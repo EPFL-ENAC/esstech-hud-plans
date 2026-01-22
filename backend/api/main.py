@@ -9,6 +9,7 @@ from fastapi_cache.backends.inmemory import InMemoryBackend
 from pydantic import BaseModel
 
 from api.config import config
+from api.views.splats import router as splats_router
 
 # from api.views.files import router as files_router
 
@@ -59,8 +60,8 @@ async def get_health() -> HealthCheck:
     return HealthCheck(status="OK")
 
 
-# app.include_router(
-#     files_router,
-#     prefix="/files",
-#     tags=["Files"],
-# )
+app.include_router(
+    splats_router,
+    prefix="/splats",
+    tags=["Splats"],
+)
