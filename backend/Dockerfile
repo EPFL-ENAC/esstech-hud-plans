@@ -30,7 +30,6 @@ ENV PATH="/app/external/bin:${PATH}"
 COPY uv.lock pyproject.toml /app/
 COPY start.sh /app/
 COPY api /app/api
-COPY data /app/data
 
 RUN uv pip install --system --no-cache-dir -e /app
 
