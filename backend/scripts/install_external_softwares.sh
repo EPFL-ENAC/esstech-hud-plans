@@ -53,7 +53,10 @@ install_linux() {
         libceres-dev \
         libcurl4-openssl-dev \
         libssl-dev \
-        libmkl-full-dev
+        libmkl-full-dev \
+        libopenimageio-dev \
+        openimageio-tools \
+        libopenexr-dev
 
     # ---- COLMAP ----
     if [ ! -x "${BIN_DIR}/colmap" ]; then
