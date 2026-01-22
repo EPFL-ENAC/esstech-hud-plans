@@ -3,11 +3,18 @@ import shutil
 import subprocess
 import sys
 
+# Check if running inside a Docker container
+IS_DOCKER = os.path.exists("/.dockerenv")
+
 backend_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 
 commands_prefix = os.path.join(backend_root, "external", "bin")
-ffmpeg_command = "ffmpeg"
-colmap_command = f"xvfb-run -a {os.path.join(commands_prefix, 'colmap')}"
+ffmpeg_command = os.path.join(commands_prefix, "ffmpeg")
+
+# Determine colmap command based on environment
+colmap_path = os.path.join(commands_prefix, "colmap")
+colmap_command = f"xvfb-run -a {colmap_path}" if IS_DOCKER else colmap_path
+
 brush_command = os.path.join(commands_prefix, "brush")
 
 output_prefix = os.path.join(backend_root, "data", "splats")

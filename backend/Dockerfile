@@ -46,7 +46,9 @@ WORKDIR /app
 # --------------------------------------------------
 COPY scripts /app/scripts
 
-RUN /app/scripts/install_external_softwares.sh
+RUN /app/scripts/linux/install_ffmpeg.sh
+RUN /app/scripts/linux/install_colmap.sh
+RUN /app/scripts/linux/install_brush.sh
 
 # Make binaries available to Python
 ENV PATH="/app/external/bin:${PATH}"

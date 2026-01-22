@@ -74,6 +74,8 @@ install_linux() {
         ninja
         ninja install
     fi
+
+    ln -s "$(which ffmpeg)" "${BIN_DIR}/ffmpeg"
 }
 
 # --------------------------------------------------
