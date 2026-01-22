@@ -56,7 +56,8 @@ install_linux() {
         libmkl-full-dev \
         libopenimageio-dev \
         openimageio-tools \
-        libopenexr-dev
+        libopenexr-dev \
+		libopencv-dev
 
     # ---- COLMAP ----
     if [ ! -x "${BIN_DIR}/colmap" ]; then
