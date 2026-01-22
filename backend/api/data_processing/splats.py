@@ -3,6 +3,8 @@ import shutil
 import subprocess
 import sys
 
+os.environ["PYTHONUNBUFFERED"] = "1"  # Add at top of file
+
 # Check if running inside a Docker container
 IS_DOCKER = os.path.exists("/.dockerenv")
 
@@ -36,7 +38,7 @@ def generate_splats(job_name: str, input_video: str):
     print("COLMAP reconstruction completed.", end="\n\n")
 
     print("Starting Brush visualization...")
-    run_brush(dirs, viewer=False, steps_count=3_000)
+    run_brush(dirs, viewer=False, steps_count=10_000)
     print("Brush visualization completed.", end="\n\n")
 
     print("Cleaning up intermediate files...")
@@ -80,7 +82,7 @@ def run_ffmpeg(
     )
 
 
-def run_colmap(paths: dict):
+"""def run_colmap(paths: dict):
     return run(
         [
             colmap_command,
@@ -90,6 +92,25 @@ def run_colmap(paths: dict):
             "--workspace_path",
             paths["colmap"],
         ]
+    )"""
+
+
+def run_colmap(paths: dict):
+    # Use shell=True for xvfb-run in Docker
+    cmd = f"{colmap_command} automatic_reconstructor --image_path {paths['images']} --workspace_path {paths['colmap']}"
+
+    return run(
+        cmd
+        if IS_DOCKER
+        else [
+            colmap_path,
+            "automatic_reconstructor",
+            "--image_path",
+            paths["images"],
+            "--workspace_path",
+            paths["colmap"],
+        ],
+        shell=IS_DOCKER,
     )
 
 
@@ -108,7 +129,7 @@ def run_brush(paths: dict, viewer: bool = False, steps_count: int = 10_000):
     if viewer:
         args.append("--with-viewer")
 
-    return run(args)
+    return run(" ".join(args) if IS_DOCKER else args, shell=IS_DOCKER)
 
 
 def cleanup(paths: dict):
@@ -116,8 +137,36 @@ def cleanup(paths: dict):
     shutil.rmtree(paths["images"], ignore_errors=True)
 
 
+"""
 def run(cmd: list[str], cwd: str | None = None):
     print("Running:", " ".join(cmd))
     subprocess.run(
         cmd, cwd=cwd, check=True, stdout=sys.stdout, stderr=sys.stderr, text=True
     )
+"""
+
+
+def run(cmd: list[str] | str, cwd: str | None = None, shell: bool = False):
+    print(f"Running: {cmd if isinstance(cmd, str) else ' '.join(cmd)}", flush=True)
+    process = subprocess.Popen(
+        cmd,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,  # Merge stderr into stdout
+        text=True,
+        bufsize=1,  # Line buffered
+        shell=shell,
+        universal_newlines=True,
+    )
+
+    # Stream output line by line in real-time
+    if process.stdout is not None:
+        for line in process.stdout:
+            print(line, end="", flush=True)
+
+    return_code = process.wait()
+
+    if return_code != 0:
+        raise subprocess.CalledProcessError(return_code, cmd)
+
+    return return_code

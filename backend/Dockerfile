@@ -19,7 +19,6 @@ ENV UV_PYTHON_INSTALL_DIR=/usr/local/share/uv-python
 # --------------------------------------------------
 # 1. Enable 'multiverse' repository (needed for libmkl-dev)
 # 2. Update apt
-# 3. Patch the script to use 'libmkl-dev' (Ubuntu name) instead of 'libmkl-full-dev'
 RUN apt update && apt install -y software-properties-common && \
     add-apt-repository multiverse && \
     apt update && \

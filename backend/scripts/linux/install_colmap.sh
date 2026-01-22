@@ -16,6 +16,9 @@ else
   SUDO=""
 fi
 
+# Detect Architecture
+ARCH="$(uname -m)"
+
 mkdir -p "${BIN_DIR}" "${SRC_DIR}" "${BUILD_DIR}"
 
 
@@ -40,6 +43,18 @@ install_prerequisite_colmap() {
     log "Installing COLMAP prerequisites"
     echo
 
+    # Define architecture-specific BLAS library
+    if [ "$ARCH" = "x86_64" ]; then
+        log "Architecture is x86_64: Using Intel MKL"
+        BLAS_DEV="libmkl-full-dev"
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+        log "Architecture is ARM64: Using OpenBLAS"
+        BLAS_DEV="libopenblas-openmp-dev" # see : https://github.com/facebookresearch/faiss/wiki/Troubleshooting#surprising-faiss-openmp-and-openblas-interaction and https://github.com/colmap/colmap/issues/3928
+    else
+        log "Unknown architecture: Defaulting to OpenBLAS"
+        BLAS_DEV="libopenblas-dev"
+    fi
+
     $SUDO apt update
     $SUDO apt install -y \
         git cmake ninja-build build-essential pkg-config curl \
@@ -61,27 +76,44 @@ install_prerequisite_colmap() {
         libceres-dev \
         libcurl4-openssl-dev \
         libssl-dev \
-        libmkl-full-dev \
+        libblas-dev \
+        liblapack-dev \
+        "$BLAS_DEV" \
         libopenimageio-dev \
         openimageio-tools \
         libopenexr-dev \
 		libopencv-dev
+        # libsuitesparse-dev \
+        # suitesparse-mongoose \
 }
 
 build_colmap() {
     log "Building COLMAP from source"
     echo
 
+    if [ "$ARCH" = "x86_64" ]; then
+        BLAS_CMAKE_FLAG="-DBLA_VENDOR=Intel10_64lp"
+    else
+        # ARM/OpenBLAS
+        BLAS_CMAKE_FLAG="-DBLA_VENDOR=OpenBLAS"
+    fi
+
     cd "${SRC_DIR}"
     git clone https://github.com/colmap/colmap.git || true
     mkdir -p "${BUILD_DIR}/colmap"
     cd "${BUILD_DIR}/colmap"
+
+    log "Configuring COLMAP with CMake"
     cmake "${SRC_DIR}/colmap" \
         -GNinja \
         -DCMAKE_BUILD_TYPE=Release \
-        -DBLA_VENDOR=Intel10_64lp \
+        "${BLAS_CMAKE_FLAG}" \
         -DCMAKE_INSTALL_PREFIX="${EXTERNAL_DIR}"
-    ninja
+
+    log "Building and installing COLMAP with ninja"
+    ninja -j 4 -v
+
+    log "Installing COLMAP to ${EXTERNAL_DIR} with ninja install"
     ninja install
 }
 
