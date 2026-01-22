@@ -1,12 +1,13 @@
 import os
 import shutil
 import subprocess
+import sys
 
 backend_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 
 commands_prefix = os.path.join(backend_root, "external", "bin")
-ffmpeg_command = os.path.join(commands_prefix, "ffmpeg")
-colmap_command = os.path.join(commands_prefix, "colmap")
+ffmpeg_command = "ffmpeg"
+colmap_command = f"xvfb-run -a {os.path.join(commands_prefix, 'colmap')}"
 brush_command = os.path.join(commands_prefix, "brush")
 
 output_prefix = os.path.join(backend_root, "data", "splats")
@@ -110,4 +111,6 @@ def cleanup(paths: dict):
 
 def run(cmd: list[str], cwd: str | None = None):
     print("Running:", " ".join(cmd))
-    subprocess.run(cmd, cwd=cwd, check=True)
+    subprocess.run(
+        cmd, cwd=cwd, check=True, stdout=sys.stdout, stderr=sys.stderr, text=True
+    )

@@ -20,14 +20,15 @@ ENV UV_PYTHON_INSTALL_DIR=/usr/local/share/uv-python
 # 1. Enable 'multiverse' repository (needed for libmkl-dev)
 # 2. Update apt
 # 3. Patch the script to use 'libmkl-dev' (Ubuntu name) instead of 'libmkl-full-dev'
-RUN apt-get update && apt-get install -y software-properties-common && \
+RUN apt update && apt install -y software-properties-common && \
     add-apt-repository multiverse && \
-    apt-get update && \
-    apt-get install -y \
+    apt update && \
+    apt install -y \
     curl \
     ca-certificates \
     git \
     build-essential \
+	xvfb \
     && rm -rf /var/lib/apt/lists/*
 
 # --------------------------------------------------
@@ -35,7 +36,7 @@ RUN apt-get update && apt-get install -y software-properties-common && \
 # --------------------------------------------------
 ADD https://astral.sh/uv/${UV_VERSION}/install.sh /uv-installer.sh
 RUN sh /uv-installer.sh && rm /uv-installer.sh
-ENV PATH="/root/.cargo/bin/:$PATH"
+ENV PATH="/root/.cargo/bin/:/root/.local/bin/:$PATH"
 
 
 WORKDIR /app
@@ -45,8 +46,7 @@ WORKDIR /app
 # --------------------------------------------------
 COPY scripts /app/scripts
 
-RUN chmod +x /app/scripts/install_external_softwares.sh && \
-    /app/scripts/install_external_softwares.sh
+RUN /app/scripts/install_external_softwares.sh
 
 # Make binaries available to Python
 ENV PATH="/app/external/bin:${PATH}"

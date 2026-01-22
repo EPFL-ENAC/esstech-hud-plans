@@ -31,8 +31,8 @@ OS="$(uname -s)"
 install_linux() {
     log "Detected Linux"
 
-    $SUDO apt-get update
-    $SUDO apt-get install -y \
+    $SUDO apt update
+    $SUDO apt install -y \
         git cmake ninja-build build-essential pkg-config curl \
         ffmpeg \
         libboost-program-options-dev \
