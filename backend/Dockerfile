@@ -39,11 +39,11 @@ RUN /app/scripts/linux/install_colmap.sh
 COPY scripts/linux/install_brush.sh /app/scripts/linux/install_brush.sh
 RUN /app/scripts/linux/install_brush.sh
 
-COPY scripts/linux/remove_build_dependencies.sh /app/scripts/linux/remove_build_dependencies.sh
-RUN /app/scripts/linux/remove_build_dependencies.sh
-
 # Make binaries available to Python
 ENV PATH="/app/external/bin:${PATH}"
+
+# Remove apt cache to reduce image size
+RUN apt clean && rm -rf /var/lib/apt/lists/*
 
 # --------------------------------------------------
 # Install uv
