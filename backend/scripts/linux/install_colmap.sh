@@ -55,7 +55,6 @@ install_prerequisite_colmap() {
         BLAS_DEV="libopenblas-dev"
     fi
 
-    $SUDO apt update
     $SUDO apt install -y \
         git cmake ninja-build build-essential pkg-config curl \
         libboost-program-options-dev \

@@ -9,17 +9,17 @@ FROM ubuntu:24.04
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 ENV UV_VERSION=0.9.13
-
-# We tell uv where to create the Python installations so they are persistent and predictable
 ENV UV_PYTHON_INSTALL_DIR=/usr/local/share/uv-python
+ENV PYTHON_VERSION=3.13.11
 
+WORKDIR /app
 
 # --------------------------------------------------
 # System tooling needed by install script
 # --------------------------------------------------
-# 1. Enable 'multiverse' repository (needed for libmkl-dev)
-# 2. Update apt
-RUN apt update && apt install -y software-properties-common && \
+# Enable 'multiverse' repository (needed for libmkl-dev)
+RUN apt update && \
+	apt install -y software-properties-common && \
     add-apt-repository multiverse && \
     apt update && \
     apt install -y \
@@ -27,18 +27,7 @@ RUN apt update && apt install -y software-properties-common && \
     ca-certificates \
     git \
     build-essential \
-	xvfb \
-    && rm -rf /var/lib/apt/lists/*
-
-# --------------------------------------------------
-# Install uv
-# --------------------------------------------------
-ADD https://astral.sh/uv/${UV_VERSION}/install.sh /uv-installer.sh
-RUN sh /uv-installer.sh && rm /uv-installer.sh
-ENV PATH="/root/.cargo/bin/:/root/.local/bin/:$PATH"
-
-
-WORKDIR /app
+	xvfb
 
 # --------------------------------------------------
 # Install external native software (COLMAP, Brush, ffmpeg)
@@ -48,26 +37,30 @@ COPY scripts /app/scripts
 RUN /app/scripts/linux/install_ffmpeg.sh
 RUN /app/scripts/linux/install_colmap.sh
 RUN /app/scripts/linux/install_brush.sh
+RUN /app/scripts/linux/remove_build_dependencies.sh
 
 # Make binaries available to Python
 ENV PATH="/app/external/bin:${PATH}"
 
-
+# --------------------------------------------------
+# Install uv
+# --------------------------------------------------
+ADD https://astral.sh/uv/${UV_VERSION}/install.sh /uv-installer.sh
+RUN sh /uv-installer.sh && rm /uv-installer.sh
+ENV PATH="/root/.cargo/bin/:/root/.local/bin/:$PATH"
 
 # --------------------------------------------------
 # Application setup
 # --------------------------------------------------
 COPY uv.lock pyproject.toml /app/
+
+RUN uv python install ${PYTHON_VERSION} && \
+    uv venv .venv --python ${PYTHON_VERSION} && \
+    uv pip install --no-cache-dir -e /app
+
 COPY start.sh /app/
 COPY api /app/api
 
-# 1. 'uv python install' downloads the standalone python 3.13 binary
-# 2. 'uv venv' creates the environment using that binary
-# 3. 'uv sync' (or pip install) installs dependencies
-RUN uv python install 3.13 && \
-    uv venv .venv --python 3.13 && \
-    uv pip install --no-cache-dir -e /app
 ENV PATH="/app/.venv/bin:$PATH"
-
 
 ENTRYPOINT ["sh", "start.sh"]

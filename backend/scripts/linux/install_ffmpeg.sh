@@ -41,7 +41,6 @@ install_prerequisite_ffmpeg() {
     log "Installing FFMPEG prerequisites"
     echo
 
-    $SUDO apt update
     $SUDO apt install -y \
         ffmpeg
 }
