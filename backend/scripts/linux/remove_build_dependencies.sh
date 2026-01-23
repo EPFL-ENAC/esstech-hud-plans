@@ -14,7 +14,6 @@ apt-get purge -y \
     ninja-build \
     pkg-config \
     git \
-    curl \
     software-properties-common \
     libboost-program-options-dev \
     libboost-graph-dev \

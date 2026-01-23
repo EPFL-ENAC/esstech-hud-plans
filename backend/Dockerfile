@@ -8,9 +8,7 @@ FROM ubuntu:24.04
 
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
-ENV UV_VERSION=0.9.13
 ENV UV_PYTHON_INSTALL_DIR=/usr/local/share/uv-python
-ENV PYTHON_VERSION=3.13.11
 
 WORKDIR /app
 
@@ -32,17 +30,17 @@ RUN apt update && \
 # --------------------------------------------------
 # Install external native software (COLMAP, Brush, ffmpeg)
 # --------------------------------------------------
-COPY scripts/linux/install_ffmpeg.sh /app/scripts/install_ffmpeg.sh
-RUN /app/scripts/install_ffmpeg.sh
+COPY scripts/linux/install_ffmpeg.sh /app/scripts/linux/install_ffmpeg.sh
+RUN /app/scripts/linux/install_ffmpeg.sh
 
-COPY scripts/linux/install_colmap.sh /app/scripts/install_colmap.sh
-RUN /app/scripts/install_colmap.sh
+COPY scripts/linux/install_colmap.sh /app/scripts/linux/install_colmap.sh
+RUN /app/scripts/linux/install_colmap.sh
 
-COPY scripts/linux/install_brush.sh /app/scripts/install_brush.sh
-RUN /app/scripts/install_brush.sh
+COPY scripts/linux/install_brush.sh /app/scripts/linux/install_brush.sh
+RUN /app/scripts/linux/install_brush.sh
 
-COPY scripts/linux/remove_build_dependencies.sh /app/scripts/remove_build_dependencies.sh
-RUN /app/scripts/remove_build_dependencies.sh
+COPY scripts/linux/remove_build_dependencies.sh /app/scripts/linux/remove_build_dependencies.sh
+RUN /app/scripts/linux/remove_build_dependencies.sh
 
 # Make binaries available to Python
 ENV PATH="/app/external/bin:${PATH}"
@@ -50,22 +48,24 @@ ENV PATH="/app/external/bin:${PATH}"
 # --------------------------------------------------
 # Install uv
 # --------------------------------------------------
+ENV UV_VERSION=0.9.13
+ENV PYTHON_VERSION=3.13.9
+
 ADD https://astral.sh/uv/${UV_VERSION}/install.sh /uv-installer.sh
 RUN sh /uv-installer.sh && rm /uv-installer.sh
-ENV PATH="/root/.cargo/bin/:/root/.local/bin/:$PATH"
+ENV PATH="/root/.local/bin/:$PATH"
 
 # --------------------------------------------------
 # Application setup
 # --------------------------------------------------
 COPY uv.lock pyproject.toml /app/
+COPY api /app/api
 
 RUN uv python install ${PYTHON_VERSION} && \
     uv venv .venv --python ${PYTHON_VERSION} && \
     uv pip install --no-cache-dir -e /app
 
 COPY start.sh /app/
-COPY api /app/api
-
 ENV PATH="/app/.venv/bin:$PATH"
 
 ENTRYPOINT ["sh", "start.sh"]
