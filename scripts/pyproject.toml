@@ -4,4 +4,6 @@ version = "0.1.0"
 description = "List of dependencies for tests scripts"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "ffmpeg-python>=0.2.0",
+]
