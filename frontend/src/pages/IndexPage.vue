@@ -53,6 +53,7 @@ const uploadVideo = async () => {
         const result = await response.json();
         uploadStatus.value = `Success: ${result.filename}`;
         statusClass.value = "success";
+        
         return router.push(`/splat/${result.generation_id}`);
     } catch (error) {
         uploadStatus.value = "Error: " + (error as Error).message;

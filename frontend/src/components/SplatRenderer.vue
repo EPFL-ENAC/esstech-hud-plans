@@ -17,10 +17,10 @@ onMounted(() => {
     renderer.setSize(window.innerWidth, window.innerHeight);
     container.value?.appendChild(renderer.domElement);
 
-    const butterfly = new SplatMesh({ fileBytes: props.splatData });
-    butterfly.quaternion.set(1, 0, 0, 0);
-    butterfly.position.set(0, 0, -3);
-    scene.add(butterfly);
+    const mesh = new SplatMesh({ fileBytes: props.splatData });
+    mesh.quaternion.set(1, 0, 0, 0);
+    mesh.position.set(0, 0, -3);
+    scene.add(mesh);
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.target.set(0, 0, 0);

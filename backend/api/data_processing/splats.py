@@ -38,7 +38,7 @@ def generate_splats(job_name: str, input_video: str):
     print("COLMAP reconstruction completed.", end="\n\n")
 
     print("Starting Brush visualization...")
-    run_brush(dirs, viewer=False, steps_count=10_000)
+    run_brush(dirs, viewer=True, steps_count=10_000)
     print("Brush visualization completed.", end="\n\n")
 
     print("Cleaning up intermediate files...")
