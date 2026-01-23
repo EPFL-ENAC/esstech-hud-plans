@@ -32,12 +32,17 @@ RUN apt update && \
 # --------------------------------------------------
 # Install external native software (COLMAP, Brush, ffmpeg)
 # --------------------------------------------------
-COPY scripts /app/scripts
+COPY scripts/linux/install_ffmpeg.sh /app/scripts/install_ffmpeg.sh
+RUN /app/scripts/install_ffmpeg.sh
 
-RUN /app/scripts/linux/install_ffmpeg.sh
-RUN /app/scripts/linux/install_colmap.sh
-RUN /app/scripts/linux/install_brush.sh
-RUN /app/scripts/linux/remove_build_dependencies.sh
+COPY scripts/linux/install_colmap.sh /app/scripts/install_colmap.sh
+RUN /app/scripts/install_colmap.sh
+
+COPY scripts/linux/install_brush.sh /app/scripts/install_brush.sh
+RUN /app/scripts/install_brush.sh
+
+COPY scripts/linux/remove_build_dependencies.sh /app/scripts/remove_build_dependencies.sh
+RUN /app/scripts/remove_build_dependencies.sh
 
 # Make binaries available to Python
 ENV PATH="/app/external/bin:${PATH}"
