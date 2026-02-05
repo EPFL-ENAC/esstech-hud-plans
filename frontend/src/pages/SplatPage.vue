@@ -1,69 +1,71 @@
 <script setup lang="ts">
 import { useRoute } from "vue-router";
 import { computed } from "vue";
-import { useReactiveGenerator } from "unwrapped/vue";
-import { AsyncResult, delay } from "unwrapped/core";
+import { makeAsyncResultLoader, useReactiveChain } from "unwrapped/vue";
+import type { ErrorBase } from "unwrapped/core";
 import SplatRenderer from "../components/SplatRenderer.vue";
+import { type SplatPipelineStatus, useSplatStore } from "src/stores/splats";
 
 const route = useRoute();
 const generationId = computed(() => route.params.id as string);
+const splatStore = useSplatStore();
 
+const splat = useReactiveChain(generationId, () => splatStore.getSplat(generationId.value));
 
-const splat = useReactiveGenerator(generationId, function* () {
-    while (true) {
-        const fetched = yield* AsyncResult.fromValuePromise(
-            fetch(`http://localhost:8000/splats/get/${generationId.value}`)
-        );
-        if (fetched.ok) {
-            return yield* AsyncResult.fromValuePromise(fetched.arrayBuffer());
-        }
+splat.value.debug("splat");
 
-        console.log("Splat not ready yet, polling again...");
-        // Wait for some time before polling again
-        yield* delay(5000);
-    }
-});
+const SplatLoader = makeAsyncResultLoader<ArrayBuffer, ErrorBase, SplatPipelineStatus>({});
+
+const directions = ["top", "bottom", "left", "right", "front", "back"] as const;
 
 </script>
 
 <template>
-    <q-page class="row items-center justify-evenly">
-        <div v-if="splat.isSuccess()">
-            <splat-renderer :splat-data="splat.unwrapOrNull()!" />
-        </div>
-        <div v-else-if="splat.isLoading()">
-            <p>Loading splat...</p>
-        </div>
+    <q-page class="">
+        <SplatLoader :result="splat">
+            <template v-slot="{ value }">
+                <h3>Splat Viewer</h3>
+                <splat-renderer :splat-data="value" />
+
+                <h3>Blueprints</h3>
+                <div v-for="direction in directions" :key="direction">
+                    <div class="q-mb-md">
+                        <h4 class="q-mb-xs">{{ direction.toUpperCase() }}</h4>
+                        <img
+                            :src="`http://localhost:8000/splats/blueprints/${generationId}/${direction}`"
+                            :alt="`Blueprint view from the ${direction}`"
+                            style="max-width: 700px; border: 1px solid black;"
+                        />
+                    </div>
+                </div>
+            </template>
+            <template v-slot:loading="{ progress }">
+                <div class="loading-progress">
+                    <q-circular-progress indeterminate size="xl" />
+                    <div v-if="progress">
+                        <div v-for="stepEntry in Object.entries(progress.steps)" :key="stepEntry[0]">
+                            <strong>{{ stepEntry[0].toUpperCase() }}:</strong>
+                            <span>{{ stepEntry[1].status }} - {{ stepEntry[1].progress }}%</span>
+                        </div>
+                    </div>
+                </div>
+            </template>
+            <template v-slot:error="{ error }">
+                <h3>Error!</h3>
+                <pre>{{ JSON.stringify(error, undefined, 4) }}</pre>
+            </template>
+        </SplatLoader>
+
     </q-page>
 </template>
 
 <style scoped>
-.upload-container {
-    max-width: 400px;
-    margin: 20px auto;
-    padding: 20px;
-    border: 1px solid #ddd;
-    border-radius: 8px;
-    font-family: sans-serif;
-}
-
-.success {
-    color: #2e7d32;
-    margin-top: 10px;
-}
-
-.error {
-    color: #d32f2f;
-    margin-top: 10px;
-}
-
-.info {
-    color: #1976d2;
-    margin-top: 10px;
-}
-
-button {
-    margin-left: 10px;
-    cursor: pointer;
+.loading-progress {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100svh;
+    gap: 1rem;
 }
 </style>

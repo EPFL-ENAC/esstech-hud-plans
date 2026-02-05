@@ -1,0 +1,611 @@
+import os
+import pty
+import re
+import select
+import subprocess
+from typing import Callable, Union
+
+import numpy as np
+import open3d as o3d
+from api.data_processing.splats import save_histogram
+from api.models.splats import (
+    BrushTrainingConfig,
+    ColmapAutoConfig,
+    ColmapManualConfig,
+    FFMPEGExtractionConfig,
+    GenerationInputs,
+)
+
+from .pipeline_logger import PipelineLogger
+
+os.environ["PYTHONUNBUFFERED"] = "1"  # Add at top of file
+
+# Check if running inside a Docker container
+IS_DOCKER = os.path.exists("/.dockerenv")
+
+backend_root = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+)
+
+commands_prefix = os.path.join(backend_root, "external", "bin")
+ffmpeg_command = os.path.join(commands_prefix, "ffmpeg")
+
+# Determine colmap command based on environment
+colmap_path = os.path.join(commands_prefix, "colmap")
+colmap_command = f"xvfb-run -a {colmap_path}" if IS_DOCKER else colmap_path
+
+brush_command = os.path.join(commands_prefix, "brush")
+
+output_prefix = os.path.join(backend_root, "data", "splats")
+
+
+class SplatPipeline:
+    def __init__(self, job_name: str, inputs: GenerationInputs):
+        self.job_name = job_name
+        self.inputs = inputs
+        self.logger = PipelineLogger(
+            name=job_name,
+            initial_settings=inputs.dict(),
+            steps_list=["ffmpeg", "colmap", "brush", "blueprint_extraction"],
+        )
+
+        self.directories: dict[str, str | list[str]] = {}
+
+    def run(self):
+        self.prepare_dirs(os.path.join(output_prefix, self.job_name))
+        self.logger.set_file_path(
+            os.path.join(self.directories["workspace"], "status.json")
+        )
+        self.logger.start()
+
+        try:
+            self.run_ffmpeg(
+                self.inputs.video_path, self.directories["images"], self.inputs.ffmpeg
+            )
+
+            self.run_colmap(self.inputs.colmap)
+
+            self.run_brush(self.inputs.brush)
+
+            self.extract_blueprint_from_splat(
+                os.path.join(self.directories["workspace"], "splat.ply"),
+                output_prefix=os.path.join(self.directories["workspace"], "blueprint"),
+            )
+
+            pipeline_output = {
+                "splat_path": os.path.join(self.directories["workspace"], "splat.ply"),
+                "blueprints": [
+                    os.path.join(self.directories["workspace"], "blueprint_top.png"),
+                    os.path.join(self.directories["workspace"], "blueprint_bottom.png"),
+                    os.path.join(self.directories["workspace"], "blueprint_front.png"),
+                    os.path.join(self.directories["workspace"], "blueprint_back.png"),
+                    os.path.join(self.directories["workspace"], "blueprint_left.png"),
+                    os.path.join(self.directories["workspace"], "blueprint_right.png"),
+                ],
+            }
+
+            self.logger.complete(output=pipeline_output)
+
+            return pipeline_output
+        except Exception as e:
+            self.logger.fail(message=str(e))
+            raise e
+
+    def prepare_dirs(self, root_path: str):
+        images = os.path.join(root_path, "images")
+
+        if not os.path.exists(images):
+            os.makedirs(images)
+
+        colmap = os.path.join(root_path, "colmap")
+        if not os.path.exists(colmap):
+            os.makedirs(colmap)
+
+        self.directories = {
+            "workspace": root_path,
+            "images": images,
+            "colmap": colmap,
+        }
+
+        return self.directories
+
+    def run_ffmpeg(
+        self, input_file: str, output_directory: str, cfg: FFMPEGExtractionConfig
+    ):
+        cmd = [
+            ffmpeg_command,
+            "-i",
+            input_file,
+            "-vf",
+            f"scale={cfg.fitInWidth}:{cfg.fitInHeight}:force_original_aspect_ratio=decrease,fps={cfg.fps}",
+            f"{output_directory}/frame_%04d.png",
+        ]
+
+        self.logger.start_step(
+            "ffmpeg", settings=cfg.dict(), command=" ".join(cmd) if IS_DOCKER else cmd
+        )
+
+        return self._run_command(
+            cmd, step_name="ffmpeg", estimate_progress_callback=estimate_ffmpeg_progress
+        )
+
+    def run_colmap(self, cfg: Union[ColmapAutoConfig, ColmapManualConfig]):
+        # Base arguments common to both
+        args = [
+            "automatic_reconstructor",
+            "--image_path",
+            self.directories["images"],
+            "--workspace_path",
+            self.directories["colmap"],
+            "--camera_model",
+            cfg.camera_model,
+            "--dense",
+            "0",
+        ]
+
+        if isinstance(cfg, ColmapAutoConfig):
+            args.extend(
+                [
+                    "--quality",
+                    cfg.quality,
+                    "--single_camera",
+                    "1" if cfg.single_camera else "0",
+                    # "--max_image_size", str(cfg.max_image_size)
+                ]
+            )
+
+        if IS_DOCKER:
+            # Use shell=True for xvfb-run in Docker
+            cmd = f"{colmap_command} {' '.join(args)}"
+            self.logger.start_step("colmap", settings=cfg.dict(), command=cmd)
+            return self._run_command(
+                cmd,
+                shell=True,
+                step_name="colmap",
+                estimate_progress_callback=estimate_colmap_progress,
+            )
+
+        cmd = [colmap_path] + args
+        self.logger.start_step("colmap", settings=cfg.dict(), command=" ".join(cmd))
+        return self._run_command(
+            cmd, step_name="colmap", estimate_progress_callback=estimate_colmap_progress
+        )
+
+    def run_brush(self, cfg: BrushTrainingConfig):
+        args = [
+            brush_command,
+            self.directories["workspace"],
+            "--export-path",
+            self.directories["workspace"],
+            "--export-name",
+            "splat.ply",
+            "--total-steps",
+            str(cfg.totalSteps),
+            "--render-mode",
+            cfg.renderMode,
+            "--sh-degree",
+            str(cfg.shDegree),
+            "--refine-every",
+            str(cfg.refineEvery),
+            "--growth-grad-threshold",
+            str(cfg.growthGradThreshold),
+            "--growth-stop-iter",
+            str(cfg.growthStopIter),
+            "--max-resolution",
+            str(cfg.maxResolution),
+            "--subsample-frames",
+            str(cfg.subsampleFrames),
+            "--alpha-mode",
+            cfg.alphaMode,
+        ]
+
+        command = " ".join(args) if IS_DOCKER else args
+        self.logger.start_step("brush", settings=cfg.dict(), command=command)
+
+        return self._run_command(
+            command,
+            shell=IS_DOCKER,
+            step_name="brush",
+            estimate_progress_callback=estimate_training_progress,
+        )
+
+    def extract_blueprint_from_splat(self, ply_path, output_prefix="blueprint"):
+        self.logger.start_step("blueprint_extraction")
+
+        # Load the dense point cloud (from your splatting PLY)
+        pcd = o3d.io.read_point_cloud(ply_path)
+        self.logger.add_log(
+            "blueprint_extraction",
+            f"Loaded point cloud with {len(pcd.points)} points from {ply_path}.",
+        )
+        self.logger.update_step_progress("blueprint_extraction", 0.1)
+
+        # 1. Statistical Outlier Removal (Cleans up the "fuzz" from splatting)
+        cl, ind = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
+        pcd = pcd.select_by_index(ind)
+        self.logger.add_log(
+            "blueprint_extraction",
+            f"Point cloud after outlier removal has {len(pcd.points)} points.",
+        )
+        self.logger.update_step_progress("blueprint_extraction", 0.3)
+
+        # 2. Estimate Plane (Find the floor)
+        # distance_threshold is in meters (adjust based on your scale)
+        plane_model, inliers = pcd.segment_plane(
+            distance_threshold=0.1, ransac_n=3, num_iterations=1000
+        )
+        [a, b, c, d] = plane_model
+        self.logger.add_log(
+            "blueprint_extraction",
+            f"Plane equation: {a:.2f}x + {b:.2f}y + {c:.2f}z + {d:.2f} = 0",
+        )
+        self.logger.update_step_progress("blueprint_extraction", 0.4)
+
+        # 2. CALCULATE ROTATION TO ALIGN FLOOR TO Z-AXIS
+        # The normal vector of our floor plane is [a, b, c]
+        floor_normal = np.array([a, b, c])
+        floor_normal = floor_normal / np.linalg.norm(floor_normal)  # Normalize
+
+        # We want to rotate the cloud so floor_normal becomes [0, 0, 1] (perfectly vertical)
+        z_axis = np.array([0, 0, 1])
+
+        # Calculate the rotation axis (cross product) and angle (dot product)
+        rotation_axis = np.cross(floor_normal, z_axis)
+        axis_norm = np.linalg.norm(rotation_axis)
+
+        if axis_norm > 1e-6:  # If the floor isn't already perfectly flat
+            rotation_axis /= axis_norm
+            angle = np.arccos(np.dot(floor_normal, z_axis))
+            R = o3d.geometry.get_rotation_matrix_from_axis_angle(
+                rotation_axis * angle
+            )  # Create a rotation matrix
+            pcd.rotate(
+                R, center=(0, 0, 0)
+            )  # Apply the rotation to the entire point cloud
+
+        # 3. TRANSLATE FLOOR TO Z=0
+        # Now that it's level, we move the cloud so the floor is exactly at height 0
+        # We use the 'd' parameter or just find the new min height
+        points = np.asarray(pcd.points)
+        z_min = np.min(points[:, 2])
+        pcd.translate((0, 0, -z_min))
+        points = np.asarray(pcd.points)
+
+        # 5. Export to PNG
+        self.logger.add_log(
+            "blueprint_extraction",
+            f"Rendering {len(points)} points to blueprint PNG...",
+        )
+        self.logger.update_step_progress("blueprint_extraction", 0.6)
+
+        accentuation = 0.5
+        # TOP & BOTTOM (XY Plane)
+        save_histogram(
+            points[:, 0],
+            points[:, 1],
+            accentuation=accentuation,
+            output_png=f"{output_prefix}_top.png",
+        )  # Top view looks down -Z
+        save_histogram(
+            -points[:, 0],
+            points[:, 1],
+            accentuation=accentuation,
+            output_png=f"{output_prefix}_bottom.png",
+        )  # Bottom view looks up +Z (mirrored X)
+        # FRONT & BACK (XZ Plane)
+        save_histogram(
+            points[:, 0],
+            points[:, 2],
+            accentuation=accentuation,
+            output_png=f"{output_prefix}_front.png",
+        )  # Front view looks along +Y
+        save_histogram(
+            -points[:, 0],
+            points[:, 2],
+            accentuation=accentuation,
+            output_png=f"{output_prefix}_back.png",
+        )  # Back view looks along -Y
+        # LEFT & RIGHT (YZ Plane)
+        save_histogram(
+            points[:, 1],
+            points[:, 2],
+            accentuation=accentuation,
+            output_png=f"{output_prefix}_right.png",
+        )  # Right view looks along -X
+        save_histogram(
+            -points[:, 1],
+            points[:, 2],
+            accentuation=accentuation,
+            output_png=f"{output_prefix}_left.png",
+        )  # Left view looks along +X
+
+        self.logger.step_completed("blueprint_extraction")
+
+    def _run_command(
+        self,
+        cmd: list[str] | str,
+        cwd: str | None = None,
+        shell: bool = False,
+        step_name: str | None = None,
+        estimate_progress_callback: Callable[[str], float] | None = None,
+    ):
+        if step_name is not None:
+            self.logger.add_log(
+                step_name,
+                f"Running command: {cmd if isinstance(cmd, str) else ' '.join(cmd)}",
+                heading_level=1,
+            )
+        # Use a pseudo-terminal to trick the process into thinking it's interactive
+        master, slave = pty.openpty()
+
+        process = subprocess.Popen(
+            cmd,
+            cwd=cwd,
+            stdout=slave,
+            stderr=slave,
+            stdin=slave,
+            shell=shell,
+            close_fds=True,
+        )
+
+        os.close(slave)
+
+        def log_and_estimate_progress(line: str):
+            self.logger.add_log(
+                step_name, line, cleanup_for_file=_extract_meaningful_log
+            )
+            if estimate_progress_callback is not None and step_name is not None:
+                self.logger.update_step_progress(
+                    step_name,
+                    estimate_progress_callback(
+                        self.logger.get_full_log_from_step(step_name)
+                    ),
+                )
+
+        # Read from master in non-blocking mode
+        buffer = ""
+        while True:
+            try:
+                ready, _, _ = select.select([master], [], [], 0.1)
+                if ready:
+                    try:
+                        data = os.read(master, 1024).decode("utf-8", errors="replace")
+                        if not data:
+                            break
+
+                        buffer += data
+                        lines = buffer.split("\n")
+                        buffer = lines[-1]
+
+                        for line in lines[:-1]:
+                            if step_name is not None and line.strip():
+                                log_and_estimate_progress(line.rstrip("\r"))
+
+                        # Also log progress updates (lines ending with \r but no \n)
+                        if "\r" in buffer and step_name is not None:
+                            parts = buffer.split("\r")
+                            for part in parts[:-1]:
+                                if part.strip():
+                                    log_and_estimate_progress(part)
+                            buffer = parts[-1]
+
+                    except OSError:
+                        break
+
+                # Check if process has finished
+                if process.poll() is not None:
+                    # Read any remaining data
+                    try:
+                        while True:
+                            data = os.read(master, 1024).decode(
+                                "utf-8", errors="replace"
+                            )
+                            if not data:
+                                break
+                            if step_name is not None:
+                                log_and_estimate_progress(data.rstrip("\n\r"))
+                    except OSError:
+                        pass
+                    break
+            except KeyboardInterrupt:
+                process.terminate()
+                break
+
+        os.close(master)
+        return_code = process.wait()
+
+        if return_code != 0:
+            raise subprocess.CalledProcessError(return_code, cmd)
+
+        if step_name is not None:
+            self.logger.add_log(
+                step_name,
+                f"Command completed with return code {return_code}",
+                heading_level=3,
+            )
+            self.logger.step_completed(step_name, return_code=return_code)
+
+        return return_code
+
+
+def _extract_meaningful_log(line: str) -> str | None:
+    if line is None:
+        return None
+
+    # 1. Remove ANSI escape sequences
+    line = re.sub(r"\x1b\[[0-9;]*[mKABCDEFG]", "", line)
+
+    # 2. Aggressive Symbol & Emoji Removal
+    # This covers:
+    # \u2000-\u2bff: General Symbols, Arrows, Math, Punctuation, Circles, Checks
+    # \ud800-\udfff: Surrogate pairs (most emojis like paintbrush)
+    # \ufe00-\ufe0f: Variation selectors
+    symbol_pattern = r"[\u2000-\u2bff\ud800-\udfff\ufe00-\ufe0f\u00b7]"
+    line = re.sub(symbol_pattern, "", line)
+    line = line.replace(r"\ud83d\udd8c", "")
+    line = line.replace("\U0001f58c", "")
+
+    # 3. Filter out known "Noise" sentences
+    # We do this AFTER removing symbols so the regex is simpler
+    noise_patterns = [
+        r"evaluating every \d+ steps",
+        r"^\s*$",
+    ]
+    for pattern in noise_patterns:
+        if re.search(pattern, line, re.IGNORECASE):
+            return None
+
+    # 4. Cleanup Whitespace
+    line = re.sub(r"\s{2,}", " ", line).strip()
+
+    # 5. Meaningless Status-only lines
+    # If the line is JUST one of these words, it's noise.
+    # If it's "Training 5/100", we keep it (or the loop below strips the prefix).
+    meaningless_phrases = ["Training", "Completed loading", "Starting up"]
+
+    if line in meaningless_phrases:
+        return None
+
+    # 6. Strip redundant prefixes
+    # e.g., "Starting up Loading dataset..." -> "Loading dataset..."
+    for phrase in meaningless_phrases:
+        if line.startswith(phrase):
+            temp = line[len(phrase) :].strip()
+            if temp:
+                line = temp
+
+    # Remove the [0s] time markers
+    line = re.sub(r"\[\d+s\]", "", line).strip()
+
+    # Final check: is there anything left?
+    if not line or len(line) < 2:
+        return None
+
+    return line
+
+
+def estimate_ffmpeg_progress(log_text: str) -> float:
+    """
+    Estimates the progress (0.0 to 1.0) of an FFmpeg process
+    by comparing current timestamp to total duration.
+    """
+
+    def get_seconds(time_str: str) -> float:
+        """Converts HH:MM:SS.ms to total seconds."""
+        h, m, s = time_str.split(":")
+        return int(h) * 3600 + int(m) * 60 + float(s)
+
+    # 1. Find the total duration of the input video
+    # Pattern looks for: Duration: 00:00:06.83
+    duration_match = re.search(r"Duration:\s+(\d{2}:\d{2}:\d{2}\.\d{2})", log_text)
+    if not duration_match:
+        return 0.0
+
+    total_seconds = get_seconds(duration_match.group(1))
+    if total_seconds <= 0:
+        return 0.0
+
+    # 2. Find all 'time=' markers and take the latest one
+    # Pattern looks for: time=00:00:01.50
+    time_matches = re.findall(r"time=(\d{2}:\d{2}:\d{2}\.\d{2})", log_text)
+
+    if not time_matches:
+        # Check if the process finished (indicated by 'Lsize=' or 'video:XKiB')
+        if "video:" in log_text and "muxing overhead" in log_text:
+            return 1.0
+        return 0.0
+
+    current_seconds = get_seconds(time_matches[-1])
+
+    # 3. Calculate ratio
+    progress = current_seconds / total_seconds
+
+    # Cap at 1.0 (sometimes FFmpeg time slightly exceeds duration due to padding)
+    return min(max(progress, 0.0), 1.0)
+
+
+def estimate_colmap_progress(log_text: str) -> float:
+    """
+    Estimates the progress (0.0 to 1.0) of a COLMAP automatic reconstruction
+    based on log output.
+    """
+    # 1. Determine the total number of images
+    # Look for "Processed file [X/Y]" patterns
+    total_images_match = re.findall(r"Processed file \[\d+/(\d+)\]", log_text)
+    total_images = int(total_images_match[-1]) if total_images_match else 0
+
+    # 2. Check current stage
+    # Stages: Extraction ~0-30%, Matching ~30-40%, Mapping ~40-100%
+
+    # Check if Mapping has started
+    if "incremental_pipeline.cc" in log_text or "Registering image" in log_text:
+        # Find the highest "num_reg_frames=X"
+        reg_frames = re.findall(r"num_reg_frames=(\d+)", log_text)
+        if reg_frames and total_images > 0:
+            current_reg = int(reg_frames[-1])
+            # Mapping takes the bulk of the remaining 60% of the progress bar
+            # We map the registered count from 0-total to 0.4-1.0
+            mapping_progress = current_reg / total_images
+            return min(0.4 + (mapping_progress * 0.6), 1.0)
+        return 0.4
+
+    # Check if Matching has started
+    if "Feature matching & geometric verification" in log_text:
+        # Matching is usually fast relative to others, we'll place it at 30-40%
+        return 0.35
+
+    # Check if Extraction is in progress
+    if "Feature extraction" in log_text:
+        if total_images_match and total_images > 0:
+            # Get the current file index [X/Y]
+            current_file_idx = int(re.findall(r"Processed file \[(\d+)/", log_text)[-1])
+            # Extraction represents the first 30%
+            extraction_progress = current_file_idx / total_images
+            return extraction_progress * 0.3
+        return 0.1
+
+    # Check for completion
+    if (
+        "Command completed" in log_text
+        or "Keeping successful reconstruction" in log_text
+    ):
+        return 1.0
+
+    return 0.0
+
+
+import re
+
+
+def estimate_training_progress(log_text: str) -> float:
+    """
+    Estimates progress (0.0 to 1.0) for training processes
+    using the 'Step/Total Steps' format.
+    """
+    # Pattern to find the last occurrence of "current/total Steps"
+    # Example: "995/1000 Steps"
+    step_matches = re.findall(r"(\d+)/(\d+)\s+Steps", log_text)
+
+    if not step_matches:
+        # Fallback: Check if the training is explicitly finished
+        if "Training took" in log_text or "Completed" in log_text:
+            return 1.0
+        return 0.0
+
+    # Get the last match found in the log
+    current_step_str, total_steps_str = step_matches[-1]
+
+    current_step = float(current_step_str)
+    total_steps = float(total_steps_str)
+
+    if total_steps <= 0:
+        return 0.0
+
+    progress = current_step / total_steps
+
+    # If the log shows "Training took X", ensure it returns 1.0
+    # even if the steps count hasn't updated yet.
+    if "Training took" in log_text:
+        return 1.0
+
+    return min(max(progress, 0.0), 1.0)

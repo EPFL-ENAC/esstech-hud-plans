@@ -1,8 +1,15 @@
+import json
 import os
 import shutil
 
-from api.services.splats import GenerationInputs, GenerationManager
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from api.models.splats import (
+    BrushTrainingConfig,
+    ColmapAutoConfig,
+    FFMPEGExtractionConfig,
+    GenerationInputs,
+)
+from api.services.splats import GenerationManager
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi_cache.decorator import cache
 from pydantic import BaseModel
@@ -11,9 +18,8 @@ router = APIRouter()
 
 manager = GenerationManager()
 
-upload_dir = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "uploads"
-)
+data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data")
+upload_dir = os.path.join(data_dir, "uploads")
 
 
 class PostRunGenerationResponse(BaseModel):
@@ -36,11 +42,28 @@ async def hello() -> str:
     description="Generates a Gaussian splat",
     response_model=PostRunGenerationResponse,
 )
-async def generate(file: UploadFile = File(...)) -> PostRunGenerationResponse:
-    # Validate file type
-    if not file.content_type.startswith("video/"):
+async def generate(
+    file: UploadFile = File(...),
+    ffmpeg_config: str = Form(...),
+    colmap_config: str = Form(...),
+    brush_config: str = Form(...),
+) -> PostRunGenerationResponse:
+    # 1. Validate file type
+    if not file.content_type or not file.content_type.startswith("video/"):
         raise HTTPException(status_code=400, detail="File must be a video")
 
+    # 2. Parse and Validate JSON Settings
+    try:
+        # We parse the strings and load them into Pydantic models for validation
+        ffmpeg_settings = FFMPEGExtractionConfig(**json.loads(ffmpeg_config))
+        colmap_settings = ColmapAutoConfig(**json.loads(colmap_config))
+        brush_settings = BrushTrainingConfig(**json.loads(brush_config))
+    except Exception as e:
+        raise HTTPException(
+            status_code=422, detail=f"Invalid configuration format: {str(e)}"
+        )
+
+    # 3. Save the file
     if not os.path.exists(upload_dir):
         os.makedirs(upload_dir, exist_ok=True)
 
@@ -50,9 +73,18 @@ async def generate(file: UploadFile = File(...)) -> PostRunGenerationResponse:
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
     finally:
-        file.file.close()
+        await file.close()
 
-    run = manager.run_generation(GenerationInputs(video_path=file_path))
+    # 4. Run generation with all inputs
+    # Ensure your GenerationInputs model accepts these three config objects
+    inputs = GenerationInputs(
+        video_path=file_path,
+        ffmpeg=ffmpeg_settings,
+        colmap=colmap_settings,
+        brush=brush_settings,
+    )
+
+    run = manager.run_generation(inputs)
 
     return PostRunGenerationResponse(generation_id=run.id)
 
@@ -78,3 +110,47 @@ async def get_splat(generation_id: str):
     return FileResponse(
         path=file_path, filename="splat.ply", media_type="application/octet-stream"
     )
+
+
+@router.get(
+    "/status/{generation_id}",
+    status_code=200,
+    description="Checks the status of a generation run",
+)
+async def check_status(generation_id: str):
+    return manager.get_status(generation_id)
+
+
+@router.get(
+    "/blueprints/{generation_id}",
+    status_code=200,
+    description="Retrieves the blueprint images of a generation run",
+)
+async def get_blueprints(generation_id: str):
+    return manager.get_blueprints(generation_id)
+
+
+@router.get(
+    "/blueprints/{generation_id}/{view}",
+    description="Returns the actual PNG image for a specific view",
+)
+async def get_blueprint_image(generation_id: str, view: str):
+    # Construct the file path
+    filename = f"blueprint_{view}.png"
+    file_path = os.path.join(data_dir, "splats", generation_id, filename)
+
+    # Security: Ensure the resolved path is actually inside our DATA_ROOT
+    real_path = os.path.abspath(file_path)
+    print("Real path : " + real_path)
+    print("Data dir : " + data_dir)
+
+    if not real_path.startswith(os.path.abspath(data_dir)):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not os.path.exists(real_path):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Blueprint {view} for generation {generation_id} not found",
+        )
+
+    return FileResponse(real_path, media_type="image/png")

@@ -1,30 +1,101 @@
 <template>
-    <q-page class="row items-center justify-evenly">
-        <div class="upload-container">
-            <h2>Video Upload (Fetch API)</h2>
-            <q-file
-                v-model="selectedFile"
-                label="Pick a video file"
-                filled
-                clearable
-                accept="video/*"
-            />
-            <q-btn @click="uploadVideo" :disabled="!selectedFile">Upload</q-btn>
+    <q-page class="q-pa-md">
+        <div class="wrapper">
+            <h1 class="text-h5 q-mb-lg">Splat Generation Pipeline</h1>
+            
+            <!-- 1. Source Selection -->
+            <q-card flat bordered class="q-pa-md q-mb-md">
+                <div class="text-subtitle2 q-mb-sm text-primary">1. Input Video</div>
+                <q-file
+                    v-model="selectedFile"
+                    label="Select video source"
+                    filled
+                    clearable
+                    accept="video/*"
+                    @update:model-value="handleFileChange"
+                >
+                    <template v-slot:prepend>
+                        <q-icon name="movie" />
+                    </template>
+                </q-file>
 
-            <div v-if="uploadStatus" :class="statusClass">
-                {{ uploadStatus }}
+                <!-- Video Preview Section -->
+                <div v-if="videoPreviewUrl" class="q-mt-md overflow-hidden rounded-borders border-grey">
+                    <div class="text-caption text-grey-7 q-mb-xs">Preview:</div>
+                    <video 
+                        :src="videoPreviewUrl" 
+                        controls 
+                        class="full-width rounded-borders shadow-2"
+                        style="max-height: 300px; background: black;"
+                    ></video>
+                </div>
+            </q-card>
+
+            <!-- 2. Pipeline Stages -->
+            <ffmpeg-settings v-model="ffmpegConfig" class="q-mb-md" />
+            <colmap-settings v-model="colmapConfig" class="q-mb-md" />
+            <brush-settings v-model="brushConfig" class="q-mb-md" />
+
+            <!-- 3. Submission -->
+            <div class="column items-center q-gutter-y-sm q-mt-xl">
+                <q-btn 
+                    size="lg"
+                    color="primary" 
+                    label="Launch Generation" 
+                    icon="rocket_launch"
+                    :loading="uploadStatus === 'Uploading...'"
+                    :disabled="!selectedFile"
+                    @click="uploadVideo"
+                    class="full-width"
+                />
+                
+                <div v-if="uploadStatus" :class="statusClass" class="text-weight-bold">
+                    <q-spinner-dots v-if="statusClass === 'info'" size="sm" class="q-mr-xs" />
+                    {{ uploadStatus }}
+                </div>
             </div>
         </div>
     </q-page>
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { onBeforeUnmount, ref } from "vue";
 import { useRouter } from "vue-router";
+import FfmpegSettings from "src/components/FfmpegSettings.vue";
+import { makeDefaultFFMPEGConfig, type FFMPEGExtractionConfig } from "src/lib/splats/ffmpeg";
+import ColmapSettings from "src/components/ColmapSettings.vue";
+import { type ColmapConfig, makeAutoDefaults } from "src/lib/splats/colmap";
+import BrushSettings from "src/components/BrushSettings.vue";
+import { type BrushTrainingConfig, makeDefaultBrushConfig } from "src/lib/splats/brush";
 
 const router = useRouter();
 
-const selectedFile = ref(null);
+const selectedFile = ref<File | null>(null);
+const videoPreviewUrl = ref<string | null>(null);
+
+// Handling file selection and preview cleanup
+const handleFileChange = (file: File | null) => {
+    // Revoke old URL to prevent memory leaks
+    if (videoPreviewUrl.value) {
+        URL.revokeObjectURL(videoPreviewUrl.value);
+        videoPreviewUrl.value = null;
+    }
+
+    if (file) {
+        videoPreviewUrl.value = URL.createObjectURL(file);
+    }
+};
+
+// Ensure cleanup if component is unmounted
+onBeforeUnmount(() => {
+    if (videoPreviewUrl.value) {
+        URL.revokeObjectURL(videoPreviewUrl.value);
+    }
+});
+
+const ffmpegConfig = ref<FFMPEGExtractionConfig>(makeDefaultFFMPEGConfig());
+const colmapConfig = ref<ColmapConfig>(makeAutoDefaults());
+const brushConfig = ref<BrushTrainingConfig>(makeDefaultBrushConfig());
 const uploadStatus = ref("");
 const statusClass = ref("");
 
@@ -32,12 +103,17 @@ const uploadVideo = async () => {
     if (!selectedFile.value) return;
 
     const formData = new FormData();
-    // The key "file" must match the parameter name in FastAPI: 
-    // async def generate(file: UploadFile = File(...))
+    // 1. Append the file
     formData.append("file", selectedFile.value);
 
+    // 2. Append the settings as JSON strings
+    // This allows the backend to receive the full pipeline configuration
+    formData.append("ffmpeg_config", JSON.stringify(ffmpegConfig.value));
+    formData.append("colmap_config", JSON.stringify(colmapConfig.value));
+    formData.append("brush_config", JSON.stringify(brushConfig.value));
+
     try {
-        uploadStatus.value = "Uploading...";
+        uploadStatus.value = "Starting pipeline...";
         statusClass.value = "info";
 
         const response = await fetch("http://localhost:8000/splats/generate", {
@@ -47,11 +123,11 @@ const uploadVideo = async () => {
 
         if (!response.ok) {
             const errorData = await response.json();
-            throw new Error(errorData.detail || "Upload failed");
+            throw new Error(errorData.detail || "Processing failed");
         }
 
         const result = await response.json();
-        uploadStatus.value = `Success: ${result.filename}`;
+        uploadStatus.value = `Success: Generation ${result.generation_id} started`;
         statusClass.value = "success";
         
         return router.push(`/splat/${result.generation_id}`);
@@ -63,13 +139,10 @@ const uploadVideo = async () => {
 </script>
 
 <style scoped>
-.upload-container {
-    max-width: 400px;
-    margin: 20px auto;
-    padding: 20px;
-    border: 1px solid #ddd;
-    border-radius: 8px;
-    font-family: sans-serif;
+
+.wrapper {
+    max-width: 600px;
+    margin: 0 auto;
 }
 
 .success {

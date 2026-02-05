@@ -1,18 +1,22 @@
+import json
 import os
 import sys
 import uuid
 from concurrent.futures import Future, ProcessPoolExecutor
 from dataclasses import dataclass
+from typing import Union
 
-from api.data_processing.splats import generate_splats
+from api.lib.splat_pipeline import SplatPipeline
+from api.models.splats import (
+    BrushTrainingConfig,
+    ColmapAutoConfig,
+    ColmapManualConfig,
+    FFMPEGExtractionConfig,
+    GenerationInputs,
+)
 
 # Add parent directory to path to import other modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-
-@dataclass
-class GenerationInputs:
-    video_path: str
 
 
 @dataclass
@@ -61,6 +65,43 @@ class GenerationManager:
 
         return run
 
+    def get_status(self, generation_id: str) -> dict:
+        # read the file "status.json" in the workspace of the generation run
+        backend_root = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", ".."
+        )
+        file = os.path.join(backend_root, f"data/splats/{generation_id}/status.json")
+
+        if not os.path.exists(file):
+            return {"error": "Status file not found"}
+        with open(file, "r") as f:
+            data = json.load(f)
+        return data
+
+    def get_blueprints(self, generation_id: str) -> dict:
+        backend_root = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", ".."
+        )
+        blueprint_prefix = os.path.join(
+            backend_root, f"data/splats/{generation_id}/blueprint"
+        )
+
+        views = {
+            "top": f"{blueprint_prefix}_top.png",
+            "bottom": f"{blueprint_prefix}_bottom.png",
+            "front": f"{blueprint_prefix}_front.png",
+            "back": f"{blueprint_prefix}_back.png",
+            "left": f"{blueprint_prefix}_left.png",
+            "right": f"{blueprint_prefix}_right.png",
+        }
+
+        for key, path in views.items():
+            if not os.path.exists(path):
+                views[key] = None
+
+        return views
+
 
 def _run_generation(inputs: GenerationInputs, job_name: str) -> GenerationRun:
-    return generate_splats(job_name, inputs.video_path)
+    pipeline = SplatPipeline(job_name=job_name, inputs=inputs)
+    return pipeline.run()

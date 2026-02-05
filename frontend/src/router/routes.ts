@@ -11,7 +11,10 @@ const routes: RouteRecordRaw[] = [
             },
             {
                 path: '/splat/:id',
-                component: () => import('pages/SplatPage.vue')
+                components: {
+                    default: () => import('pages/SplatPage.vue'),
+                    drawer: () => import('src/drawers/SplatPipelineDrawer.vue')
+                }
             }
         ],
     },
