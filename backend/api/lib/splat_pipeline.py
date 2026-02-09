@@ -7,6 +7,7 @@ from typing import Callable, Union
 
 import numpy as np
 import open3d as o3d
+import pycolmap
 from api.data_processing.splats import save_histogram
 from api.models.splats import (
     BrushTrainingConfig,
@@ -158,17 +159,58 @@ class SplatPipeline:
             # Use shell=True for xvfb-run in Docker
             cmd = f"{colmap_command} {' '.join(args)}"
             self.logger.start_step("colmap", settings=cfg.dict(), command=cmd)
-            return self._run_command(
+            self._run_command(
                 cmd,
                 shell=True,
                 step_name="colmap",
                 estimate_progress_callback=estimate_colmap_progress,
             )
 
-        cmd = [colmap_path] + args
-        self.logger.start_step("colmap", settings=cfg.dict(), command=" ".join(cmd))
-        return self._run_command(
-            cmd, step_name="colmap", estimate_progress_callback=estimate_colmap_progress
+        else:
+            cmd = [colmap_path] + args
+            self.logger.start_step("colmap", settings=cfg.dict(), command=" ".join(cmd))
+            self._run_command(
+                cmd,
+                step_name="colmap",
+                estimate_progress_callback=estimate_colmap_progress,
+            )
+
+        # TODO: do one reconstruction per directory in `colmap/sparse`
+        # based on config.MIN_COLMAP_IMAGES_KEEP
+        sparse_dir = os.path.join(self.directories["colmap"], "sparse", "0")
+        self._colmap_compute_geometric_data(sparse_dir)
+
+    def _colmap_compute_geometric_data(self, sparse_dir: str):
+        reconstruction = pycolmap.Reconstruction(sparse_dir)
+        positions = []
+        up_vectors = []
+
+        for image in reconstruction.images.values():
+            pose = image.cam_from_world()
+            translation = pose.translation
+            rotation = pose.rotation.matrix()
+            positions.append(-rotation.T @ translation)
+            up_vectors.append(-rotation.T @ np.array([0, 1, 0]))
+
+        positions = np.array(positions)
+        up_vectors = np.array(up_vectors)
+        average_up = np.mean(up_vectors, axis=0)
+
+        # Find the normal to a plane fitted to the camera posisions
+        centroid = np.mean(positions, axis=0)
+        centered_positions = positions - centroid
+        cov = np.cov(centered_positions, rowvar=False)
+        eigenvalues, eigenvectors = np.linalg.eig(cov)
+        normal = eigenvectors[:, np.argmin(eigenvalues)]
+        normal *= np.sign(np.dot(normal, average_up))
+        normal /= np.linalg.norm(normal)
+        radius = np.max(np.linalg.norm(centered_positions, axis=1))
+
+        self.logger.set_colmap_geometric_data(
+            {
+                "up_vector": average_up.tolist(),
+                "radius": radius,
+            }
         )
 
     def run_brush(self, cfg: BrushTrainingConfig):

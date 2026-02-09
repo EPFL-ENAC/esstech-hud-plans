@@ -1,7 +1,7 @@
 env_path=../.env
 
 install:
-	uv venv --python 3.13 --allow-existing
+	uv venv --python 3.12 --allow-existing
 	uv pip install -e .[dev]
 
 
