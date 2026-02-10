@@ -6,8 +6,6 @@ import subprocess
 from typing import Callable, Union
 
 import numpy as np
-import open3d as o3d
-import pycolmap
 from api.data_processing.splats import save_histogram
 from api.models.splats import (
     BrushTrainingConfig,
@@ -77,11 +75,6 @@ class SplatPipeline:
                 "splat_path": os.path.join(self.directories["workspace"], "splat.ply"),
                 "blueprints": [
                     os.path.join(self.directories["workspace"], "blueprint_top.png"),
-                    os.path.join(self.directories["workspace"], "blueprint_bottom.png"),
-                    os.path.join(self.directories["workspace"], "blueprint_front.png"),
-                    os.path.join(self.directories["workspace"], "blueprint_back.png"),
-                    os.path.join(self.directories["workspace"], "blueprint_left.png"),
-                    os.path.join(self.directories["workspace"], "blueprint_right.png"),
                 ],
             }
 
@@ -181,6 +174,8 @@ class SplatPipeline:
         self._colmap_compute_geometric_data(sparse_dir)
 
     def _colmap_compute_geometric_data(self, sparse_dir: str):
+        import pycolmap
+
         reconstruction = pycolmap.Reconstruction(sparse_dir)
         positions = []
         up_vectors = []
@@ -197,18 +192,21 @@ class SplatPipeline:
         average_up = np.mean(up_vectors, axis=0)
 
         # Find the normal to a plane fitted to the camera posisions
-        centroid = np.mean(positions, axis=0)
-        centered_positions = positions - centroid
+        center = np.mean(positions, axis=0)
+        centered_positions = positions - center
         cov = np.cov(centered_positions, rowvar=False)
         eigenvalues, eigenvectors = np.linalg.eig(cov)
         normal = eigenvectors[:, np.argmin(eigenvalues)]
+        tangent = eigenvectors[:, np.argmax(eigenvalues)]
         normal *= np.sign(np.dot(normal, average_up))
         normal /= np.linalg.norm(normal)
+        world_rotation = np.stack([tangent, np.cross(normal, tangent), normal], axis=1)
         radius = np.max(np.linalg.norm(centered_positions, axis=1))
 
         self.logger.set_colmap_geometric_data(
             {
-                "up_vector": average_up.tolist(),
+                "center": center.tolist(),
+                "world_rotation": world_rotation.tolist(),
                 "radius": radius,
             }
         )
@@ -252,114 +250,106 @@ class SplatPipeline:
         )
 
     def extract_blueprint_from_splat(self, ply_path, output_prefix="blueprint"):
+        import numpy as np
+        import torch
+        from gsplat import rasterization
+        from PIL import Image
+        from plyfile import PlyData
+
+        IMAGE_HEIGHT = 2048
+        IMAGE_WIDTH = 2048
+        RADIUS_SCALE = 2
+        OPACITY = 0.05
+
+        colmap_geometry = self.logger.get_colmap_geometric_data()
+        if colmap_geometry is None:
+            self.logger.fail("Cannot extract blueprint without COLMAP geometric data.")
+            return
+        center = np.array(colmap_geometry["center"])
+        world_rotation = np.array(colmap_geometry["world_rotation"])
+        R_world = torch.tensor(world_rotation, device="cuda", dtype=torch.float32)
+        radius = colmap_geometry["radius"]
+
         self.logger.start_step("blueprint_extraction")
 
-        # Load the dense point cloud (from your splatting PLY)
-        pcd = o3d.io.read_point_cloud(ply_path)
+        plydata = PlyData.read(ply_path)
+        v = plydata["vertex"]
+
+        means = np.stack([v["x"], v["y"], v["z"]], axis=-1)
+        means = torch.from_numpy(means).float().cuda()
+
+        scales = np.stack([v["scale_0"], v["scale_1"], v["scale_2"]], axis=-1)
+        scales = torch.exp(torch.from_numpy(scales).float().cuda())
+
+        quats = np.stack([v["rot_0"], v["rot_1"], v["rot_2"], v["rot_3"]], axis=-1)
+        quats = torch.from_numpy(quats).float().cuda()
+
+        opacities = v["opacity"][:, np.newaxis]
+        opacities = torch.sigmoid(torch.from_numpy(opacities).float().cuda()) * OPACITY
+
+        # 0.28209 is the SH constant for degree 0
+        sh_dc = np.stack([v["f_dc_0"], v["f_dc_1"], v["f_dc_2"]], axis=-1)
+        colors = torch.sigmoid(torch.from_numpy(sh_dc))
+        colors = colors.float().cuda()
+
         self.logger.add_log(
             "blueprint_extraction",
-            f"Loaded point cloud with {len(pcd.points)} points from {ply_path}.",
+            f"Loaded point cloud with {len(v)} points from {ply_path}.",
         )
-        self.logger.update_step_progress("blueprint_extraction", 0.1)
+        self.logger.update_step_progress("blueprint_extraction", 0.0)
 
-        # 1. Statistical Outlier Removal (Cleans up the "fuzz" from splatting)
-        cl, ind = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
-        pcd = pcd.select_by_index(ind)
+        center = torch.tensor(center, device="cuda", dtype=torch.float32)
+
+        D = 1000.0 * radius  # Large distance to flatten perspective
+        R_td = torch.tensor(
+            [[-1, 0, 0], [0, 1, 0], [0, 0, -1]], device="cuda", dtype=torch.float32
+        )
+        R_combined = R_td @ R_world.T
+        t_combined = -R_combined @ center
+        t_combined[2] += D
+
+        view_mat = torch.eye(4, device="cuda", dtype=torch.float32)
+        view_mat[:3, :3] = R_combined
+        view_mat[:3, 3] = t_combined
+
+        focal_obj = (IMAGE_WIDTH / 2) / (radius * RADIUS_SCALE)
+        focal_length = focal_obj * D
+        K = torch.tensor(
+            [
+                [focal_length, 0, IMAGE_WIDTH / 2],
+                [0, focal_length, IMAGE_HEIGHT / 2],
+                [0, 0, 1],
+            ],
+            device="cuda",
+            dtype=torch.float32,
+        )
+
+        render_colors, render_alphas, info = rasterization(
+            means=means,
+            quats=quats,
+            scales=scales,
+            opacities=opacities.squeeze(-1),
+            colors=colors,
+            viewmats=view_mat[None, ...],
+            Ks=K[None, ...],
+            width=IMAGE_WIDTH,
+            height=IMAGE_HEIGHT,
+            # near_plane=D - 0.1 * radius,
+            # far_plane=D + 0.3 * radius,
+        )
+
+        self.logger.update_step_progress("blueprint_extraction", 1.0)
+
         self.logger.add_log(
             "blueprint_extraction",
-            f"Point cloud after outlier removal has {len(pcd.points)} points.",
+            f"Finished processing points. Saving blueprint image to {output_prefix}_top.png",
         )
-        self.logger.update_step_progress("blueprint_extraction", 0.3)
 
-        # 2. Estimate Plane (Find the floor)
-        # distance_threshold is in meters (adjust based on your scale)
-        plane_model, inliers = pcd.segment_plane(
-            distance_threshold=0.1, ransac_n=3, num_iterations=1000
+        img = Image.fromarray(
+            ((1 - render_alphas[0].cpu().numpy()) * 255).astype(np.uint8).squeeze()
         )
-        [a, b, c, d] = plane_model
-        self.logger.add_log(
-            "blueprint_extraction",
-            f"Plane equation: {a:.2f}x + {b:.2f}y + {c:.2f}z + {d:.2f} = 0",
-        )
-        self.logger.update_step_progress("blueprint_extraction", 0.4)
-
-        # 2. CALCULATE ROTATION TO ALIGN FLOOR TO Z-AXIS
-        # The normal vector of our floor plane is [a, b, c]
-        floor_normal = np.array([a, b, c])
-        floor_normal = floor_normal / np.linalg.norm(floor_normal)  # Normalize
-
-        # We want to rotate the cloud so floor_normal becomes [0, 0, 1] (perfectly vertical)
-        z_axis = np.array([0, 0, 1])
-
-        # Calculate the rotation axis (cross product) and angle (dot product)
-        rotation_axis = np.cross(floor_normal, z_axis)
-        axis_norm = np.linalg.norm(rotation_axis)
-
-        if axis_norm > 1e-6:  # If the floor isn't already perfectly flat
-            rotation_axis /= axis_norm
-            angle = np.arccos(np.dot(floor_normal, z_axis))
-            R = o3d.geometry.get_rotation_matrix_from_axis_angle(
-                rotation_axis * angle
-            )  # Create a rotation matrix
-            pcd.rotate(
-                R, center=(0, 0, 0)
-            )  # Apply the rotation to the entire point cloud
-
-        # 3. TRANSLATE FLOOR TO Z=0
-        # Now that it's level, we move the cloud so the floor is exactly at height 0
-        # We use the 'd' parameter or just find the new min height
-        points = np.asarray(pcd.points)
-        z_min = np.min(points[:, 2])
-        pcd.translate((0, 0, -z_min))
-        points = np.asarray(pcd.points)
-
-        # 5. Export to PNG
-        self.logger.add_log(
-            "blueprint_extraction",
-            f"Rendering {len(points)} points to blueprint PNG...",
-        )
-        self.logger.update_step_progress("blueprint_extraction", 0.6)
-
-        accentuation = 0.5
-        # TOP & BOTTOM (XY Plane)
-        save_histogram(
-            points[:, 0],
-            points[:, 1],
-            accentuation=accentuation,
-            output_png=f"{output_prefix}_top.png",
-        )  # Top view looks down -Z
-        save_histogram(
-            -points[:, 0],
-            points[:, 1],
-            accentuation=accentuation,
-            output_png=f"{output_prefix}_bottom.png",
-        )  # Bottom view looks up +Z (mirrored X)
-        # FRONT & BACK (XZ Plane)
-        save_histogram(
-            points[:, 0],
-            points[:, 2],
-            accentuation=accentuation,
-            output_png=f"{output_prefix}_front.png",
-        )  # Front view looks along +Y
-        save_histogram(
-            -points[:, 0],
-            points[:, 2],
-            accentuation=accentuation,
-            output_png=f"{output_prefix}_back.png",
-        )  # Back view looks along -Y
-        # LEFT & RIGHT (YZ Plane)
-        save_histogram(
-            points[:, 1],
-            points[:, 2],
-            accentuation=accentuation,
-            output_png=f"{output_prefix}_right.png",
-        )  # Right view looks along -X
-        save_histogram(
-            -points[:, 1],
-            points[:, 2],
-            accentuation=accentuation,
-            output_png=f"{output_prefix}_left.png",
-        )  # Left view looks along +X
+        # img = Image.fromarray((render_colors[0].cpu().numpy() * 255).astype(np.uint8))
+        img.save(f"{output_prefix}_top.png")
 
         self.logger.step_completed("blueprint_extraction")
 

@@ -139,6 +139,9 @@ class PipelineLogger:
         self.data["geometric_data"] = geometric_data
         self.save()
 
+    def get_colmap_geometric_data(self) -> dict | None:
+        return self.data.get("geometric_data")
+
 
 def _strip_ansi(text: str) -> str:
     """Remove ANSI escape codes and control characters"""
