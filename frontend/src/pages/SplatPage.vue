@@ -16,7 +16,7 @@ splat.value.debug("splat");
 
 const SplatLoader = makeAsyncResultLoader<ArrayBuffer, ErrorBase, SplatPipelineStatus>({});
 
-const directions = ["top", "bottom", "left", "right", "front", "back"] as const;
+const directions = ["top"] as const;
 
 </script>
 
