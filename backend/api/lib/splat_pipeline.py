@@ -8,6 +8,7 @@ from typing import Callable, Union
 import numpy as np
 from api.data_processing.splats import save_histogram
 from api.models.splats import (
+    BlueprintConfig,
     BrushTrainingConfig,
     ColmapAutoConfig,
     ColmapManualConfig,
@@ -68,6 +69,7 @@ class SplatPipeline:
 
             self.extract_blueprint_from_splat(
                 os.path.join(self.directories["workspace"], "splat.ply"),
+                self.inputs.blueprint,
                 output_prefix=os.path.join(self.directories["workspace"], "blueprint"),
             )
 
@@ -249,17 +251,14 @@ class SplatPipeline:
             estimate_progress_callback=estimate_training_progress,
         )
 
-    def extract_blueprint_from_splat(self, ply_path, output_prefix="blueprint"):
+    def extract_blueprint_from_splat(
+        self, ply_path: str, cfg: BlueprintConfig, output_prefix: str = "blueprint"
+    ):
         import numpy as np
         import torch
         from gsplat import rasterization
         from PIL import Image
         from plyfile import PlyData
-
-        IMAGE_HEIGHT = 2048
-        IMAGE_WIDTH = 2048
-        RADIUS_SCALE = 2
-        OPACITY = 0.05
 
         colmap_geometry = self.logger.get_colmap_geometric_data()
         if colmap_geometry is None:
@@ -284,8 +283,10 @@ class SplatPipeline:
         quats = np.stack([v["rot_0"], v["rot_1"], v["rot_2"], v["rot_3"]], axis=-1)
         quats = torch.from_numpy(quats).float().cuda()
 
-        opacities = v["opacity"][:, np.newaxis]
-        opacities = torch.sigmoid(torch.from_numpy(opacities).float().cuda()) * OPACITY
+        opacities = v["opacity"][:, np.newaxis] + cfg.opacityShift
+        opacities = (
+            torch.sigmoid(torch.from_numpy(opacities).float().cuda()) * cfg.opacity
+        )
 
         # 0.28209 is the SH constant for degree 0
         sh_dc = np.stack([v["f_dc_0"], v["f_dc_1"], v["f_dc_2"]], axis=-1)
@@ -312,12 +313,12 @@ class SplatPipeline:
         view_mat[:3, :3] = R_combined
         view_mat[:3, 3] = t_combined
 
-        focal_obj = (IMAGE_WIDTH / 2) / (radius * RADIUS_SCALE)
+        focal_obj = (cfg.imageWidth / 2) / (radius * cfg.radiusScale)
         focal_length = focal_obj * D
         K = torch.tensor(
             [
-                [focal_length, 0, IMAGE_WIDTH / 2],
-                [0, focal_length, IMAGE_HEIGHT / 2],
+                [focal_length, 0, cfg.imageWidth / 2],
+                [0, focal_length, cfg.imageHeight / 2],
                 [0, 0, 1],
             ],
             device="cuda",
@@ -332,10 +333,10 @@ class SplatPipeline:
             colors=colors,
             viewmats=view_mat[None, ...],
             Ks=K[None, ...],
-            width=IMAGE_WIDTH,
-            height=IMAGE_HEIGHT,
-            # near_plane=D - 0.1 * radius,
-            # far_plane=D + 0.3 * radius,
+            width=cfg.imageWidth,
+            height=cfg.imageHeight,
+            near_plane=D - cfg.verticalClip * radius,
+            far_plane=D + cfg.verticalClip * radius,
         )
 
         self.logger.update_step_progress("blueprint_extraction", 1.0)

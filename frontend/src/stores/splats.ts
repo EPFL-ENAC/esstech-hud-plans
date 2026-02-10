@@ -1,4 +1,5 @@
 import { defineStore } from "pinia";
+import type { BlueprintConfig } from "src/lib/splats/blueprint";
 import type { BrushTrainingConfig } from "src/lib/splats/brush";
 import type { ColmapConfig } from "src/lib/splats/colmap";
 import type { FFMPEGExtractionConfig } from "src/lib/splats/ffmpeg";
@@ -9,6 +10,7 @@ export interface SplatPipelineSettings {
     ffmpeg: FFMPEGExtractionConfig;
     colmap: ColmapConfig;
     brush: BrushTrainingConfig;
+    blueprint: BlueprintConfig;
 }
 
 export interface SplatPipelineStep<T extends object> {
@@ -40,7 +42,7 @@ export interface SplatPipelineStatus {
         ffmpeg: SplatPipelineStep<FFMPEGExtractionConfig>
         colmap: SplatPipelineStep<ColmapConfig>
         brush: SplatPipelineStep<BrushTrainingConfig>
-        blueprint_extraction: SplatPipelineStep<object>;
+        blueprint_extraction: SplatPipelineStep<BlueprintConfig>;
     }
 }
 

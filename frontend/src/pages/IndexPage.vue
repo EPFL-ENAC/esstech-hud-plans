@@ -2,7 +2,7 @@
     <q-page class="q-pa-md">
         <div class="wrapper">
             <h1 class="text-h5 q-mb-lg">Splat Generation Pipeline</h1>
-            
+
             <!-- 1. Source Selection -->
             <q-card flat bordered class="q-pa-md q-mb-md">
                 <div class="text-subtitle2 q-mb-sm text-primary">1. Input Video</div>
@@ -22,9 +22,9 @@
                 <!-- Video Preview Section -->
                 <div v-if="videoPreviewUrl" class="q-mt-md overflow-hidden rounded-borders border-grey">
                     <div class="text-caption text-grey-7 q-mb-xs">Preview:</div>
-                    <video 
-                        :src="videoPreviewUrl" 
-                        controls 
+                    <video
+                        :src="videoPreviewUrl"
+                        controls
                         class="full-width rounded-borders shadow-2"
                         style="max-height: 300px; background: black;"
                     ></video>
@@ -35,20 +35,21 @@
             <ffmpeg-settings v-model="ffmpegConfig" class="q-mb-md" />
             <colmap-settings v-model="colmapConfig" class="q-mb-md" />
             <brush-settings v-model="brushConfig" class="q-mb-md" />
+            <blueprint-settings v-model="blueprintConfig" class="q-mb-md" />
 
             <!-- 3. Submission -->
             <div class="column items-center q-gutter-y-sm q-mt-xl">
-                <q-btn 
+                <q-btn
                     size="lg"
-                    color="primary" 
-                    label="Launch Generation" 
+                    color="primary"
+                    label="Launch Generation"
                     icon="rocket_launch"
                     :loading="uploadStatus === 'Uploading...'"
                     :disabled="!selectedFile"
                     @click="uploadVideo"
                     class="full-width"
                 />
-                
+
                 <div v-if="uploadStatus" :class="statusClass" class="text-weight-bold">
                     <q-spinner-dots v-if="statusClass === 'info'" size="sm" class="q-mr-xs" />
                     {{ uploadStatus }}
@@ -67,6 +68,8 @@ import ColmapSettings from "src/components/ColmapSettings.vue";
 import { type ColmapConfig, makeAutoDefaults } from "src/lib/splats/colmap";
 import BrushSettings from "src/components/BrushSettings.vue";
 import { type BrushTrainingConfig, makeDefaultBrushConfig } from "src/lib/splats/brush";
+import BlueprintSettings from "src/components/BlueprintSettings.vue";
+import { type BlueprintConfig, makeDefaultBlueprintConfig } from "src/lib/splats/blueprint";
 
 const router = useRouter();
 
@@ -96,6 +99,7 @@ onBeforeUnmount(() => {
 const ffmpegConfig = ref<FFMPEGExtractionConfig>(makeDefaultFFMPEGConfig());
 const colmapConfig = ref<ColmapConfig>(makeAutoDefaults());
 const brushConfig = ref<BrushTrainingConfig>(makeDefaultBrushConfig());
+const blueprintConfig = ref<BlueprintConfig>(makeDefaultBlueprintConfig());
 const uploadStatus = ref("");
 const statusClass = ref("");
 
@@ -111,6 +115,7 @@ const uploadVideo = async () => {
     formData.append("ffmpeg_config", JSON.stringify(ffmpegConfig.value));
     formData.append("colmap_config", JSON.stringify(colmapConfig.value));
     formData.append("brush_config", JSON.stringify(brushConfig.value));
+    formData.append("blueprint_config", JSON.stringify(blueprintConfig.value));
 
     try {
         uploadStatus.value = "Starting pipeline...";
@@ -129,7 +134,7 @@ const uploadVideo = async () => {
         const result = await response.json();
         uploadStatus.value = `Success: Generation ${result.generation_id} started`;
         statusClass.value = "success";
-        
+
         return router.push(`/splat/${result.generation_id}`);
     } catch (error) {
         uploadStatus.value = "Error: " + (error as Error).message;

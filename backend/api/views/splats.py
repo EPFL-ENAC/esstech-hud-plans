@@ -3,6 +3,7 @@ import os
 import shutil
 
 from api.models.splats import (
+    BlueprintConfig,
     BrushTrainingConfig,
     ColmapAutoConfig,
     FFMPEGExtractionConfig,
@@ -47,6 +48,7 @@ async def generate(
     ffmpeg_config: str = Form(...),
     colmap_config: str = Form(...),
     brush_config: str = Form(...),
+    blueprint_config: str = Form(...),
 ) -> PostRunGenerationResponse:
     # 1. Validate file type
     if not file.content_type or not file.content_type.startswith("video/"):
@@ -58,6 +60,7 @@ async def generate(
         ffmpeg_settings = FFMPEGExtractionConfig(**json.loads(ffmpeg_config))
         colmap_settings = ColmapAutoConfig(**json.loads(colmap_config))
         brush_settings = BrushTrainingConfig(**json.loads(brush_config))
+        blueprint_settings = BlueprintConfig(**json.loads(blueprint_config))
     except Exception as e:
         raise HTTPException(
             status_code=422, detail=f"Invalid configuration format: {str(e)}"
@@ -76,12 +79,12 @@ async def generate(
         await file.close()
 
     # 4. Run generation with all inputs
-    # Ensure your GenerationInputs model accepts these three config objects
     inputs = GenerationInputs(
         video_path=file_path,
         ffmpeg=ffmpeg_settings,
         colmap=colmap_settings,
         brush=brush_settings,
+        blueprint=blueprint_settings,
     )
 
     run = manager.run_generation(inputs)

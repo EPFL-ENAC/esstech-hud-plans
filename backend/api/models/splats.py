@@ -43,8 +43,18 @@ class BrushTrainingConfig(BaseModel):
     subsampleFrames: int
 
 
+class BlueprintConfig(BaseModel):
+    imageWidth: int
+    imageHeight: int
+    radiusScale: float
+    verticalClip: float
+    opacityShift: float
+    opacity: float
+
+
 class GenerationInputs(BaseModel):
     video_path: str
     ffmpeg: FFMPEGExtractionConfig
     colmap: Union[ColmapAutoConfig, ColmapManualConfig]
     brush: BrushTrainingConfig
+    blueprint: BlueprintConfig
