@@ -55,17 +55,25 @@ export const useSplatStore = defineStore('splat', () => {
                 yield* delay(5000); // slight delay to allow for initial processing
 
                 while (true) {
-                    const fetched = yield* AsyncResult.fromValuePromise(
-                        fetch(`http://localhost:8000/splats/status/${generationId}`)
-                    );
-                    if (fetched.ok) {
-                        const statusData: SplatPipelineStatus = yield* AsyncResult.fromValuePromise(fetched.json());
-                        notifyProgress(statusData);
-                        if (statusData.overall_status === "completed" || statusData.overall_status === "failed") {
-                            return yield* AsyncResult.ok(statusData);
+                    try {
+                        const fetched = yield* AsyncResult.fromValuePromise(
+                            fetch(`http://localhost:8000/splats/status/${generationId}`)
+                        );
+                        if (fetched.ok) {
+                            const statusData: SplatPipelineStatus = yield* AsyncResult.fromValuePromise(fetched.json());
+                            const knownStatuses = ["running", "completed", "failed"];
+                            if (knownStatuses.includes(statusData.overall_status)) {
+                                notifyProgress(statusData);
+                                if (statusData.overall_status === "completed" || statusData.overall_status === "failed") {
+                                    return yield* AsyncResult.ok(statusData);
+                                }
+                            }
                         }
+                    } catch (e) {
+                        // Log error but continue polling - don't fail the entire operation
+                        console.warn(`Failed to fetch status for ${generationId}, retrying...`, e);
                     }
-                    
+
                     yield* delay(2000);
                 }
             });

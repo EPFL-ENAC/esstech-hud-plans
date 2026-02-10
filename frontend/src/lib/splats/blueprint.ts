@@ -12,7 +12,7 @@ export function makeDefaultBlueprintConfig(): BlueprintConfig {
         imageWidth: 2048,
         imageHeight: 2048,
         radiusScale: 2.0,
-        verticalClip: 0.2,
+        verticalClip: 1.0,
         opacityShift: -0.5,
         opacity: 0.05,
     }

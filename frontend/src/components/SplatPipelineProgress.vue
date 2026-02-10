@@ -45,7 +45,7 @@ const statusText = computed(() => {
                         color="primary"
                     />
                     <q-chip v-else :color="statusColor" text-color="white" class="q-ml-md" icon="info">
-                        {{ props.value.overall_status.toUpperCase() }}
+                        {{ props.value.overall_status?.toUpperCase() || 'UNKNOWN' }}
                     </q-chip>
                 </div>
             </div>

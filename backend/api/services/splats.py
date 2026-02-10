@@ -73,10 +73,49 @@ class GenerationManager:
         file = os.path.join(backend_root, f"data/splats/{generation_id}/status.json")
 
         if not os.path.exists(file):
-            return {"error": "Status file not found"}
-        with open(file, "r") as f:
-            data = json.load(f)
-        return data
+            return {
+                "overall_status": "pending",
+                "name": generation_id,
+                "progress": 0,
+                "message": "Initializing pipeline...",
+                "started_at": None,
+                "finished_at": None,
+                "output": None,
+                "settings": {},
+                "steps_list": ["ffmpeg", "colmap", "brush", "blueprint_extraction"],
+                "steps": {},
+            }
+
+        try:
+            with open(file, "r") as f:
+                data = json.load(f)
+            return data
+        except json.JSONDecodeError:
+            return {
+                "overall_status": "pending",
+                "name": generation_id,
+                "progress": 0,
+                "message": "Reading status...",
+                "started_at": None,
+                "finished_at": None,
+                "output": None,
+                "settings": {},
+                "steps_list": ["ffmpeg", "colmap", "brush", "blueprint_extraction"],
+                "steps": {},
+            }
+        except IOError as e:
+            return {
+                "overall_status": "pending",
+                "name": generation_id,
+                "progress": 0,
+                "message": "Waiting for status file...",
+                "started_at": None,
+                "finished_at": None,
+                "output": None,
+                "settings": {},
+                "steps_list": ["ffmpeg", "colmap", "brush", "blueprint_extraction"],
+                "steps": {},
+            }
 
     def get_blueprints(self, generation_id: str) -> dict:
         backend_root = os.path.join(
