@@ -52,7 +52,7 @@ export const useSplatStore = defineStore('splat', () => {
     function getStatus(generationId: string) {
         if (!loaders[generationId]) {
             loaders[generationId] = AsyncResult.run(function* (notifyProgress) {
-                yield* delay(5000); // slight delay to allow for initial processing
+                yield* delay(2000); // slight delay to allow for initial processing
 
                 while (true) {
                     try {

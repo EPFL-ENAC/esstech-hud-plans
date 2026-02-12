@@ -21,7 +21,7 @@ class PipelineLogger:
             "output": None,
             "steps_list": steps_list,
             "steps": {},
-            "geometric_data": None,
+            "colmap_geometric_data": None,
         }
         self.save()
 
@@ -136,11 +136,11 @@ class PipelineLogger:
         self.data["progress"] = overall_progress
 
     def set_colmap_geometric_data(self, geometric_data: dict):
-        self.data["geometric_data"] = geometric_data
+        self.data["colmap_geometric_data"] = geometric_data
         self.save()
 
     def get_colmap_geometric_data(self) -> dict | None:
-        return self.data.get("geometric_data")
+        return self.data.get("colmap_geometric_data")
 
 
 def _strip_ansi(text: str) -> str:

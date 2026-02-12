@@ -157,3 +157,33 @@ async def get_blueprint_image(generation_id: str, view: str):
         )
 
     return FileResponse(real_path, media_type="image/png")
+
+
+class BlueprintGeometryResponse(BaseModel):
+    world_rotation: list[list[float]]
+    center: list[float]
+    radius: float
+
+
+@router.get(
+    "/blueprint-geometry/{generation_id}",
+    status_code=200,
+    description="Returns world rotation matrix and center for building blueprint view matrix",
+    response_model=BlueprintGeometryResponse,
+)
+async def get_blueprint_geometry(generation_id: str):
+    """Get the geometric data needed for the blueprint view."""
+    colmap_geometry = manager.get_colmap_geometry(generation_id)
+
+    if colmap_geometry is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"COLMAP geometric data not found for generation {generation_id}. "
+            "The pipeline may not have completed the COLMAP step yet.",
+        )
+
+    return BlueprintGeometryResponse(
+        world_rotation=colmap_geometry["world_rotation"],
+        center=colmap_geometry["center"],
+        radius=colmap_geometry["radius"],
+    )

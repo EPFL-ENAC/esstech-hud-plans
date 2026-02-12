@@ -57,13 +57,49 @@ class GenerationManager:
 
     def get_run(self, generation_id: str) -> GenerationRun | None:
         run = self.runs.get(generation_id)
-        if run is None:
+        if run is not None:
+            if run.status != "completed":
+                return None
+            return run
+
+        # Check if generation exists on disk after restart
+        backend_root = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", ".."
+        )
+        splat_dir = os.path.join(backend_root, f"data/splats/{generation_id}")
+        status_file = os.path.join(splat_dir, "status.json")
+
+        if not os.path.exists(status_file):
             return None
 
-        if run.status != "completed":
-            return None
+        try:
+            with open(status_file, "r") as f:
+                data = json.load(f)
 
-        return run
+            overall_status = data.get("overall_status", "pending")
+            output = data.get("output", {})
+            settings = data.get("settings", {})
+
+            # Determine status: treat unfinished runs as failed
+            if overall_status == "completed":
+                status = "completed"
+            else:
+                status = "failed"
+
+            # Reconstruct the run from disk
+            run = GenerationRun(
+                id=generation_id,
+                status=status,
+                input_video_path=settings.get("video_path", ""),
+                output_splat_path=output.get("splat_path")
+                if status == "completed"
+                else None,
+            )
+            self.runs[generation_id] = run
+            return run if status == "completed" else None
+
+        except (json.JSONDecodeError, IOError):
+            return None
 
     def get_status(self, generation_id: str) -> dict:
         # read the file "status.json" in the workspace of the generation run
@@ -139,6 +175,25 @@ class GenerationManager:
                 views[key] = None
 
         return views
+
+    def get_colmap_geometry(self, generation_id: str) -> dict | None:
+        """Retrieve the COLMAP geometric data for a generation run."""
+        backend_root = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", ".."
+        )
+        status_file = os.path.join(
+            backend_root, f"data/splats/{generation_id}/status.json"
+        )
+
+        if not os.path.exists(status_file):
+            return None
+
+        try:
+            with open(status_file, "r") as f:
+                data = json.load(f)
+            return data.get("colmap_geometric_data")
+        except (json.JSONDecodeError, IOError):
+            return None
 
 
 def _run_generation(inputs: GenerationInputs, job_name: str) -> GenerationRun:

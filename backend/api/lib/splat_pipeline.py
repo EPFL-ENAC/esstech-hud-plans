@@ -251,6 +251,36 @@ class SplatPipeline:
             estimate_progress_callback=estimate_training_progress,
         )
 
+    def compute_blueprint_view_matrix(
+        self, colmap_geometry: dict, distance_scale: float = 1000.0
+    ) -> np.ndarray:
+        """Compute the 4x4 view matrix for the blueprint top-down view.
+
+        Args:
+            colmap_geometry: Dictionary with 'center', 'world_rotation', and 'radius' keys
+            distance_scale: Multiplier for radius to determine view distance (default: 1000.0)
+
+        Returns:
+            4x4 numpy array representing the view matrix
+        """
+        center = np.array(colmap_geometry["center"])
+        world_rotation = np.array(colmap_geometry["world_rotation"])
+        radius = colmap_geometry["radius"]
+
+        D = distance_scale * radius  # Large distance to flatten perspective
+
+        # Top-down view rotation matrix (converts from world space to top-down view)
+        R_td = np.array([[-1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=np.float32)
+        R_combined = R_td @ world_rotation.T
+        t_combined = -R_combined @ center
+        t_combined[2] += D
+
+        view_mat = np.eye(4, dtype=np.float32)
+        view_mat[:3, :3] = R_combined
+        view_mat[:3, 3] = t_combined
+
+        return view_mat
+
     def extract_blueprint_from_splat(
         self, ply_path: str, cfg: BlueprintConfig, output_prefix: str = "blueprint"
     ):
@@ -260,13 +290,13 @@ class SplatPipeline:
         from PIL import Image
         from plyfile import PlyData
 
+        DISTANCE_SCALE = 1000.0
+
         colmap_geometry = self.logger.get_colmap_geometric_data()
         if colmap_geometry is None:
             self.logger.fail("Cannot extract blueprint without COLMAP geometric data.")
             return
-        center = np.array(colmap_geometry["center"])
-        world_rotation = np.array(colmap_geometry["world_rotation"])
-        R_world = torch.tensor(world_rotation, device="cuda", dtype=torch.float32)
+
         radius = colmap_geometry["radius"]
 
         self.logger.start_step("blueprint_extraction")
@@ -288,7 +318,6 @@ class SplatPipeline:
             torch.sigmoid(torch.from_numpy(opacities).float().cuda()) * cfg.opacity
         )
 
-        # 0.28209 is the SH constant for degree 0
         sh_dc = np.stack([v["f_dc_0"], v["f_dc_1"], v["f_dc_2"]], axis=-1)
         colors = torch.sigmoid(torch.from_numpy(sh_dc))
         colors = colors.float().cuda()
@@ -299,20 +328,16 @@ class SplatPipeline:
         )
         self.logger.update_step_progress("blueprint_extraction", 0.0)
 
-        center = torch.tensor(center, device="cuda", dtype=torch.float32)
-
-        D = 1000.0 * radius  # Large distance to flatten perspective
-        R_td = torch.tensor(
-            [[-1, 0, 0], [0, 1, 0], [0, 0, -1]], device="cuda", dtype=torch.float32
+        center = torch.tensor(
+            colmap_geometry["center"], device="cuda", dtype=torch.float32
         )
-        R_combined = R_td @ R_world.T
-        t_combined = -R_combined @ center
-        t_combined[2] += D
 
-        view_mat = torch.eye(4, device="cuda", dtype=torch.float32)
-        view_mat[:3, :3] = R_combined
-        view_mat[:3, 3] = t_combined
+        view_mat_np = self.compute_blueprint_view_matrix(
+            colmap_geometry, distance_scale=DISTANCE_SCALE
+        )
+        view_mat = torch.from_numpy(view_mat_np).cuda()
 
+        D = DISTANCE_SCALE * radius
         focal_obj = (cfg.imageWidth / 2) / (radius * cfg.radiusScale)
         focal_length = focal_obj * D
         K = torch.tensor(

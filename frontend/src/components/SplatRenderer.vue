@@ -17,7 +17,9 @@ onMounted(() => {
     renderer.setSize(window.innerWidth, window.innerHeight);
     container.value?.appendChild(renderer.domElement);
 
-    const mesh = new SplatMesh({ fileBytes: props.splatData });
+    // Clone the ArrayBuffer to prevent detachment issues with Web Workers
+    const clonedBuffer = props.splatData.slice(0);
+    const mesh = new SplatMesh({ fileBytes: clonedBuffer });
     mesh.quaternion.set(1, 0, 0, 0);
     mesh.position.set(0, 0, -3);
     scene.add(mesh);

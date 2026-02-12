@@ -4,6 +4,7 @@ import { computed } from "vue";
 import { makeAsyncResultLoader, useReactiveChain } from "unwrapped/vue";
 import type { ErrorBase } from "unwrapped/core";
 import SplatRenderer from "../components/SplatRenderer.vue";
+import InteractiveBlueprintViewer from "../components/InteractiveBlueprintViewer.vue";
 import { type SplatPipelineStatus, useSplatStore } from "src/stores/splats";
 
 const route = useRoute();
@@ -26,6 +27,13 @@ const directions = ["top"] as const;
             <template v-slot="{ value }">
                 <h3>Splat Viewer</h3>
                 <splat-renderer :splat-data="value" />
+
+                <h3>Interactive Blueprint</h3>
+                <interactive-blueprint-viewer 
+                    :splat-data="value" 
+                    :generation-id="generationId"
+                    class="q-mb-lg"
+                />
 
                 <h3>Blueprints</h3>
                 <div v-for="direction in directions" :key="direction">
