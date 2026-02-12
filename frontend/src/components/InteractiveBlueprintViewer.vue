@@ -2,7 +2,7 @@
 import * as THREE from "three";
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SplatMesh } from "@sparkjsdev/spark";
-import { onMounted, ref, useTemplateRef, watch } from "vue";
+import { computed, onMounted, ref, useTemplateRef, watch } from "vue";
 
 
 const CAMERA_DISTANCE_FACTOR = 3.0;
@@ -34,6 +34,17 @@ const initialCameraTarget = ref<THREE.Vector3 | null>(null);
 const isLoading = ref(true);
 const error = ref<string | null>(null);
 
+const thresholdEnabled = ref(false);
+
+const canvasFilter = computed(() => {
+    if (!thresholdEnabled.value) {
+        return 'none';
+    }
+    const brightness = 100;
+    const contrast = 10000;
+    return `contrast(${contrast}%) brightness(${brightness}%)`;
+});
+
 async function fetchBlueprintGeometry(): Promise<void> {
     try {
         const response = await fetch(`http://localhost:8000/splats/blueprint-geometry/${props.generationId}`);
@@ -48,7 +59,6 @@ async function fetchBlueprintGeometry(): Promise<void> {
 }
 
 
-
 function resetView(): void {
     if (controls && initialCameraPosition.value && initialCameraTarget.value) {
         camera?.position.copy(initialCameraPosition.value);
@@ -56,7 +66,6 @@ function resetView(): void {
         controls.update();
     }
 }
-
 
 
 onMounted(async () => {
@@ -79,7 +88,7 @@ onMounted(async () => {
         0.1,
         radius * 10
     );
-    camera.position.set(radius * CAMERA_DISTANCE_FACTOR, 0, 0);
+    camera.position.set(0, 0, radius * CAMERA_DISTANCE_FACTOR);
     camera.lookAt(0, 0, 0);
 
     initialCameraPosition.value = camera.position.clone();
@@ -96,9 +105,9 @@ onMounted(async () => {
 
     const rotationMatrix = new THREE.Matrix4();
     rotationMatrix.set(
-        world_rotation[0]![0]!, world_rotation[0]![1]!, world_rotation[0]![2]!, 0,
-        world_rotation[1]![0]!, world_rotation[1]![1]!, world_rotation[1]![2]!, 0,
-        world_rotation[2]![0]!, world_rotation[2]![1]!, world_rotation[2]![2]!, 0,
+        world_rotation[0]![0]!, world_rotation[1]![0]!, world_rotation[2]![0]!, 0,
+        world_rotation[0]![1]!, world_rotation[1]![1]!, world_rotation[2]![1]!, 0,
+        world_rotation[0]![2]!, world_rotation[1]![2]!, world_rotation[2]![2]!, 0,
         0, 0, 0, 1
     );
     mesh.setRotationFromMatrix(rotationMatrix);
@@ -139,7 +148,7 @@ watch(clipPlanes, (newValue) => {
 
 <template>
     <div class="viewer-container">
-        <div ref="container" class="canvas-container">
+        <div ref="container" class="canvas-container" :style="{ filter: canvasFilter }">
             <div v-if="isLoading" class="loading-overlay">
                 <q-spinner color="primary" size="3em" />
                 <div class="q-mt-sm">Loading interactive blueprint...</div>
@@ -183,6 +192,16 @@ watch(clipPlanes, (newValue) => {
                         label
                         :label-value="opacityMultiplier.toFixed(2)"
                         style="width: 200px"
+                        :disable="isLoading || !!error"
+                    />
+                </div>
+
+                <q-separator vertical class="q-mx-sm" />
+
+                <div class="control-group">
+                    <q-checkbox
+                        v-model="thresholdEnabled"
+                        label="Binary Threshold"
                         :disable="isLoading || !!error"
                     />
                 </div>

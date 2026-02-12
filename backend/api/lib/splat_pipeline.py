@@ -270,7 +270,7 @@ class SplatPipeline:
         D = distance_scale * radius  # Large distance to flatten perspective
 
         # Top-down view rotation matrix (converts from world space to top-down view)
-        R_td = np.array([[-1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=np.float32)
+        R_td = np.array([[1, 0, 0], [0, -1, 0], [0, 0, 1]], dtype=np.float32)
         R_combined = R_td @ world_rotation.T
         t_combined = -R_combined @ center
         t_combined[2] += D
