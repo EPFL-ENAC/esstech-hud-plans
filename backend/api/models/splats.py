@@ -1,4 +1,4 @@
-from typing import Literal, Union
+from typing import Literal, Optional, Union
 
 from pydantic import BaseModel
 
@@ -44,6 +44,7 @@ class BrushTrainingConfig(BaseModel):
 
 
 class BlueprintConfig(BaseModel):
+    enabled: bool = False
     imageWidth: int
     imageHeight: int
     radiusScale: float
@@ -57,4 +58,4 @@ class GenerationInputs(BaseModel):
     ffmpeg: FFMPEGExtractionConfig
     colmap: Union[ColmapAutoConfig, ColmapManualConfig]
     brush: BrushTrainingConfig
-    blueprint: BlueprintConfig
+    blueprint: Optional[BlueprintConfig] = None

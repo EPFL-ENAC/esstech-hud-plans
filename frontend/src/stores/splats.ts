@@ -32,6 +32,7 @@ export interface SplatPipelineStatus {
     finished_at: string | null;
     name: string;
     settings: SplatPipelineSettings;
+    steps_list: string[];
 
     output: {
         splat_path: string;
@@ -42,8 +43,12 @@ export interface SplatPipelineStatus {
         ffmpeg: SplatPipelineStep<FFMPEGExtractionConfig>
         colmap: SplatPipelineStep<ColmapConfig>
         brush: SplatPipelineStep<BrushTrainingConfig>
-        blueprint_extraction: SplatPipelineStep<BlueprintConfig>;
+        blueprint_extraction?: SplatPipelineStep<BlueprintConfig>;
     }
+}
+
+export function hasBlueprintGeneration(status: SplatPipelineStatus): boolean {
+    return status.steps_list?.includes("blueprint_extraction") ?? false;
 }
 
 export const useSplatStore = defineStore('splat', () => {

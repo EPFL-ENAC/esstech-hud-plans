@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import { type BlueprintConfig, makeDefaultBlueprintConfig } from "../lib/splats/blueprint";
 
 const config = defineModel<BlueprintConfig>({
@@ -10,22 +11,37 @@ const resetToDefaults = () => {
     config.value = makeDefaultBlueprintConfig();
 };
 
+const isEnabled = computed(() => config.value.enabled);
+
+const cardClasses = computed(() => ({
+    'q-pa-md': true,
+    'q-mb-md': true,
+    'text-grey-5': !isEnabled.value
+}));
+
 </script>
 
 <template>
-    <q-card flat bordered class="q-pa-md q-mb-md">
-        <q-card-section>
-            <div class="text-h6 text-weight-light">Blueprint Extraction</div>
-            <div class="text-caption text-grey">
-                Generate a top-down blueprint image from the Gaussian splat.
+    <q-card flat bordered :class="cardClasses">
+        <q-card-section class="row items-center justify-between">
+            <div>
+                <div class="text-h6 text-weight-light">Blueprint Extraction (Optional)</div>
+                <div class="text-caption text-grey">
+                    Generate a top-down blueprint image from the Gaussian splat.
+                </div>
             </div>
+            <q-toggle
+                v-model="config.enabled"
+                label="Enable"
+                color="primary"
+            />
         </q-card-section>
         
         <q-separator />
         
         <q-card-section class="q-gutter-y-md">
             <!-- Resolution Settings -->
-            <div class="text-subtitle2 text-primary">Output Resolution</div>
+            <div class="text-subtitle2" :class="isEnabled ? 'text-primary' : 'text-grey-7'">Output Resolution</div>
             <div class="row q-col-gutter-md">
                 <div class="col-6">
                     <q-input
@@ -35,6 +51,7 @@ const resetToDefaults = () => {
                     suffix="px"
                     outlined
                     dense
+                    :disable="!isEnabled"
                     :rules="[(val) => val > 0 || 'Width must be greater than 0']"
                     />
                 </div>
@@ -46,15 +63,16 @@ const resetToDefaults = () => {
                     suffix="px"
                     outlined
                     dense
+                    :disable="!isEnabled"
                     :rules="[(val) => val > 0 || 'Height must be greater than 0']"
                     />
                 </div>
             </div>
-            
+
             <q-separator inset class="q-my-sm" />
-            
+
             <!-- Radius Scale -->
-            <div class="text-subtitle2 text-primary">Boundaries</div>
+            <div class="text-subtitle2" :class="isEnabled ? 'text-primary' : 'text-grey-7'">Boundaries</div>
             <q-input
             v-model.number="config.radiusScale"
             type="number"
@@ -63,13 +81,14 @@ const resetToDefaults = () => {
             outlined
             dense
             step="0.1"
+            :disable="!isEnabled"
             :rules="[(val) => val > 0 || 'Radius scale must be greater than 0']"
             />
-            
+
             <q-separator inset class="q-my-sm" />
-            
+
             <!-- Vertical Clip -->
-            <div class="text-subtitle2 text-primary">Vertical Bounds</div>
+            <div class="text-subtitle2" :class="isEnabled ? 'text-primary' : 'text-grey-7'">Vertical Bounds</div>
             <div class="row items-center q-col-gutter-md">
                 <div class="col-8">
                     <q-slider
@@ -78,7 +97,8 @@ const resetToDefaults = () => {
                     :max="2"
                     :step="0.1"
                     label
-                    color="primary"
+                    :color="isEnabled ? 'primary' : 'grey-5'"
+                    :disable="!isEnabled"
                     />
                 </div>
                 <div class="col-4">
@@ -91,17 +111,18 @@ const resetToDefaults = () => {
                     :max="2"
                     :step="0.1"
                     suffix="x"
+                    :disable="!isEnabled"
                     />
                 </div>
             </div>
-            <p class="text-caption text-grey-7 q-mt-sm">
+            <p class="text-caption" :class="isEnabled ? 'text-grey-7' : 'text-grey-5'">
                 Only keep elements within vertical bounds, scaled with respect to camera path radius
             </p>
-            
+
             <q-separator inset class="q-my-sm" />
-            
+
             <!-- Opacity Settings -->
-            <div class="text-subtitle2 text-primary">Opacity Settings</div>
+            <div class="text-subtitle2" :class="isEnabled ? 'text-primary' : 'text-grey-7'">Opacity Settings</div>
             <div class="row q-col-gutter-md">
                 <div class="col-6">
                     <q-input
@@ -113,6 +134,7 @@ const resetToDefaults = () => {
                     step="0.1"
                     :min="-5"
                     :max="5"
+                    :disable="!isEnabled"
                     />
                 </div>
                 <div class="col-6">
@@ -125,18 +147,20 @@ const resetToDefaults = () => {
                     step="0.01"
                     :min="0"
                     :max="1"
+                    :disable="!isEnabled"
                     />
                 </div>
             </div>
         </q-card-section>
-        
+
         <q-separator />
-        
+
         <q-btn
             flat
             label="Reset to Defaults"
             color="grey-7"
             @click="resetToDefaults"
+            :disable="!isEnabled"
         />
     </q-card>
 </template>

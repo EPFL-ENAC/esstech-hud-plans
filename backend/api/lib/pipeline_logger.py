@@ -88,6 +88,16 @@ class PipelineLogger:
 
         self.save()
 
+    def step_failed(self, step: str, message: str, return_code: int | None = None):
+        self.data["steps"][step]["status"] = "failed"
+        self.data["steps"][step]["finished_at"] = datetime.utcnow().isoformat() + "Z"
+        self.data["steps"][step]["progress"] = 1
+        self.data["steps"][step]["message"] = message
+        if return_code is not None:
+            self.data["steps"][step]["return_code"] = return_code
+
+        self.save()
+
     def add_log(
         self,
         step: str,

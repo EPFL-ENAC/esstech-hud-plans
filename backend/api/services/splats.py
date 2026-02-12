@@ -101,6 +101,15 @@ class GenerationManager:
         except (json.JSONDecodeError, IOError):
             return None
 
+    def _get_default_steps_list(self, settings: dict) -> list[str]:
+        """Determine the default steps list based on settings."""
+        steps = ["ffmpeg", "colmap", "brush"]
+        # Check if blueprint was enabled in settings
+        blueprint_settings = settings.get("blueprint")
+        if blueprint_settings is not None:
+            steps.append("blueprint_extraction")
+        return steps
+
     def get_status(self, generation_id: str) -> dict:
         # read the file "status.json" in the workspace of the generation run
         backend_root = os.path.join(
@@ -118,7 +127,7 @@ class GenerationManager:
                 "finished_at": None,
                 "output": None,
                 "settings": {},
-                "steps_list": ["ffmpeg", "colmap", "brush", "blueprint_extraction"],
+                "steps_list": ["ffmpeg", "colmap", "brush"],
                 "steps": {},
             }
 
@@ -136,7 +145,7 @@ class GenerationManager:
                 "finished_at": None,
                 "output": None,
                 "settings": {},
-                "steps_list": ["ffmpeg", "colmap", "brush", "blueprint_extraction"],
+                "steps_list": ["ffmpeg", "colmap", "brush"],
                 "steps": {},
             }
         except IOError as e:
@@ -149,11 +158,11 @@ class GenerationManager:
                 "finished_at": None,
                 "output": None,
                 "settings": {},
-                "steps_list": ["ffmpeg", "colmap", "brush", "blueprint_extraction"],
+                "steps_list": ["ffmpeg", "colmap", "brush"],
                 "steps": {},
             }
 
-    def get_blueprints(self, generation_id: str) -> dict:
+    def get_blueprints(self, generation_id: str) -> dict[str, str | None]:
         backend_root = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "..", ".."
         )
@@ -161,7 +170,7 @@ class GenerationManager:
             backend_root, f"data/splats/{generation_id}/blueprint"
         )
 
-        views = {
+        views: dict[str, str | None] = {
             "top": f"{blueprint_prefix}_top.png",
             "bottom": f"{blueprint_prefix}_bottom.png",
             "front": f"{blueprint_prefix}_front.png",
@@ -170,8 +179,8 @@ class GenerationManager:
             "right": f"{blueprint_prefix}_right.png",
         }
 
-        for key, path in views.items():
-            if not os.path.exists(path):
+        for key, path in list(views.items()):
+            if path is not None and not os.path.exists(path):
                 views[key] = None
 
         return views
@@ -192,6 +201,25 @@ class GenerationManager:
             with open(status_file, "r") as f:
                 data = json.load(f)
             return data.get("colmap_geometric_data")
+        except (json.JSONDecodeError, IOError):
+            return None
+
+    def get_settings(self, generation_id: str) -> dict | None:
+        """Retrieve the settings for a generation run."""
+        backend_root = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", ".."
+        )
+        status_file = os.path.join(
+            backend_root, f"data/splats/{generation_id}/status.json"
+        )
+
+        if not os.path.exists(status_file):
+            return None
+
+        try:
+            with open(status_file, "r") as f:
+                data = json.load(f)
+            return data.get("settings")
         except (json.JSONDecodeError, IOError):
             return None
 

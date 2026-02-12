@@ -15,6 +15,9 @@ Setup your environment by running:
 make install
 ```
 
+> [!NOTE]
+> By default, dependencies to generate blueprints in the backend are not installed. To install them, run `cd backend && uv pip install -e .[blueprint]`.
+
 
 ### Backend
 

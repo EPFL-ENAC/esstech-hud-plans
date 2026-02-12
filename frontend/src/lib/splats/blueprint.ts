@@ -1,4 +1,5 @@
 export interface BlueprintConfig {
+    enabled: boolean;
     imageWidth: number;
     imageHeight: number;
     radiusScale: number;
@@ -9,6 +10,7 @@ export interface BlueprintConfig {
 
 export function makeDefaultBlueprintConfig(): BlueprintConfig {
     return {
+        enabled: false,
         imageWidth: 2048,
         imageHeight: 2048,
         radiusScale: 2.0,

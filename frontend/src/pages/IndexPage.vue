@@ -115,7 +115,10 @@ const uploadVideo = async () => {
     formData.append("ffmpeg_config", JSON.stringify(ffmpegConfig.value));
     formData.append("colmap_config", JSON.stringify(colmapConfig.value));
     formData.append("brush_config", JSON.stringify(brushConfig.value));
-    formData.append("blueprint_config", JSON.stringify(blueprintConfig.value));
+    // Only include blueprint config if enabled
+    if (blueprintConfig.value.enabled) {
+        formData.append("blueprint_config", JSON.stringify(blueprintConfig.value));
+    }
 
     try {
         uploadStatus.value = "Starting pipeline...";

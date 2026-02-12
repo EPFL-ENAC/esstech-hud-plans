@@ -43,10 +43,13 @@ class SplatPipeline:
     def __init__(self, job_name: str, inputs: GenerationInputs):
         self.job_name = job_name
         self.inputs = inputs
+        steps_list = ["ffmpeg", "colmap", "brush"]
+        if inputs.blueprint is not None:
+            steps_list.append("blueprint_extraction")
         self.logger = PipelineLogger(
             name=job_name,
             initial_settings=inputs.dict(),
-            steps_list=["ffmpeg", "colmap", "brush", "blueprint_extraction"],
+            steps_list=steps_list,
         )
 
         self.directories: dict[str, str | list[str]] = {}
@@ -67,18 +70,22 @@ class SplatPipeline:
 
             self.run_brush(self.inputs.brush)
 
-            self.extract_blueprint_from_splat(
-                os.path.join(self.directories["workspace"], "splat.ply"),
-                self.inputs.blueprint,
-                output_prefix=os.path.join(self.directories["workspace"], "blueprint"),
-            )
-
-            pipeline_output = {
+            pipeline_output: dict[str, str | list[str]] = {
                 "splat_path": os.path.join(self.directories["workspace"], "splat.ply"),
-                "blueprints": [
-                    os.path.join(self.directories["workspace"], "blueprint_top.png"),
-                ],
+                "blueprints": [],
             }
+
+            if self.inputs.blueprint is not None:
+                self.extract_blueprint_from_splat(
+                    os.path.join(self.directories["workspace"], "splat.ply"),
+                    self.inputs.blueprint,
+                    output_prefix=os.path.join(
+                        self.directories["workspace"], "blueprint"
+                    ),
+                )
+                pipeline_output["blueprints"] = [
+                    os.path.join(self.directories["workspace"], "blueprint_top.png"),
+                ]
 
             self.logger.complete(output=pipeline_output)
 
@@ -284,11 +291,20 @@ class SplatPipeline:
     def extract_blueprint_from_splat(
         self, ply_path: str, cfg: BlueprintConfig, output_prefix: str = "blueprint"
     ):
+        try:
+            import torch
+            from gsplat import rasterization
+            from PIL import Image
+            from plyfile import PlyData
+
+        except ImportError as e:
+            self.logger.step_failed(
+                "blueprint_extraction",
+                "Required libraries for blueprint extraction are missing. Please install the [blueprint] extras.",
+            )
+            return
+
         import numpy as np
-        import torch
-        from gsplat import rasterization
-        from PIL import Image
-        from plyfile import PlyData
 
         DISTANCE_SCALE = 1000.0
 

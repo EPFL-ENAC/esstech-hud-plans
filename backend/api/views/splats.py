@@ -48,7 +48,7 @@ async def generate(
     ffmpeg_config: str = Form(...),
     colmap_config: str = Form(...),
     brush_config: str = Form(...),
-    blueprint_config: str = Form(...),
+    blueprint_config: str = Form(None),
 ) -> PostRunGenerationResponse:
     # 1. Validate file type
     if not file.content_type or not file.content_type.startswith("video/"):
@@ -60,13 +60,20 @@ async def generate(
         ffmpeg_settings = FFMPEGExtractionConfig(**json.loads(ffmpeg_config))
         colmap_settings = ColmapAutoConfig(**json.loads(colmap_config))
         brush_settings = BrushTrainingConfig(**json.loads(brush_config))
-        blueprint_settings = BlueprintConfig(**json.loads(blueprint_config))
+        blueprint_settings = (
+            BlueprintConfig(**json.loads(blueprint_config))
+            if blueprint_config
+            else None
+        )
     except Exception as e:
         raise HTTPException(
             status_code=422, detail=f"Invalid configuration format: {str(e)}"
         )
 
     # 3. Save the file
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="File must have a filename")
+
     if not os.path.exists(upload_dir):
         os.makedirs(upload_dir, exist_ok=True)
 
@@ -187,3 +194,22 @@ async def get_blueprint_geometry(generation_id: str):
         center=colmap_geometry["center"],
         radius=colmap_geometry["radius"],
     )
+
+
+@router.get(
+    "/settings/{generation_id}",
+    status_code=200,
+    description="Retrieves the settings used for a generation run",
+)
+async def get_generation_settings(generation_id: str):
+    """Get the settings used for a generation run."""
+    settings = manager.get_settings(generation_id)
+
+    if settings is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Settings not found for generation {generation_id}. "
+            "The generation may not exist or may not have started yet.",
+        )
+
+    return settings
