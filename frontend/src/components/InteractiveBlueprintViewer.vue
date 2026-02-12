@@ -33,6 +33,7 @@ const initialCameraPosition = ref<THREE.Vector3 | null>(null);
 const initialCameraTarget = ref<THREE.Vector3 | null>(null);
 const isLoading = ref(true);
 const error = ref<string | null>(null);
+const viewerSize = ref(700);
 
 const thresholdEnabled = ref(false);
 
@@ -67,6 +68,18 @@ function resetView(): void {
     }
 }
 
+function exportImage(): void {
+    if (!renderer || !container.value) return;
+
+    const canvas = container.value.querySelector('canvas');
+    if (!canvas) return;
+
+    const link = document.createElement('a');
+    link.download = `blueprint-${props.generationId}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+}
+
 
 onMounted(async () => {
     await fetchBlueprintGeometry();
@@ -94,8 +107,8 @@ onMounted(async () => {
     initialCameraPosition.value = camera.position.clone();
     initialCameraTarget.value = new THREE.Vector3(0, 0, 0);
 
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(700, 700);
+    renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    renderer.setSize(viewerSize.value, viewerSize.value);
     renderer.setClearColor(0xffffff, 1);
     container.value.appendChild(renderer.domElement);
 
@@ -134,6 +147,21 @@ onMounted(async () => {
     isLoading.value = false;
 });
 
+watch(viewerSize, (newSize) => {
+    if (renderer) {
+        renderer.setSize(newSize, newSize);
+    }
+    if (camera && geometryData.value) {
+        const { radius } = geometryData.value;
+        const frustumSize = radius * 4;
+        camera.left = -frustumSize / 2;
+        camera.right = frustumSize / 2;
+        camera.top = frustumSize / 2;
+        camera.bottom = -frustumSize / 2;
+        camera.updateProjectionMatrix();
+    }
+});
+
 watch(clipPlanes, (newValue) => {
     if (camera && geometryData.value) {
         const { radius } = geometryData.value;
@@ -148,17 +176,6 @@ watch(clipPlanes, (newValue) => {
 
 <template>
     <div class="viewer-container">
-        <div ref="container" class="canvas-container" :style="{ filter: canvasFilter }">
-            <div v-if="isLoading" class="loading-overlay">
-                <q-spinner color="primary" size="3em" />
-                <div class="q-mt-sm">Loading interactive blueprint...</div>
-            </div>
-            <div v-if="error" class="error-overlay">
-                <q-icon name="error" color="negative" size="3em" />
-                <div class="q-mt-sm text-negative">{{ error }}</div>
-            </div>
-        </div>
-
         <div class="controls-container q-pa-md">
             <div class="row q-gutter-md items-center">
                 <q-btn
@@ -169,6 +186,20 @@ watch(clipPlanes, (newValue) => {
                 />
 
                 <div class="control-group">
+                    <div class="text-caption text-grey-7">Size</div>
+                    <q-slider
+                        v-model="viewerSize"
+                        :min="300"
+                        :max="1200"
+                        :step="50"
+                        label
+                        :label-value="`${viewerSize}px`"
+                        style="width: 150px"
+                        :disable="isLoading || !!error"
+                    />
+                </div>
+
+                <div class="control-group">
                     <div class="text-caption text-grey-7">Clip Planes</div>
                     <q-slider
                         v-model="clipPlanes"
@@ -177,7 +208,7 @@ watch(clipPlanes, (newValue) => {
                         :step="0.01"
                         label
                         :label-value="clipPlanes.toFixed(1)"
-                        style="width: 200px"
+                        style="width: 150px"
                         :disable="isLoading || !!error"
                     />
                 </div>
@@ -191,7 +222,7 @@ watch(clipPlanes, (newValue) => {
                         :step="0.001"
                         label
                         :label-value="opacityMultiplier.toFixed(2)"
-                        style="width: 200px"
+                        style="width: 150px"
                         :disable="isLoading || !!error"
                     />
                 </div>
@@ -205,6 +236,27 @@ watch(clipPlanes, (newValue) => {
                         :disable="isLoading || !!error"
                     />
                 </div>
+
+                <q-separator vertical class="q-mx-sm" />
+
+                <q-btn
+                    label="Save as Image"
+                    color="positive"
+                    icon="save"
+                    @click="exportImage"
+                    :disable="isLoading || !!error"
+                />
+            </div>
+        </div>
+
+        <div ref="container" class="canvas-container" :style="{ filter: canvasFilter, width: `${viewerSize}px`, height: `${viewerSize}px` }">
+            <div v-if="isLoading" class="loading-overlay">
+                <q-spinner color="primary" size="3em" />
+                <div class="q-mt-sm">Loading interactive blueprint...</div>
+            </div>
+            <div v-if="error" class="error-overlay">
+                <q-icon name="error" color="negative" size="3em" />
+                <div class="q-mt-sm text-negative">{{ error }}</div>
             </div>
         </div>
     </div>
@@ -219,8 +271,6 @@ watch(clipPlanes, (newValue) => {
 }
 
 .canvas-container {
-    width: 700px;
-    height: 700px;
     border: 1px solid #ccc;
     position: relative;
     background: #000;
