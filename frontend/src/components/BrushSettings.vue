@@ -17,9 +17,9 @@ const resetDefaults = () => {
                 <div class="text-h6">Brush Training Settings</div>
                 <div class="text-caption text-grey">Universal Gaussian Splatting Training</div>
             </q-card-section>
-            
+
             <q-separator />
-            
+
             <q-card-section class="q-gutter-y-md">
                 <!-- Training Core -->
                 <div class="text-subtitle2 text-primary">Core Training</div>
@@ -33,7 +33,7 @@ const resetDefaults = () => {
                         />
                     </div>
                     <div class="col-6">
-                        
+
                         <q-select
                             v-model="config.renderMode"
                             :options="renderModeOptions"
@@ -53,7 +53,7 @@ const resetDefaults = () => {
                         </q-select>
                     </div>
                 </div>
-                
+
                 <q-input
                 v-model.number="config.shDegree"
                 :min="0" :max="3" :step="1"
@@ -61,20 +61,32 @@ const resetDefaults = () => {
                 label="SH Degree (Spherical Harmonics)"
                 class="q-mt-lg"
                 />
-                
+
                 <!-- Refinement -->
                 <q-separator />
                 <div class="text-subtitle2 text-primary">Refinement & Density</div>
-                
-                <q-input
-                v-model.number="config.growthGradThreshold"
-                type="number"
-                step="0.001"
-                label="Growth Gradient Threshold"
-                hint="Lower = more aggressive densification"
-                outlined dense
-                />
-                
+
+                <div class="row q-col-gutter-sm">
+                    <div class="col-6">
+                        <q-input
+                        v-model.number="config.maxSplats"
+                        type="number"
+                        label="Max Splats"
+                        outlined dense
+                        />
+                    </div>
+                    <div class="col-6">
+                        <q-input
+                        v-model.number="config.growthGradThreshold"
+                        type="number"
+                        step="0.001"
+                        label="Growth Gradient Threshold"
+                        hint="Lower = more aggressive densification"
+                        outlined dense
+                        />
+                    </div>
+                </div>
+
                 <div class="row q-col-gutter-sm">
                     <div class="col-6">
                         <q-input
@@ -93,10 +105,10 @@ const resetDefaults = () => {
                         />
                     </div>
                 </div>
-                
+
                 <q-separator />
                 <div class="text-subtitle2 text-primary">Dataset & Performance</div>
-                
+
                 <q-select
                     v-model="config.alphaMode"
                     :options="alphaModeOptions"
@@ -114,7 +126,7 @@ const resetDefaults = () => {
                         </q-item>
                     </template>
                 </q-select>
-                
+
                 <div class="row q-col-gutter-sm">
                     <div class="col-6">
                         <q-input
@@ -134,9 +146,9 @@ const resetDefaults = () => {
                     </div>
                 </div>
             </q-card-section>
-            
+
             <q-separator />
-            
+
             <q-btn flat label="Reset Defaults" color="grey" @click="resetDefaults" />
         </q-card>
     </div>

@@ -149,6 +149,8 @@ class SplatPipeline:
         if isinstance(cfg, ColmapAutoConfig):
             args.extend(
                 [
+                    "--data_type",
+                    cfg.data_type,
                     "--quality",
                     cfg.quality,
                     "--single_camera",
@@ -234,6 +236,8 @@ class SplatPipeline:
             cfg.renderMode,
             "--sh-degree",
             str(cfg.shDegree),
+            "--max-splats",
+            str(cfg.maxSplats),
             "--refine-every",
             str(cfg.refineEvery),
             "--growth-grad-threshold",

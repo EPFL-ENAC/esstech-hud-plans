@@ -4,18 +4,20 @@ from pydantic import BaseModel
 
 
 class FFMPEGExtractionConfig(BaseModel):
-    fps: int
+    fps: float
     fitInWidth: int
     fitInHeight: int
 
 
-CameraModel = Literal["PINHOLE", "OPENCV", "OPENCV_FISHEYE", "RADIAL"]
-COLMAPQuality = Literal["low", "medium", "high", "extreme"]
+ColmapDataType = Literal["individual", "video", "internet"]
+ColmapQuality = Literal["low", "medium", "high", "extreme"]
+ColmapCameraModel = Literal["PINHOLE", "OPENCV", "OPENCV_FISHEYE", "RADIAL"]
 
 
 class ColmapAutoConfig(BaseModel):
-    quality: str
-    camera_model: str
+    data_type: ColmapDataType
+    quality: ColmapQuality
+    camera_model: ColmapCameraModel
     max_image_size: int
     single_camera: bool
     dense: bool
@@ -23,7 +25,7 @@ class ColmapAutoConfig(BaseModel):
 
 class ColmapManualConfig(BaseModel):
     mode: Literal["manual"]
-    camera_model: CameraModel
+    camera_model: ColmapCameraModel
     max_num_features: int
     overlap: int
     loop_closure: bool
@@ -35,6 +37,7 @@ class BrushTrainingConfig(BaseModel):
     totalSteps: int
     renderMode: str
     shDegree: int
+    maxSplats: int
     growthGradThreshold: float
     refineEvery: int
     growthStopIter: int

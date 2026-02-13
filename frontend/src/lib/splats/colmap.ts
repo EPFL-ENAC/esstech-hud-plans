@@ -1,16 +1,18 @@
-export type CameraModel = "PINHOLE" | "OPENCV" | "OPENCV_FISHEYE" | "RADIAL";
-export type COLMAPQuality = "low" | "medium" | "high" | "extreme";
+export type ColmapDataType = "individual" | "video" | "internet";
+export type ColmapQuality = "low" | "medium" | "high" | "extreme";
+export type ColmapCameraModel = "PINHOLE" | "OPENCV" | "OPENCV_FISHEYE" | "RADIAL";
 
 export interface AutoReconstructorConfig {
-    quality: COLMAPQuality;
-    camera_model: CameraModel;
+    data_type: ColmapDataType;
+    quality: ColmapQuality;
+    camera_model: ColmapCameraModel;
     max_image_size: number;
     single_camera: boolean;
     dense: boolean;
 }
 
 export interface ManualPipelineConfig {
-    camera_model: CameraModel;
+    camera_model: ColmapCameraModel;
     max_num_features: number;
     overlap: number;
     loop_closure: boolean;
@@ -25,6 +27,12 @@ export type ColmapSubmitPayload =
 
 // Union for the v-model
 export type ColmapConfig = AutoReconstructorConfig | ManualPipelineConfig;
+
+export const dataTypes = [
+    { value: 'individual', label: 'Individual Images', desc: 'Collection of separate photos.' },
+    { value: 'video', label: 'Video', desc: 'Frames coming from a single video source.' },
+    { value: 'internet', label: 'Internet Images', desc: 'Images sourced from online platforms.' }
+];
 
 export const qualityOptions = [
     { value: 'low', label: 'Low', desc: 'Fastest processing, minimal feature points.' },
@@ -42,6 +50,7 @@ export const cameraModels = [
 
 export function makeAutoDefaults(): AutoReconstructorConfig {
     return {
+        data_type: "individual",
         quality: "medium",
         camera_model: "OPENCV",
         max_image_size: 2000,
