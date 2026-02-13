@@ -52,7 +52,7 @@ class SplatPipeline:
             steps_list=steps_list,
         )
 
-        self.directories: dict[str, str | list[str]] = {}
+        self.directories: dict[str, str] = {}
 
     def run(self):
         self.prepare_dirs(os.path.join(output_prefix, self.job_name))
@@ -70,7 +70,7 @@ class SplatPipeline:
 
             self.run_brush(self.inputs.brush)
 
-            pipeline_output: dict[str, str | list[str]] = {
+            pipeline_output: dict[str, str | list[str] | list] = {
                 "splat_path": os.path.join(self.directories["workspace"], "splat.ply"),
                 "blueprints": [],
             }
@@ -115,7 +115,7 @@ class SplatPipeline:
     def run_ffmpeg(
         self, input_file: str, output_directory: str, cfg: FFMPEGExtractionConfig
     ):
-        cmd = [
+        cmd: list[str] = [
             ffmpeg_command,
             "-i",
             input_file,
@@ -124,9 +124,7 @@ class SplatPipeline:
             f"{output_directory}/frame_%04d.png",
         ]
 
-        self.logger.start_step(
-            "ffmpeg", settings=cfg.dict(), command=" ".join(cmd) if IS_DOCKER else cmd
-        )
+        self.logger.start_step("ffmpeg", settings=cfg.model_dump(), command=cmd)
 
         return self._run_command(
             cmd, step_name="ffmpeg", estimate_progress_callback=estimate_ffmpeg_progress
@@ -161,18 +159,18 @@ class SplatPipeline:
 
         if IS_DOCKER:
             # Use shell=True for xvfb-run in Docker
-            cmd = f"{colmap_command} {' '.join(args)}"
-            self.logger.start_step("colmap", settings=cfg.dict(), command=cmd)
+            cmd_str: str = f"{colmap_command} {' '.join(args)}"
+            self.logger.start_step("colmap", settings=cfg.model_dump(), command=cmd_str)
             self._run_command(
-                cmd,
+                cmd_str,
                 shell=True,
                 step_name="colmap",
                 estimate_progress_callback=estimate_colmap_progress,
             )
 
         else:
-            cmd = [colmap_path] + args
-            self.logger.start_step("colmap", settings=cfg.dict(), command=" ".join(cmd))
+            cmd: list[str] = [colmap_path] + args
+            self.logger.start_step("colmap", settings=cfg.model_dump(), command=cmd)
             self._run_command(
                 cmd,
                 step_name="colmap",
@@ -252,15 +250,23 @@ class SplatPipeline:
             cfg.alphaMode,
         ]
 
-        command = " ".join(args) if IS_DOCKER else args
-        self.logger.start_step("brush", settings=cfg.dict(), command=command)
-
-        return self._run_command(
-            command,
-            shell=IS_DOCKER,
-            step_name="brush",
-            estimate_progress_callback=estimate_training_progress,
-        )
+        if IS_DOCKER:
+            command: str = " ".join(args)
+            self.logger.start_step("brush", settings=cfg.model_dump(), command=command)
+            return self._run_command(
+                command,
+                shell=True,
+                step_name="brush",
+                estimate_progress_callback=estimate_training_progress,
+            )
+        else:
+            self.logger.start_step("brush", settings=cfg.model_dump(), command=args)
+            return self._run_command(
+                args,
+                shell=False,
+                step_name="brush",
+                estimate_progress_callback=estimate_training_progress,
+            )
 
     def compute_blueprint_view_matrix(
         self, colmap_geometry: dict, distance_scale: float = 1000.0
@@ -429,10 +435,12 @@ class SplatPipeline:
         os.close(slave)
 
         def log_and_estimate_progress(line: str):
+            if step_name is None:
+                return
             self.logger.add_log(
                 step_name, line, cleanup_for_file=_extract_meaningful_log
             )
-            if estimate_progress_callback is not None and step_name is not None:
+            if estimate_progress_callback is not None:
                 self.logger.update_step_progress(
                     step_name,
                     estimate_progress_callback(

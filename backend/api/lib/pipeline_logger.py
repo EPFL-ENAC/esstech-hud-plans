@@ -2,7 +2,7 @@ import json
 import os
 import re
 from datetime import datetime
-from typing import Callable
+from typing import Any, Callable
 
 MAX_HEADING_LEVEL = 3
 
@@ -10,7 +10,7 @@ MAX_HEADING_LEVEL = 3
 class PipelineLogger:
     def __init__(self, name: str, initial_settings: dict, steps_list: list[str]):
         self.file_path: str | None = None
-        self.data = {
+        self.data: dict[str, Any] = {
             "overall_status": "running",
             "name": name,
             "settings": initial_settings,
@@ -64,7 +64,10 @@ class PipelineLogger:
         self.save()
 
     def start_step(
-        self, step: str, settings: dict = None, command: str | list[str] = None
+        self,
+        step: str,
+        settings: dict | None = None,
+        command: str | list[str] | None = None,
     ):
         self.data["steps"][step] = {
             "status": "running",
@@ -105,12 +108,14 @@ class PipelineLogger:
         heading_level: int = 0,
         cleanup_for_file: Callable[[str], str | None] | None = None,
     ):
-        cleaned_line: str | None = _strip_ansi(line)
+        cleaned_line = _strip_ansi(line)
         if cleanup_for_file:
-            cleaned_line = cleanup_for_file(cleaned_line)
+            cleaned_line_or_none: str | None = cleanup_for_file(cleaned_line)
+        else:
+            cleaned_line_or_none = cleaned_line
 
-        if cleaned_line is not None:
-            self.data["steps"][step]["logs"].append(cleaned_line)
+        if cleaned_line_or_none is not None:
+            self.data["steps"][step]["logs"].append(cleaned_line_or_none)
 
         extra_lines = (
             max(0, MAX_HEADING_LEVEL - heading_level) if heading_level > 0 else 0
