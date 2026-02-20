@@ -189,10 +189,15 @@ class SplatPipeline:
         positions = []
         up_vectors = []
 
-        for image in reconstruction.images.values():
+        sorted_image_ids = sorted(reconstruction.images.keys())
+
+        for image_id in sorted_image_ids:
+            image = reconstruction.images[image_id]
             pose = image.cam_from_world()
+
             translation = pose.translation
             rotation = pose.rotation.matrix()
+
             positions.append(-rotation.T @ translation)
             up_vectors.append(-rotation.T @ np.array([0, 1, 0]))
 
@@ -217,6 +222,7 @@ class SplatPipeline:
                 "center": center.tolist(),
                 "world_rotation": world_rotation.tolist(),
                 "radius": radius,
+                "positions": positions.tolist(),
             }
         )
 

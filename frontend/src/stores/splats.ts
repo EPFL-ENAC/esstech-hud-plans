@@ -68,9 +68,8 @@ export const useSplatStore = defineStore('splat', () => {
                             fetch(`http://localhost:8000/splats/status/${generationId}`),
                         );
                         if (fetched.ok) {
-                            const statusData: SplatPipelineStatus = yield* AsyncResult.fromValuePromise(
-                                fetched.json(),
-                            );
+                            const statusData: SplatPipelineStatus =
+                                yield* AsyncResult.fromValuePromise(fetched.json());
                             const knownStatuses = ['running', 'completed', 'failed'];
                             if (knownStatuses.includes(statusData.overall_status)) {
                                 notifyProgress(statusData);

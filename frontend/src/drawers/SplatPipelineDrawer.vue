@@ -16,32 +16,32 @@ const StatusLoader = makeAsyncResultLoader<SplatPipelineStatus, ErrorBase, Splat
 </script>
 
 <template>
-  <div class="fit">
-    <div class="q-pa-md">
-      <h2>Pipeline status</h2>
-      <div class="text-subtitle1">Job #{{ generationId }}</div>
+    <div class="fit">
+        <div class="q-pa-md">
+            <h2>Pipeline status</h2>
+            <div class="text-subtitle1">Job #{{ generationId }}</div>
+        </div>
+        <div class="q-my-md">
+            <StatusLoader :result="status">
+                <template v-slot="{ value }">
+                    <splat-pipeline-progress :value="value" />
+                </template>
+                <template v-slot:loading="{ progress }">
+                    <splat-pipeline-progress v-if="progress" :value="progress" />
+                    <h3 v-else>Pending...</h3>
+                </template>
+                <template v-slot:error="{ error }">
+                    <h3>Error while getting status !</h3>
+                    <pre>{{ JSON.stringify(error, undefined, 4) }}</pre>
+                </template>
+            </StatusLoader>
+        </div>
     </div>
-    <div class="q-my-md">
-      <StatusLoader :result="status">
-        <template v-slot="{ value }">
-          <splat-pipeline-progress :value="value" />
-        </template>
-        <template v-slot:loading="{ progress }">
-          <splat-pipeline-progress v-if="progress" :value="progress" />
-          <h3 v-else>Pending...</h3>
-        </template>
-        <template v-slot:error="{ error }">
-          <h3>Error while getting status !</h3>
-          <pre>{{ JSON.stringify(error, undefined, 4) }}</pre>
-        </template>
-      </StatusLoader>
-    </div>
-  </div>
 </template>
 
 <style scoped>
 h2 {
-  font-size: 3rem;
-  margin: 0 0 0.5rem 0;
+    font-size: 3rem;
+    margin: 0 0 0.5rem 0;
 }
 </style>

@@ -56,7 +56,11 @@ onMounted(async () => {
                 <splat-renderer :splat-data="value" />
 
                 <h3>Interactive Blueprint</h3>
-                <interactive-blueprint-viewer :splat-data="value" :generation-id="generationId" class="q-mb-lg" />
+                <interactive-blueprint-viewer
+                    :splat-data="value"
+                    :generation-id="generationId"
+                    class="q-mb-lg"
+                />
 
                 <template v-if="settings?.blueprint">
                     <h3>Blueprints</h3>
@@ -77,7 +81,10 @@ onMounted(async () => {
                     <q-circular-progress indeterminate size="xl" />
                     <div v-if="progress">
                         {{ ((pipelineStatus = progress), '') }}
-                        <div v-for="stepEntry in Object.entries(progress.steps)" :key="stepEntry[0]">
+                        <div
+                            v-for="stepEntry in Object.entries(progress.steps)"
+                            :key="stepEntry[0]"
+                        >
                             <strong>{{ stepEntry[0].toUpperCase() }}:</strong>
                             <span>{{ stepEntry[1].status }} - {{ stepEntry[1].progress }}%</span>
                         </div>

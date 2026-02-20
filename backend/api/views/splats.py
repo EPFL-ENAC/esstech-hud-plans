@@ -170,6 +170,7 @@ class BlueprintGeometryResponse(BaseModel):
     world_rotation: list[list[float]]
     center: list[float]
     radius: float
+    positions: list[list[float]]
 
 
 @router.get(
@@ -193,6 +194,7 @@ async def get_blueprint_geometry(generation_id: str):
         world_rotation=colmap_geometry["world_rotation"],
         center=colmap_geometry["center"],
         radius=colmap_geometry["radius"],
+        positions=colmap_geometry["positions"],
     )
 
 

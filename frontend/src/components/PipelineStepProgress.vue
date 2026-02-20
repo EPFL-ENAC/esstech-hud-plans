@@ -110,9 +110,19 @@ const wrapLogs = ref(false);
             <!-- Status and Progress Section -->
             <div class="row items-center q-col-gutter-md">
                 <div class="col-grow">
-                    <q-linear-progress :value="step.progress" :color="statusColor" size="20px" stripe rounded>
+                    <q-linear-progress
+                        :value="step.progress"
+                        :color="statusColor"
+                        size="20px"
+                        stripe
+                        rounded
+                    >
                         <div class="absolute-full flex flex-center">
-                            <q-badge color="white" text-color="black" :label="`${(step.progress * 100).toFixed(2)}%`" />
+                            <q-badge
+                                color="white"
+                                text-color="black"
+                                :label="`${(step.progress * 100).toFixed(2)}%`"
+                            />
                         </div>
                     </q-linear-progress>
                 </div>
@@ -151,7 +161,13 @@ const wrapLogs = ref(false);
                 <div class="row items-center justify-between q-mb-xs">
                     <div class="text-subtitle2">Logs:</div>
                     <div class="row items-center q-gutter-x-sm">
-                        <q-toggle v-model="wrapLogs" label="Line wrap" size="xs" dense class="text-caption" />
+                        <q-toggle
+                            v-model="wrapLogs"
+                            label="Line wrap"
+                            size="xs"
+                            dense
+                            class="text-caption"
+                        />
                         <q-btn
                             icon="content_copy"
                             label="Copy Logs"
@@ -163,10 +179,14 @@ const wrapLogs = ref(false);
                         />
                     </div>
                 </div>
-                <div ref="logsContainer" :class="[
-                    'logs-container bg-black text-white q-pa-sm rounded-borders',
-                    { 'scroll-x': !wrapLogs },
-                ]" :style="`--line-number-width: ${`${props.step.logs.length}`.length + 1}ch`">
+                <div
+                    ref="logsContainer"
+                    :class="[
+                        'logs-container bg-black text-white q-pa-sm rounded-borders',
+                        { 'scroll-x': !wrapLogs },
+                    ]"
+                    :style="`--line-number-width: ${`${props.step.logs.length}`.length + 1}ch`"
+                >
                     <div v-for="(line, index) in step.logs" :key="index" class="log-line">
                         <span class="line-number">{{ index + 1 }}</span>
                         <span>{{ line }}</span>

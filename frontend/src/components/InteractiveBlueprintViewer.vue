@@ -3,14 +3,12 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SplatMesh } from '@sparkjsdev/spark';
 import { computed, onMounted, ref, useTemplateRef, watch } from 'vue';
+import { useAsyncResultCollection } from 'unwrapped/vue';
+import { AsyncResult } from 'unwrapped/core';
+import { BlueprintGeometry, fetchBlueprintGeometryJSON } from 'src/lib/maths/blueprintGeometry';
+import { autoDetectFloorOffset, type BlueprintSplatProcessingParams, generateBlueprintMesh } from 'src/lib/maths/blueprintMesh';
 
 const CAMERA_DISTANCE_FACTOR = 3.0;
-
-interface BlueprintGeometry {
-    world_rotation: number[][];
-    center: number[];
-    radius: number;
-}
 
 const props = defineProps<{
     splatData: ArrayBuffer;
@@ -19,25 +17,37 @@ const props = defineProps<{
 
 const container = useTemplateRef<HTMLDivElement>('container');
 let controls: OrbitControls | null = null;
-let mesh: SplatMesh | null = null;
 let camera: THREE.OrthographicCamera | null = null;
 let scene: THREE.Scene | null = null;
 let renderer: THREE.WebGLRenderer | null = null;
+const group = new THREE.Group();
+let mesh: SplatMesh | null = null;
+let floorPlaneMesh: THREE.Mesh | null = null;
+let cameraPositionsPointsMesh: THREE.Points | null = null;
 
+const scaleBarWidthPx = ref(0);
+const sceneZRotation = ref(0);
+const displayCameraPositions = ref(true);
+const displayFloor = ref(true);
 
+const floorZOffset = ref(0);
+const averageCameraOffsetUnit = ref(1);
+const averageCameraHeightUnit = computed(() => averageCameraOffsetUnit.value - floorZOffset.value);
+const cameramanHeightCm = ref(180);
+const cameraHeightCm = computed(() => cameramanHeightCm.value * 0.9); // Assume camera is at 90% of cameraman height
+const cmPerUnit = computed(() => cameraHeightCm.value / averageCameraHeightUnit.value);
+
+const sectionZStart = ref(0);
+const sectionZEnd = ref(10);
 const densityThreshold = ref(0.01);
 const opacityThreshold = ref(0);
 const opacityMultiplier = ref(0.2);
 const opacityPower = ref(4.0);
 const opacityGain = ref(100.0);
 
-const clipNear = ref(0.5);
-const clipFar = ref(2.0);
-const geometryData = ref<BlueprintGeometry | null>(null);
+let geometryData: BlueprintGeometry | null = null;
 const initialCameraPosition = ref<THREE.Vector3 | null>(null);
 const initialCameraTarget = ref<THREE.Vector3 | null>(null);
-const isLoading = ref(true);
-const error = ref<string | null>(null);
 const viewerSize = ref(700);
 
 const thresholdEnabled = ref(false);
@@ -50,21 +60,6 @@ const canvasFilter = computed(() => {
     const contrast = 10000;
     return `contrast(${contrast}%) brightness(${brightness}%)`;
 });
-
-async function fetchBlueprintGeometry(): Promise<void> {
-    try {
-        const response = await fetch(
-            `http://localhost:8000/splats/blueprint-geometry/${props.generationId}`,
-        );
-        if (!response.ok) {
-            throw new Error(`Failed to fetch blueprint geometry: ${response.statusText}`);
-        }
-        geometryData.value = await response.json();
-    } catch (e) {
-        error.value = e instanceof Error ? e.message : 'Unknown error';
-        isLoading.value = false;
-    }
-}
 
 function resetView(): void {
     if (controls && initialCameraPosition.value && initialCameraTarget.value) {
@@ -86,81 +81,89 @@ function exportImage(): void {
     link.click();
 }
 
-const rotationMatrix = new THREE.Matrix4();
-const center = new THREE.Vector3();
+const collection = useAsyncResultCollection();
 
-onMounted(async () => {
-    await fetchBlueprintGeometry();
-
-    if (!geometryData.value || !container.value) {
-        return;
-    }
-
-    const { world_rotation, center: centerCoords, radius } = geometryData.value;
-    rotationMatrix.set(
-        world_rotation[0]![0]!,
-        world_rotation[1]![0]!,
-        world_rotation[2]![0]!,
-        0,
-        world_rotation[0]![1]!,
-        world_rotation[1]![1]!,
-        world_rotation[2]![1]!,
-        0,
-        world_rotation[0]![2]!,
-        world_rotation[1]![2]!,
-        world_rotation[2]![2]!,
-        0,
-        0,
-        0,
-        0,
-        1,
-    );
-    center.set(centerCoords[0]!, centerCoords[1]!, centerCoords[2]!);
-
-    scene = new THREE.Scene();
-
-    const frustumSize = radius * 4;
-    camera = new THREE.OrthographicCamera(
-        -frustumSize / 2,
-        frustumSize / 2,
-        frustumSize / 2,
-        -frustumSize / 2,
-        0.1,
-        radius * 10,
-    );
-    camera.position.set(0, 0, radius * CAMERA_DISTANCE_FACTOR);
-    camera.lookAt(0, 0, 0);
-
-    initialCameraPosition.value = camera.position.clone();
-    initialCameraTarget.value = new THREE.Vector3(0, 0, 0);
-
-    renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-    renderer.setSize(viewerSize.value, viewerSize.value);
-    renderer.setClearColor(0xffffff, 1);
-    container.value.appendChild(renderer.domElement);
-
-    controls = new OrbitControls(camera, renderer.domElement);
-    controls.target.copy(initialCameraTarget.value);
-    controls.enableRotate = true;
-    controls.update();
-
-    renderer.setAnimationLoop(() => {
-        controls?.update();
-
-        if (renderer && scene && camera) {
-            renderer.render(scene, camera);
+onMounted(() => {
+    collection.value.add('setup', AsyncResult.run(function* () {
+        if (!container.value) {
+            return;
         }
-    });
 
-    isLoading.value = false;
+        const geometryJSON = yield* fetchBlueprintGeometryJSON(props.generationId);
+        geometryData = new BlueprintGeometry(geometryJSON);
+
+        scene = new THREE.Scene();
+        scene.add(group);
+
+        const frustumSize = geometryData.radius * 4;
+        camera = new THREE.OrthographicCamera(
+            -frustumSize / 2,
+            frustumSize / 2,
+            frustumSize / 2,
+            -frustumSize / 2,
+            0.1,
+            geometryData.radius * 10,
+        );
+        camera.position.set(0, 0, geometryData.radius * CAMERA_DISTANCE_FACTOR);
+        camera.lookAt(0, 0, 0);
+
+        floorPlaneMesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(geometryData.radius * 10, geometryData.radius * 10),
+            new THREE.MeshBasicMaterial({
+                color: 0xeeeeee,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.9,
+            }),
+        );
+        group.add(floorPlaneMesh);
+        
+        averageCameraOffsetUnit.value = geometryData.averageCameraZ;
+        const cameraPositionsGeometry = new THREE.BufferGeometry().setFromPoints(geometryData.cameraPositions);
+        const cameraPositionsMaterial = new THREE.PointsMaterial({ color: 0xff0000, size: 3 });
+        cameraPositionsPointsMesh = new THREE.Points(cameraPositionsGeometry, cameraPositionsMaterial);
+        cameraPositionsPointsMesh.setRotationFromMatrix(geometryData.worldRotationMatrix);
+        group.add(cameraPositionsPointsMesh);
+        sectionZStart.value = averageCameraOffsetUnit.value - 0.5;
+        sectionZEnd.value = averageCameraOffsetUnit.value + 0.5;
+
+        initialCameraPosition.value = camera.position.clone();
+        initialCameraTarget.value = new THREE.Vector3(0, 0, 0);
+
+        renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+        renderer.setSize(viewerSize.value, viewerSize.value);
+        renderer.setClearColor(0xffffff, 1);
+        container.value.appendChild(renderer.domElement);
+
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.copy(initialCameraTarget.value);
+        controls.enableRotate = true;
+        controls.update();
+        controls.addEventListener('change', updateScaleOverlay);
+        updateScaleOverlay();
+
+        yield* generateBlueprint((mesh) => {
+            if (!geometryData) return;
+
+            floorZOffset.value = autoDetectFloorOffset(mesh, geometryData) ?? 0;
+        });
+
+        renderer.setAnimationLoop(() => {
+            controls?.update();
+
+            if (renderer && scene && camera) {
+                renderer.render(scene, camera);
+            }
+        });
+    }));
 });
 
 watch(viewerSize, (newSize) => {
     if (renderer) {
         renderer.setSize(newSize, newSize);
     }
-    if (camera && geometryData.value) {
-        const { radius } = geometryData.value;
+    if (camera && geometryData) {
+        const radius = geometryData.radius;
         const frustumSize = radius * 4;
         camera.left = -frustumSize / 2;
         camera.right = frustumSize / 2;
@@ -168,213 +171,457 @@ watch(viewerSize, (newSize) => {
         camera.bottom = -frustumSize / 2;
         camera.updateProjectionMatrix();
     }
+    updateScaleOverlay();
 });
 
-watch([clipNear, clipFar], ([newNear, newFar]) => {
-    if (!camera || !geometryData.value) return;
+watch(
+    [opacityMultiplier, opacityPower, opacityGain, opacityThreshold, densityThreshold, sectionZStart, sectionZEnd],
+    () => collection.value.add(`generation-${Date.now()}`, generateBlueprint()),
+);
 
-    const { radius } = geometryData.value;
-    const centerDistance = radius * CAMERA_DISTANCE_FACTOR;
+function generateBlueprint(onFinishedLoading?: (mesh: SplatMesh) => void): AsyncResult<SplatMesh> {
+    return AsyncResult.run(function* () {
+        if (mesh) {
+            group.remove(mesh);
+        }
 
-    // Near plane: distance minus offset 
-    // (Smaller slider value = further from camera = tighter clip)
-    camera.near = Math.max(0.1, centerDistance - (radius * newNear));
+        const params: BlueprintSplatProcessingParams = {
+            opacityMultiplier: opacityMultiplier.value,
+            opacityPower: opacityPower.value,
+            opacityGain: opacityGain.value,
+            opacityThreshold: opacityThreshold.value,
+            densityThreshold: densityThreshold.value,
+            sectionZStart: sectionZStart.value,
+            sectionZEnd: sectionZEnd.value,
+        };
 
-    // Far plane: distance plus offset
-    camera.far = centerDistance + (radius * newFar);
+        mesh = yield* AsyncResult.fromValuePromise(generateBlueprintMesh(props.splatData, params, onFinishedLoading));
 
-    camera.updateProjectionMatrix();
-});
+        mesh.setRotationFromMatrix(geometryData!.worldRotationMatrix);
+        mesh.position.set(-geometryData!.center.x, -geometryData!.center.y, -geometryData!.center.z);
 
-watch([opacityMultiplier, opacityPower, opacityGain, opacityThreshold, densityThreshold], ([newMultiplier, newPower, newGain, newThreshold, newDensityThreshold]) => {
-    if (mesh) {
-        scene?.remove(mesh);
-    }
+        group.add(mesh);
 
-    const black = new THREE.Color(0x000000);
-    const clonedBuffer = props.splatData.slice(0);
-    let maxDensity = 0;
-    let minDensity = Infinity;
-    mesh = new SplatMesh({
-        fileBytes: clonedBuffer,
-        onLoad(mesh) {
-            mesh.packedSplats.forEachSplat((index, center, scales, quaternion, opacity) => {
-                const volume = scales.x * scales.y * scales.z;
-                const opacityPower = Math.pow(opacity, 10);
-                const density = volume > 0 ? opacityPower / volume : 0;
-                maxDensity = Math.max(maxDensity, density);
-                minDensity = Math.min(minDensity, density);
-
-                let newOpacity = 0;
-                if (opacity >= newThreshold && density >= newDensityThreshold) {
-                    newOpacity = Math.pow(opacity * newMultiplier, newPower) * newGain;
-                }
-                mesh.packedSplats.setSplat(index, center, scales, quaternion, newOpacity, black);
-            });
-            console.log(`Density range: ${minDensity} - ${maxDensity}`);
-        },
+        return mesh;
     });
+}
 
-    // mesh.recolor = new THREE.Color(0x000000);
-    mesh.setRotationFromMatrix(rotationMatrix);
-    mesh.position.set(-center.x, -center.y, -center.z);
+watch(floorZOffset, (newOffset) => {
+    if (floorPlaneMesh) {
+        floorPlaneMesh.position.z = newOffset;
+    }
+});
 
-    scene?.add(mesh);
-}, { immediate: true });
+watch(displayFloor, (show) => {
+    if (floorPlaneMesh) {
+        floorPlaneMesh.visible = show;
+    }
+});
+
+watch(cmPerUnit, () => {
+    updateScaleOverlay();
+});
+
+function updateScaleOverlay(): void {
+    if (!renderer || !camera || !container.value) return;
+    // CSS pixel width of the canvas in the layout
+    const canvas = renderer.domElement;
+    const canvasWidthPx = canvas.clientWidth || viewerSize.value;
+
+    // 1 meter in "scene units"
+    const unitsPerMeter = 100 / cmPerUnit.value;
+
+    // Ortho visible width in world units depends on zoom
+    const visibleWorldWidthUnits = (camera.right - camera.left) / camera.zoom;
+    const pxPerUnit = canvasWidthPx / visibleWorldWidthUnits;
+
+    scaleBarWidthPx.value = unitsPerMeter * pxPerUnit;
+}
+
+watch(displayCameraPositions, (show) => {
+    if (cameraPositionsPointsMesh) {
+        cameraPositionsPointsMesh.visible = show;
+    }
+});
+
+watch(sceneZRotation, (tilt) => {
+    group.rotateZ(THREE.MathUtils.degToRad(tilt) - group.rotation.z);
+});
 </script>
 
 <template>
-    <div class="viewer-container">
-        <div class="controls-container q-pa-md">
-            <div class="row q-gutter-md items-center">
-                <q-btn label="Reset View" color="primary" @click="resetView" :disable="isLoading || !!error" />
+    <div class="viewer-container q-pa-md">
+        <!-- Main Control Toolbar -->
+        <q-card class="toolbar-card q-mb-lg shadow-2">
+            <q-card-section class="q-py-md">
+                <div class="toolbar-grid">
+                    <!-- Section 1: Viewer Settings -->
+                    <div class="section-viewer q-px-md">
+                        <div class="text-overline text-primary q-mb-sm">Viewer Settings</div>
+                        <div class="column q-gutter-sm">
+                            <q-btn
+                                label="Reset View"
+                                color="primary"
+                                icon="refresh"
+                                unelevated
+                                dense
+                                @click="resetView"
+                                :disable="collection.anyLoading()"
+                            />
+                            <div>
+                                <div class="text-caption text-grey-7">Size: {{ viewerSize }}px</div>
+                                <q-slider
+                                    v-model="viewerSize"
+                                    :min="300"
+                                    :max="1200"
+                                    :step="50"
+                                    dense
+                                />
+                            </div>
+                            <div>
+                                <div class="text-caption text-grey-7">Blueprint tilt: {{ sceneZRotation }}°</div>
+                                <q-slider
+                                    v-model="sceneZRotation"
+                                    :min="-90"
+                                    :max="90"
+                                    :step="1"
+                                    dense
+                                />
+                            </div>
+                            <div>
+                                <q-toggle
+                                    v-model="displayCameraPositions"
+                                    label="Show Camera Positions"
+                                    color="primary"
+                                    dense
+                                    :disable="collection.anyLoading()"
+                                />
+                            </div>
+                            <div>
+                                <q-toggle
+                                    v-model="displayFloor"
+                                    label="Show Floor"
+                                    color="primary"
+                                    dense
+                                    :disable="collection.anyLoading()"
+                                />
+                            </div>
+                            <q-btn
+                                label="Save Image"
+                                color="positive"
+                                icon="save"
+                                outline
+                                dense
+                                @click="exportImage"
+                                :disable="collection.anyLoading()"
+                            />
+                        </div>
+                    </div>
 
-                <div class="control-group">
-                    <div class="text-caption text-grey-7">Size</div>
-                    <q-slider v-model="viewerSize" :min="300" :max="1200" :step="50" label
-                        :label-value="`${viewerSize}px`" style="width: 150px" :disable="isLoading || !!error" />
-                </div>
+                    <q-separator vertical inset />
 
-                <div class="control-group">
-                    <div class="text-caption text-grey-7">Clip Near</div>
-                    <q-slider v-model="clipNear" :min="0.01" :max="2.0" :step="0.01" label
-                        :label-value="clipNear.toFixed(1)" style="width: 150px" :disable="isLoading || !!error" />
-                </div>
-                <div class="control-group">
-                    <div class="text-caption text-grey-7">Clip Far</div>
-                    <q-slider v-model="clipFar" :min="0.01" :max="2.0" :step="0.01" label
-                        :label-value="clipFar.toFixed(1)" style="width: 150px" :disable="isLoading || !!error" />
-                </div>
+                    <!-- Section 2: Floor Height & Scale -->
+                    <div class="section-floor q-px-md">
+                        <div class="text-overline text-primary q-mb-sm">Floor Height & Scale</div>
+                        <div class="row q-col-gutter-sm">
+                            <div class="col-6">
+                                <div class="text-caption text-grey-7">Cameraman height (cm)</div>
+                                <q-slider
+                                    v-model="cameramanHeightCm"
+                                    :min="100"
+                                    :max="200"
+                                    dense
+                                    label
+                                    :label-value="cameramanHeightCm.toFixed(2)"
+                                    :disable="collection.anyLoading()"
+                                />
+                            </div>
+                            <div class="col-6">
+                                <div class="text-caption text-grey-7">Floor Offset</div>
+                                <q-slider
+                                    v-model="floorZOffset"
+                                    :min="-10"
+                                    :max="10"
+                                    :step="0.1"
+                                    dense
+                                    label
+                                    :label-value="floorZOffset.toFixed(2)"
+                                    :disable="collection.anyLoading()"
+                                />
+                            </div>
+                        </div>
 
-                <div class="control-group">
-                    <div class="text-caption text-grey-7">Density Threshold</div>
-                    <q-slider
-                        v-model="densityThreshold"
-                        :min="0.001"
-                        :max="100.0"
-                        :step="0.001"
-                        label
-                        :label-value="densityThreshold.toFixed(2)"
-                        style="width: 150px"
-                        :disable="isLoading || !!error"
-                    />
-                </div>
-                <div class="control-group">
-                    <div class="text-caption text-grey-7">Opacity Threshold</div>
-                    <q-slider
-                        v-model="opacityThreshold"
-                        :min="0.001"
-                        :max="1.0"
-                        :step="0.001"
-                        label
-                        :label-value="opacityThreshold.toFixed(2)"
-                        style="width: 150px"
-                        :disable="isLoading || !!error"
-                    />
-                </div>
-                <div class="control-group">
-                    <div class="text-caption text-grey-7">Opacity</div>
-                    <q-slider
-                        v-model="opacityMultiplier"
-                        :min="0.001"
-                        :max="1.0"
-                        :step="0.001"
-                        label
-                        :label-value="opacityMultiplier.toFixed(2)"
-                        style="width: 150px"
-                        :disable="isLoading || !!error"
-                    />
-                </div>
-                <div class="control-group">
-                    <div class="text-caption text-grey-7">Opacity Power</div>
-                    <q-slider
-                        v-model="opacityPower"
-                        :min="0.1"
-                        :max="10.0"
-                        :step="0.1"
-                        label
-                        :label-value="opacityPower.toFixed(1)"
-                        style="width: 150px"
-                        :disable="isLoading || !!error"
-                    />
-                </div>
-                <div class="control-group">
-                    <div class="text-caption text-grey-7">Opacity Gain</div>
-                    <q-slider
-                        v-model="opacityGain"
-                        :min="0.1"
-                        :max="500.0"
-                        :step="0.1"
-                        label
-                        :label-value="opacityGain.toFixed(1)"
-                        style="width: 150px"
-                        :disable="isLoading || !!error"
-                    />
-                </div>
+                        <div class="info-grid q-mt-sm">
+                            <div class="info-item">
+                                <span class="label">Camera Height:</span>
+                                <span class="value">{{ cameraHeightCm.toFixed(2) }} cm</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="label">Scale:</span>
+                                <span class="value text-caption"
+                                    >{{ cmPerUnit.toFixed(4) }} cm/u</span
+                                >
+                            </div>
+                        </div>
+                    </div>
 
-                <q-separator vertical class="q-mx-sm" />
+                    <q-separator vertical inset />
 
-                <div class="control-group">
-                    <q-checkbox v-model="thresholdEnabled" label="Binary Threshold" :disable="isLoading || !!error" />
+                    <!-- Section 3: Splat Processing & Clipping -->
+                    <div class="section-splat q-px-md">
+                        <div class="text-overline text-primary q-mb-sm">Splat Processing</div>
+                        <div class="splat-processing">
+                            <div class="control-group section-z-start">
+                                <div class="text-caption text-grey-7">Section Start</div>
+                                <q-slider
+                                    v-model="sectionZStart"
+                                    :min="-10.0"
+                                    :max="10.0"
+                                    :step="0.01"
+                                    label
+                                    :label-value="sectionZStart.toFixed(2)"
+                                    :disable="collection.anyLoading()"
+                                />
+                            </div>
+                            <div class="control-group section-z-end">
+                                <div class="text-caption text-grey-7">Section End</div>
+                                <q-slider
+                                    v-model="sectionZEnd"
+                                    :min="-10.0"
+                                    :max="10.0"
+                                    :step="0.01"
+                                    label
+                                    :label-value="sectionZEnd.toFixed(2)"
+                                    :disable="collection.anyLoading()"
+                                />
+                            </div>
+
+                            <div class="control-group density-threshold">
+                                <div class="text-caption text-grey-7">Density Threshold</div>
+                                <q-slider
+                                    v-model="densityThreshold"
+                                    :min="0.001"
+                                    :max="100.0"
+                                    :step="0.001"
+                                    label
+                                    :label-value="densityThreshold.toFixed(2)"
+                                    :disable="collection.anyLoading()"
+                                />
+                            </div>
+                            <div class="control-group opacity-threshold">
+                                <div class="text-caption text-grey-7">Opacity Threshold</div>
+                                <q-slider
+                                    v-model="opacityThreshold"
+                                    :min="0.001"
+                                    :max="1.0"
+                                    :step="0.001"
+                                    label
+                                    :label-value="opacityThreshold.toFixed(2)"
+                                    :disable="collection.anyLoading()"
+                                />
+                            </div>
+                            <div class="control-group opacity-multiplier">
+                                <div class="text-caption text-grey-7">Opacity Multiplier</div>
+                                <q-slider
+                                    v-model="opacityMultiplier"
+                                    :min="0.001"
+                                    :max="1.0"
+                                    :step="0.001"
+                                    label
+                                    :label-value="opacityMultiplier.toFixed(2)"
+                                    :disable="collection.anyLoading()"
+                                />
+                            </div>
+                            <div class="control-group opacity-power">
+                                <div class="text-caption text-grey-7">Opacity Power</div>
+                                <q-slider
+                                    v-model="opacityPower"
+                                    :min="0.1"
+                                    :max="10.0"
+                                    :step="0.1"
+                                    label
+                                    :label-value="opacityPower.toFixed(2)"
+                                    :disable="collection.anyLoading()"
+                                />
+                            </div>
+                            <div class="control-group opacity-gain">
+                                <div class="text-caption text-grey-7">Opacity Gain</div>
+                                <q-slider
+                                    v-model="opacityGain"
+                                    :min="0.1"
+                                    :max="500.0"
+                                    :step="0.1"
+                                    label
+                                    :label-value="opacityGain.toFixed(2)"
+                                    :disable="collection.anyLoading()"
+                                />
+                            </div>
+                        </div>
+                    </div>
                 </div>
+            </q-card-section>
+        </q-card>
 
-                <q-separator vertical class="q-mx-sm" />
-
-                <q-btn label="Save as Image" color="positive" icon="save" @click="exportImage"
-                    :disable="isLoading || !!error" />
+        <!-- Canvas Container -->
+        <div
+            ref="container"
+            class="canvas-container shadow-8"
+            :style="{
+                filter: canvasFilter,
+                width: `${viewerSize}px`,
+                height: `${viewerSize}px`,
+                maxWidth: '95vw',
+            }"
+        >
+            <div class="scale-overlay" aria-label="Scale: 1 meter">
+                <div class="scale-bar" :style="{ width: `${scaleBarWidthPx}px` }" />
+                <div class="scale-text">1 m</div>
             </div>
-        </div>
-
-        <div ref="container" class="canvas-container"
-            :style="{ filter: canvasFilter, width: `${viewerSize}px`, height: `${viewerSize}px` }">
-            <div v-if="isLoading" class="loading-overlay">
-                <q-spinner color="primary" size="3em" />
-                <div class="q-mt-sm">Loading interactive blueprint...</div>
-            </div>
-            <div v-if="error" class="error-overlay">
-                <q-icon name="error" color="negative" size="3em" />
-                <div class="q-mt-sm text-negative">{{ error }}</div>
+            <div v-if="collection.anyLoading()" class="loading-overlay">
+                <q-spinner-grid color="primary" size="4em" />
+                <div class="q-mt-md text-h6">Processing Blueprint...</div>
             </div>
         </div>
     </div>
 </template>
 
 <style scoped>
+.splat-processing {
+    display: grid;
+    gap: 1rem 0.5rem;
+
+    grid-template-areas:
+        'section-z-start section-z-end'
+        'density-threshold density-threshold'
+        'opacity-threshold opacity-multiplier'
+        'opacity-power opacity-gain';
+}
+
+.section-z-start {
+    grid-area: section-z-start;
+}
+
+.section-z-end {
+    grid-area: section-z-end;
+}
+
+.density-threshold {
+    grid-area: density-threshold;
+}
+
+.opacity-threshold {
+    grid-area: opacity-threshold;
+}
+
+.opacity-multiplier {
+    grid-area: opacity-multiplier;
+}
+
+.opacity-power {
+    grid-area: opacity-power;
+}
+
+.opacity-gain {
+    grid-area: opacity-gain;
+}
+
 .viewer-container {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 1rem;
+    background-color: #f4f7f9;
+    min-height: 100vh;
+}
+
+.toolbar-card {
+    width: 100%;
+    max-width: 1100px;
+    border-radius: 12px;
+    background: white;
+}
+
+.toolbar-grid {
+    display: grid;
+    grid-template-columns: 3fr auto 4fr auto 5fr;
+    align-items: stretch;
+}
+
+.info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    background: #f0f4f8;
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid #dbe3eb;
+}
+
+.info-item {
+    display: flex;
+    flex-direction: column;
+}
+
+.info-item .label {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    color: #78909c;
+    font-weight: bold;
+}
+
+.info-item .value {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #2c3e50;
 }
 
 .canvas-container {
-    border: 1px solid #ccc;
+    border: 4px solid #1a1a1a;
     position: relative;
     background: #000;
+    border-radius: 8px;
+    overflow: hidden;
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
-.loading-overlay,
-.error-overlay {
+.loading-overlay {
     position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    inset: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    background: rgba(0, 0, 0, 0.8);
+    background: rgba(0, 0, 0, 0.9);
     color: white;
+    backdrop-filter: blur(4px);
+    z-index: 20;
 }
 
-.controls-container {
-    width: 100%;
-    max-width: 700px;
+
+.scale-overlay {
+    position: absolute;
+    left: 12px;
+    bottom: 12px;
+    z-index: 30;
+    pointer-events: none; /* don't block OrbitControls */
+    background: rgba(255, 255, 255, 0.85);
+    color: #111;
+    border: 1px solid rgba(0, 0, 0, 0.25);
+    border-radius: 6px;
+    padding: 8px 10px;
+    display: grid;
+    gap: 6px;
 }
 
-.control-group {
-    display: flex;
-    flex-direction: column;
+.scale-bar {
+    height: 6px;
+    background: #00aa00;
+    border: 1px solid rgba(0, 0, 0, 0.4);
+    border-radius: 2px;
+}
+
+.scale-text {
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
 }
 </style>
