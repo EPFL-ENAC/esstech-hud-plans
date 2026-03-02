@@ -38,3 +38,20 @@ make run-frontend
 ```
 
 The website will be available at [http://localhost:9000](http://localhost:9000).
+
+
+## Build and push Docker images
+
+From the project root, run:
+```bash
+docker build -t hud-colmap -f docker/Dockerfile.colmap . \
+    --build-arg LDAP_GROUPNAME=<group-name> \
+    --build-arg LDAP_GID=<group-id> \
+    --build-arg LDAP_USERNAME=<username> \
+    --build-arg LDAP_UID=<user-id>
+```
+
+To get the user and group information, run the following command:
+```bash
+ssh <username>@jumphost.rcp.epfl.ch -o StrictHostKeychecking=no 'echo -e "-> uid: $(id -u)\n-> gid: $(id -g)\n-> groups $(id)"'
+```
