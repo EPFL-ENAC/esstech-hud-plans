@@ -16,8 +16,7 @@ else
   SUDO=""
 fi
 
-mkdir -p "${BIN_DIR}" "${SRC_DIR}" "${BUILD_DIR}"
-
+mkdir -p "${BIN_DIR}" "${SRC_DIR}" "${BUILD_DIR}" "${EXTERNAL_DIR}"
 
 
 log() {

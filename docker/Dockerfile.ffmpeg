@@ -1,0 +1,35 @@
+FROM nvcr.io/nvidia/cuda:13.1.1-runtime-ubuntu24.04
+
+########################################
+# RCP CaaS requirement
+########################################
+# Mapping needed to access files from the external storage
+ARG LDAP_USERNAME
+ARG LDAP_UID
+ARG LDAP_GROUPNAME
+ARG LDAP_GID
+RUN groupadd ${LDAP_GROUPNAME} --gid ${LDAP_GID}
+RUN useradd -m -s /bin/bash -g ${LDAP_GROUPNAME} -u ${LDAP_UID} ${LDAP_USERNAME}
+RUN mkdir -p /home/${LDAP_USERNAME}
+
+########################################
+# Setup
+########################################
+RUN apt update && \
+    apt install -y ffmpeg && \
+	apt clean && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /home/${LDAP_USERNAME}
+
+########################################
+# FFmpeg wrapper: tee stdout to a log file
+########################################
+# The log file path can be overridden at runtime via the LOG_FILE env variable.
+RUN printf '#!/bin/sh\n$(which ffmpeg) "$@" 2>&1 | tee "${LOG_FILE:-/home/%s/ffmpeg.log}"\n' "${LDAP_USERNAME}" \
+    > /usr/local/bin/ffmpeg-run && \
+    chmod +x /usr/local/bin/ffmpeg-run
+
+WORKDIR /home/${LDAP_USERNAME}
+USER ${LDAP_USERNAME}
+
+ENTRYPOINT ["/usr/local/bin/ffmpeg-run"]

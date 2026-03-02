@@ -44,12 +44,17 @@ The website will be available at [http://localhost:9000](http://localhost:9000).
 
 From the project root, run:
 ```bash
-docker build -t hud-colmap -f docker/Dockerfile.colmap . \
-    --build-arg LDAP_GROUPNAME=<group-name> \
-    --build-arg LDAP_GID=<group-id> \
-    --build-arg LDAP_USERNAME=<username> \
-    --build-arg LDAP_UID=<user-id>
+docker build -t hud-<TOOL> -f docker/Dockerfile.<TOOL> . \
+    --build-arg LDAP_GROUPNAME=<GROUP-NAME> \
+    --build-arg LDAP_GID=<GROUP-ID> \
+    --build-arg LDAP_USERNAME=<USERNAME> \
+    --build-arg LDAP_UID=<USER-ID>
 ```
+
+where `<TOOL>` is:
+- `ffmpeg` for the FFmpeg image
+- `colmap` for the COLMAP image
+- `brush` for the Brush image
 
 To get the user and group information, run the following command:
 ```bash

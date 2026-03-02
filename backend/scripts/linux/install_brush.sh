@@ -10,8 +10,7 @@ BIN_DIR="${EXTERNAL_DIR}/bin"
 SRC_DIR="${EXTERNAL_DIR}/src"
 BUILD_DIR="${EXTERNAL_DIR}/build"
 
-mkdir -p "${BIN_DIR}" "${SRC_DIR}" "${BUILD_DIR}"
-
+mkdir -p "${BIN_DIR}" "${SRC_DIR}" "${BUILD_DIR}" "${EXTERNAL_DIR}"
 
 
 log() {
