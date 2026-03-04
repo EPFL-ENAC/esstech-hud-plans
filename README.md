@@ -44,7 +44,7 @@ The website will be available at [http://localhost:9000](http://localhost:9000).
 
 From the project root, run:
 ```bash
-docker build -t hud-<TOOL> -f docker/Dockerfile.<TOOL> . \
+docker build -t registry.rcp.epfl.ch/enac-it-poh/hud-<TOOL>:latest -f docker/Dockerfile.<TOOL> . \
     --build-arg LDAP_GROUPNAME=<GROUP-NAME> \
     --build-arg LDAP_GID=<GROUP-ID> \
     --build-arg LDAP_USERNAME=<USERNAME> \
@@ -59,4 +59,10 @@ where `<TOOL>` is:
 To get the user and group information, run the following command:
 ```bash
 ssh <username>@jumphost.rcp.epfl.ch -o StrictHostKeychecking=no 'echo -e "-> uid: $(id -u)\n-> gid: $(id -g)\n-> groups $(id)"'
+```
+
+Then, push the image to the registry:
+```bash
+docker login registry.rcp.epfl.ch
+docker push registry.rcp.epfl.ch/enac-it-poh/hud-<TOOL>:latest
 ```

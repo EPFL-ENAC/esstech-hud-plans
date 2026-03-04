@@ -3,9 +3,12 @@ import pty
 import re
 import select
 import subprocess
-from typing import Callable, Union
+import time
+from typing import Callable, Literal, Union
 
 import numpy as np
+from api import runai
+from api.config import config
 from api.data_processing.splats import save_histogram
 from api.models.splats import (
     BlueprintConfig,
@@ -18,6 +21,7 @@ from api.models.splats import (
 
 from .pipeline_logger import PipelineLogger
 
+RUNAI_POLL_INTERVAL = 10  # seconds
 os.environ["PYTHONUNBUFFERED"] = "1"  # Add at top of file
 
 # Check if running inside a Docker container
@@ -135,9 +139,9 @@ class SplatPipeline:
         args = [
             "automatic_reconstructor",
             "--image_path",
-            self.directories["images"],
+            os.path.relpath(self.directories["images"]),
             "--workspace_path",
-            self.directories["colmap"],
+            os.path.relpath(self.directories["colmap"]),
             "--camera_model",
             cfg.camera_model,
             "--dense",
@@ -157,7 +161,26 @@ class SplatPipeline:
                 ]
             )
 
-        if IS_DOCKER:
+        if config.USE_RUNAI:
+            runai.copy_data_to_scratch(
+                os.path.relpath(self.directories["images"]),
+                os.path.relpath(self.directories["images"]),
+            )
+            runai.copy_data_to_scratch(
+                os.path.relpath(self.directories["colmap"]),
+                os.path.relpath(self.directories["colmap"]),
+            )
+            self._run_command_runai(
+                args,
+                step_name="colmap",
+                estimate_progress_callback=estimate_colmap_progress,
+            )
+            runai.copy_data_from_scratch(
+                os.path.relpath(self.directories["colmap"]),
+                os.path.relpath(self.directories["colmap"]),
+            )
+
+        elif IS_DOCKER:
             # Use shell=True for xvfb-run in Docker
             cmd_str: str = f"{colmap_command} {' '.join(args)}"
             self.logger.start_step("colmap", settings=cfg.model_dump(), command=cmd_str)
@@ -229,9 +252,9 @@ class SplatPipeline:
     def run_brush(self, cfg: BrushTrainingConfig):
         args = [
             brush_command,
-            self.directories["workspace"],
+            os.path.relpath(self.directories["workspace"]),
             "--export-path",
-            self.directories["workspace"],
+            os.path.relpath(self.directories["workspace"]),
             "--export-name",
             "splat.ply",
             "--total-steps",
@@ -256,7 +279,21 @@ class SplatPipeline:
             cfg.alphaMode,
         ]
 
-        if IS_DOCKER:
+        if config.USE_RUNAI:
+            runai.copy_data_to_scratch(
+                os.path.relpath(self.directories["workspace"]),
+                os.path.relpath(self.directories["workspace"]),
+            )
+            self._run_command_runai(
+                args,
+                step_name="brush",
+                estimate_progress_callback=estimate_training_progress,
+            )
+            runai.copy_data_from_scratch(
+                os.path.relpath(self.directories["workspace"]),
+                os.path.relpath(self.directories["workspace"]),
+            )
+        elif IS_DOCKER:
             command: str = " ".join(args)
             self.logger.start_step("brush", settings=cfg.model_dump(), command=command)
             return self._run_command(
@@ -518,6 +555,62 @@ class SplatPipeline:
             self.logger.step_completed(step_name, return_code=return_code)
 
         return return_code
+
+    def _run_command_runai(
+        self,
+        cmd: list[str],
+        step_name: Literal["ffmpeg", "colmap", "brush"],
+        estimate_progress_callback: Callable[[str], float],
+    ):
+        job_name = runai.submit_job(tool=step_name, command=cmd)
+        log_file_path = runai.get_log_file_path(job_name)
+
+        def log_and_estimate_progress(line: str):
+            self.logger.add_log(
+                step_name, line, cleanup_for_file=_extract_meaningful_log
+            )
+            self.logger.update_step_progress(
+                step_name,
+                estimate_progress_callback(
+                    self.logger.get_full_log_from_step(step_name)
+                ),
+            )
+
+        while not os.path.exists(log_file_path):
+            if runai.check_job_terminated(job_name) is not False:
+                self.logger.step_failed(
+                    step_name,
+                    f"RunAI job {job_name} terminated before log file was created.",
+                )
+                return
+            time.sleep(RUNAI_POLL_INTERVAL)
+
+        with open(log_file_path, "r", encoding="utf-8", errors="replace") as f:
+            buffer = ""
+            while True:
+                chunk = f.read(1024)
+                if chunk:
+                    buffer += chunk
+                    lines = buffer.split("\n")
+                    # Keep the last (potentially incomplete) line in the buffer
+                    buffer = lines[-1]
+                    for line in lines[:-1]:
+                        if line.strip():
+                            log_and_estimate_progress(line.rstrip("\r"))
+                else:
+                    # No new data — flush any remaining buffered content if job is done
+                    if runai.check_job_terminated(job_name) is not False:
+                        if buffer.strip():
+                            log_and_estimate_progress(buffer.rstrip("\r"))
+                        break
+                    time.sleep(RUNAI_POLL_INTERVAL)
+
+        self.logger.add_log(
+            step_name,
+            "Command completed",
+            heading_level=3,
+        )
+        self.logger.step_completed(step_name)
 
 
 def _extract_meaningful_log(line: str) -> str | None:

@@ -38,11 +38,10 @@ RUN mkdir -p /home/${LDAP_USERNAME}
 # COLMAP wrapper: tee stdout to a log file
 ########################################
 # The log file path can be overridden at runtime via the LOG_FILE env variable.
-RUN printf '#!/bin/sh\n/external/bin/colmap "$@" 2>&1 | tee "${LOG_FILE:-/home/%s/colmap.log}"\n' "${LDAP_USERNAME}" \
+RUN printf '#!/bin/sh\ncd /scratch && exec xvfb-run -a /external/bin/colmap "$@" 2>&1 | tee "${LOG_FILE:-/home/%s/colmap.log}"\n' "${LDAP_USERNAME}" \
     > /usr/local/bin/colmap && \
     chmod +x /usr/local/bin/colmap
 
-WORKDIR /home/${LDAP_USERNAME}
 USER ${LDAP_USERNAME}
 
 ENTRYPOINT ["/usr/local/bin/colmap"]
