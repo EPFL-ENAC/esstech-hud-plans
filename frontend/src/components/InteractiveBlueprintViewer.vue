@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { SplatMesh } from '@sparkjsdev/spark';
+import type { SplatMesh } from '@sparkjsdev/spark';
 import { computed, onMounted, ref, useTemplateRef, watch } from 'vue';
 import { useAsyncResultCollection } from 'unwrapped/vue';
 import { AsyncResult } from 'unwrapped/core';
@@ -117,7 +117,7 @@ onMounted(() => {
             }),
         );
         group.add(floorPlaneMesh);
-        
+
         averageCameraOffsetUnit.value = geometryData.averageCameraZ;
         const cameraPositionsGeometry = new THREE.BufferGeometry().setFromPoints(geometryData.cameraPositions);
         const cameraPositionsMaterial = new THREE.PointsMaterial({ color: 0xff0000, size: 3 });

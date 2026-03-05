@@ -1,6 +1,6 @@
 import { SplatMesh } from "@sparkjsdev/spark";
 import * as THREE from 'three';
-import { BlueprintGeometry } from "./blueprintGeometry";
+import type { BlueprintGeometry } from "./blueprintGeometry";
 import { Histogram } from "./histogram";
 
 export interface BlueprintSplatProcessingParams {
@@ -58,11 +58,11 @@ export function autoDetectFloorOffset(mesh: SplatMesh, geometryData: BlueprintGe
     const p = new THREE.Vector3();
     mesh.packedSplats.forEachSplat((index, center) => {
         p.set(
-            center.x - geometryData!.center.x,
-            center.y - geometryData!.center.y,
-            center.z - geometryData!.center.z,
+            center.x - geometryData.center.x,
+            center.y - geometryData.center.y,
+            center.z - geometryData.center.z,
         );
-        p.applyMatrix4(geometryData!.worldRotationMatrix);
+        p.applyMatrix4(geometryData.worldRotationMatrix);
         zValues[index] = p.z;
     });
 
