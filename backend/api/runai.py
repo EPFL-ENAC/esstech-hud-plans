@@ -11,28 +11,7 @@ from .config import config
 logger = logging.getLogger("uvicorn.error")
 
 
-SCRATCH_MOUNT_POINT = "/tmp/scratch"
-
-
-def ensure_scratch_mounted() -> None:
-    """Ensure that the scratch PVC is mounted on the backend service using sshfs."""
-
-    os.makedirs(SCRATCH_MOUNT_POINT, exist_ok=True)
-
-    if os.path.ismount(SCRATCH_MOUNT_POINT):
-        return
-
-    logger.info(
-        f"Mounting scratch remote {config.RUNAI_MOUNT_SCRATCH_PATH} to {SCRATCH_MOUNT_POINT} using sshfs"
-    )
-    subprocess.run(
-        [
-            "sshfs",
-            config.RUNAI_MOUNT_SCRATCH_PATH,
-            SCRATCH_MOUNT_POINT,
-        ],
-        check=True,
-    )
+LOGS_DIR_PATH = "log"
 
 
 def get_log_file_path(job_name: str) -> str:
@@ -43,8 +22,7 @@ def get_log_file_path(job_name: str) -> str:
     Returns:
         Absolute local path to the log file for the job.
     """
-    ensure_scratch_mounted()
-    return os.path.join(SCRATCH_MOUNT_POINT, f"{job_name}.log")
+    return os.path.join(LOGS_DIR_PATH, f"{job_name}.log")
 
 
 def copy_data_to_scratch(source_path: str, dest_path: str) -> None:
@@ -77,10 +55,19 @@ def copy_data_from_scratch(source_path: str, dest_path: str) -> None:
     )
 
 
+def refresh_logs() -> None:
+    """Refresh the local logs directory by copying data from the scratch remote."""
+    try:
+        copy_data_from_scratch(LOGS_DIR_PATH, LOGS_DIR_PATH)
+    except Exception:
+        pass
+
+
 def submit_job(
     tool: Literal["ffmpeg", "colmap", "brush"],
     command: list[str],
     n_gpu: int = 1,
+    unbuffer: bool = False,
 ) -> str:
     hex_suffix = secrets.token_hex(4)
     job_name = f"{tool}-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{hex_suffix}"
@@ -88,9 +75,23 @@ def submit_job(
     logger.info(
         f"Submitting Run:AI job {job_name} with command: {tool} {' '.join(command)}"
     )
-    shell_command = " ".join(
-        ["cd /scratch &&", *command, "2>&1 | tee", f"/scratch/{job_name}.log"]
-    )
+
+    if unbuffer:
+        shell_command = " ".join(
+            [
+                f'cd /scratch && mkdir -p {LOGS_DIR_PATH} && script -q -e -c \\"{" ".join(command)}\\"',
+                os.path.join("/scratch", get_log_file_path(job_name)),
+            ]
+        )
+    else:
+        shell_command = " ".join(
+            [
+                f"cd /scratch && mkdir -p {LOGS_DIR_PATH} && ",
+                *command,
+                "2>&1 | tee",
+                os.path.join("/scratch", get_log_file_path(job_name)),
+            ]
+        )
 
     subprocess.run(
         [

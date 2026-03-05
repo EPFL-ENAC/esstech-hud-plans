@@ -20,10 +20,16 @@ RUN apt update && \
     curl \
     ca-certificates \
     git \
-    build-essential
+    build-essential \
+	cmake \
+    libvulkan1 \
+    vulkan-tools \
+    mesa-vulkan-drivers \
+    nvidia-driver-570
 
 COPY backend/scripts/linux/install_brush.sh /home/${LDAP_USERNAME}/install_brush.sh
 RUN /home/${LDAP_USERNAME}/install_brush.sh
 RUN apt clean && rm -rf /var/lib/apt/lists/*
+RUN ln -s /external/bin/brush /usr/local/bin/brush
 
 USER ${LDAP_USERNAME}

@@ -13,7 +13,6 @@ RUN curl -sLo /tmp/runai https://rcp-caas-prod.rcp.epfl.ch/cli/linux \
 # System dependencies
 RUN apt update \
 	&& apt install -y libglew-dev \
-	sshfs \
 	rclone \
 	&& rm -rf /var/lib/apt/lists/*
 

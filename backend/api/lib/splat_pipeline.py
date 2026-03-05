@@ -166,8 +166,10 @@ class SplatPipeline:
                 os.path.relpath(self.directories["workspace"]),
                 os.path.relpath(self.directories["workspace"]),
             )
+            cmd = ["xvfb-run", "-a", "colmap"] + args
+            self.logger.start_step("colmap", settings=cfg.model_dump(), command=cmd)
             self._run_command_runai(
-                ["xvfb-run", "-a", "colmap"] + args,
+                cmd,
                 step_name="colmap",
                 estimate_progress_callback=estimate_colmap_progress,
             )
@@ -188,7 +190,7 @@ class SplatPipeline:
             )
 
         else:
-            cmd: list[str] = [colmap_path] + args
+            cmd = [colmap_path] + args
             self.logger.start_step("colmap", settings=cfg.model_dump(), command=cmd)
             self._run_command(
                 cmd,
@@ -280,10 +282,13 @@ class SplatPipeline:
                 os.path.relpath(self.directories["workspace"]),
                 os.path.relpath(self.directories["workspace"]),
             )
+            cmd = ["brush"] + args[1:]
+            self.logger.start_step("brush", settings=cfg.model_dump(), command=cmd)
             self._run_command_runai(
-                ["brush"] + args[1:],
+                cmd,
                 step_name="brush",
                 estimate_progress_callback=estimate_training_progress,
+                unbuffer=True,
             )
             runai.copy_data_from_scratch(
                 os.path.relpath(self.directories["workspace"]),
@@ -557,8 +562,9 @@ class SplatPipeline:
         cmd: list[str],
         step_name: Literal["ffmpeg", "colmap", "brush"],
         estimate_progress_callback: Callable[[str], float],
+        unbuffer: bool = False,
     ):
-        job_name = runai.submit_job(tool=step_name, command=cmd)
+        job_name = runai.submit_job(tool=step_name, command=cmd, unbuffer=unbuffer)
         log_file_path = runai.get_log_file_path(job_name)
 
         def log_and_estimate_progress(line: str):
@@ -572,6 +578,7 @@ class SplatPipeline:
                 ),
             )
 
+        runai.refresh_logs()
         while not os.path.exists(log_file_path):
             print(f"Waiting for log file {log_file_path} to be created...")
             if runai.check_job_terminated(job_name):
@@ -581,36 +588,44 @@ class SplatPipeline:
                 )
                 return
             time.sleep(RUNAI_POLL_INTERVAL)
-            os.listdir(runai.SCRATCH_MOUNT_POINT)  # Trigger reload
+            runai.refresh_logs()
 
-        with open(log_file_path, "r", encoding="utf-8", errors="replace") as f:
-            print(f"Monitoring log file {log_file_path} for updates...")
-            buffer = ""
-            while True:
-                os.listdir(runai.SCRATCH_MOUNT_POINT)  # Trigger reload
-                chunk = f.read(1024)
-                if chunk:
-                    buffer += chunk
-                    lines = buffer.split("\n")
-                    # Keep the last (potentially incomplete) line in the buffer
-                    buffer = lines[-1]
-                    for line in lines[:-1]:
-                        if line.strip():
-                            log_and_estimate_progress(line.rstrip("\r"))
-                else:
-                    # No new data — flush any remaining buffered content if job is done
-                    if runai.check_job_terminated(job_name):
-                        if buffer.strip():
-                            log_and_estimate_progress(buffer.rstrip("\r"))
-                        break
-                    time.sleep(RUNAI_POLL_INTERVAL)
+        print(f"Monitoring log file {log_file_path} for updates...")
+        buffer = ""
+        read_pos = 0
+        while True:
+            runai.refresh_logs()
+            with open(log_file_path, "rb") as f:
+                f.seek(read_pos)
+                raw_chunk = f.read(1024)
+                read_pos = f.tell()
+            if raw_chunk:
+                chunk = raw_chunk.decode("utf-8", errors="replace")
+                buffer += chunk
+                lines = buffer.split("\n")
+                buffer = lines[-1]
+                for line in lines[:-1]:
+                    if line.strip():
+                        log_and_estimate_progress(line.rstrip("\r"))
+                if "\r" in buffer:
+                    parts = buffer.split("\r")
+                    for part in parts[:-1]:
+                        if part.strip():
+                            log_and_estimate_progress(part)
+                    buffer = parts[-1]
+            else:
+                if runai.check_job_terminated(job_name):
+                    if buffer.strip():
+                        log_and_estimate_progress(buffer.rstrip("\r"))
+                    break
+                time.sleep(RUNAI_POLL_INTERVAL)
 
         self.logger.add_log(
             step_name,
-            "Command completed",
+            "Command completed with return code 0",
             heading_level=3,
         )
-        self.logger.step_completed(step_name)
+        self.logger.step_completed(step_name, return_code=0)
 
 
 def _extract_meaningful_log(line: str) -> str | None:
