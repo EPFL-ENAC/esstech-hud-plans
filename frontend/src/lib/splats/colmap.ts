@@ -55,7 +55,7 @@ export const cameraModels = [
 export function makeAutoDefaults(): AutoReconstructorConfig {
     return {
         data_type: 'individual',
-        quality: 'medium',
+        quality: 'low',
         camera_model: 'OPENCV',
         max_image_size: 2000,
         single_camera: true,
