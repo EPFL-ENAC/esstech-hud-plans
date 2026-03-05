@@ -1,5 +1,4 @@
-# libmkl-full-dev package, needed for COLMAP, requires Ubuntu
-FROM nvcr.io/nvidia/cuda:13.1.1-runtime-ubuntu24.04
+FROM colmap/colmap:20260224.6006
 
 ########################################
 # RCP CaaS requirement
@@ -16,32 +15,9 @@ RUN mkdir -p /home/${LDAP_USERNAME}
 ########################################
 # Setup
 ########################################
-# Enable 'multiverse' repository (needed for libmkl-dev)
 RUN apt update && \
-	apt install -y software-properties-common && \
-    add-apt-repository multiverse && \
-    apt update && \
     apt install -y \
-    curl \
-    ca-certificates \
-    git \
-    build-essential \
-	xvfb
-
-COPY backend/scripts/linux/install_colmap.sh /home/${LDAP_USERNAME}/install_colmap.sh
-RUN /home/${LDAP_USERNAME}/install_colmap.sh
-RUN apt clean && rm -rf /var/lib/apt/lists/*
-
-RUN mkdir -p /home/${LDAP_USERNAME}
-
-########################################
-# COLMAP wrapper: tee stdout to a log file
-########################################
-# The log file path can be overridden at runtime via the LOG_FILE env variable.
-RUN printf '#!/bin/sh\ncd /scratch && exec xvfb-run -a /external/bin/colmap "$@" 2>&1 | tee "${LOG_FILE:-/home/%s/colmap.log}"\n' "${LDAP_USERNAME}" \
-    > /usr/local/bin/colmap && \
-    chmod +x /usr/local/bin/colmap
+	xvfb && \
+	apt clean && rm -rf /var/lib/apt/lists/*
 
 USER ${LDAP_USERNAME}
-
-ENTRYPOINT ["/usr/local/bin/colmap"]

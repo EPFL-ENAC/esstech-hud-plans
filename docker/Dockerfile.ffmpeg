@@ -16,19 +16,8 @@ RUN mkdir -p /home/${LDAP_USERNAME}
 # Setup
 ########################################
 RUN apt update && \
-    apt install -y ffmpeg && \
+    apt install -y \
+	ffmpeg && \
 	apt clean && rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p /home/${LDAP_USERNAME}
-
-########################################
-# FFmpeg wrapper: tee stdout to a log file
-########################################
-# The log file path can be overridden at runtime via the LOG_FILE env variable.
-RUN printf '#!/bin/sh\ncd /scratch && exec $(which ffmpeg) "$@" 2>&1 | tee "${LOG_FILE:-/home/%s/ffmpeg.log}"\n' "${LDAP_USERNAME}" \
-    > /usr/local/bin/ffmpeg-run && \
-    chmod +x /usr/local/bin/ffmpeg-run
-
 USER ${LDAP_USERNAME}
-
-ENTRYPOINT ["/usr/local/bin/ffmpeg-run"]

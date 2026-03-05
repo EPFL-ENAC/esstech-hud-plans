@@ -26,16 +26,4 @@ COPY backend/scripts/linux/install_brush.sh /home/${LDAP_USERNAME}/install_brush
 RUN /home/${LDAP_USERNAME}/install_brush.sh
 RUN apt clean && rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p /home/${LDAP_USERNAME}
-
-########################################
-# Brush wrapper: tee stdout to a log file
-########################################
-# The log file path can be overridden at runtime via the LOG_FILE env variable.
-RUN printf '#!/bin/sh\n cd /scratch && exec /external/bin/brush "$@" 2>&1 | tee "${LOG_FILE:-/home/%s/brush.log}"\n' "${LDAP_USERNAME}" \
-    > /usr/local/bin/brush && \
-    chmod +x /usr/local/bin/brush
-
 USER ${LDAP_USERNAME}
-
-ENTRYPOINT ["/usr/local/bin/brush"]

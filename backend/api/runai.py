@@ -8,7 +8,7 @@ from typing import Literal
 
 from .config import config
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error")
 
 
 SCRATCH_MOUNT_POINT = "/tmp/scratch"
@@ -88,6 +88,10 @@ def submit_job(
     logger.info(
         f"Submitting Run:AI job {job_name} with command: {tool} {' '.join(command)}"
     )
+    shell_command = " ".join(
+        ["cd /scratch &&", *command, "2>&1 | tee", f"/scratch/{job_name}.log"]
+    )
+
     subprocess.run(
         [
             "runai",
@@ -97,13 +101,14 @@ def submit_job(
             f"{config.RUNAI_REGISTRY}/hud-{tool}:latest",
             "--gpu",
             str(n_gpu),
-            "--environment",
-            f'LOG_FILE="/scratch/{job_name}.log"',
             "--existing-pvc",
             f"claimname={config.RUNAI_PVC_SCRATCH_NAME},path=/scratch",
             "--interactive",
+            "--command",
             "--",
-            *command,
+            "/bin/sh",
+            "-c",
+            shell_command,
         ],
         check=True,
     )
@@ -114,7 +119,7 @@ def submit_job(
 def get_job_status(job_name: str) -> str | None:
     try:
         result = subprocess.run(
-            ["runai", "get", job_name, "-o", "json"],
+            ["runai", "describe", "job", job_name, "-o", "json"],
             check=True,
             capture_output=True,
             text=True,
