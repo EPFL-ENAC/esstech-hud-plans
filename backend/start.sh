@@ -16,6 +16,7 @@ if [ ! -f ~/.kube/config ]; then
 fi
 
 # Must run `runai login` manually. Requires web browser interaction
+# Then, run `runai list projects` and `runai config project <project_name>` to set the default project
 
 rclone config create jumphost.rcp.epfl.ch sftp host=jumphost.rcp.epfl.ch key_file=/root/.ssh/id_ed25519
 uvicorn --host=0.0.0.0 --timeout-keep-alive=0 api.main:app --reload

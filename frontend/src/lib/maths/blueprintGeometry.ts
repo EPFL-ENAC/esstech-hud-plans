@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { AsyncResult } from 'unwrapped/core';
+import { baseUrl } from 'boot/api';
 
 export interface BlueprintGeometryResponse {
     world_rotation: number[][];
@@ -67,7 +68,7 @@ export class BlueprintGeometry {
 export function fetchBlueprintGeometryJSON(id: string): AsyncResult<BlueprintGeometryResponse> {
     return AsyncResult.run(function* () {
         const response = yield* AsyncResult.fromValuePromise(fetch(
-            `http://localhost:8000/splats/blueprint-geometry/${id}`,
+            `${baseUrl}/splats/blueprint-geometry/${id}`,
         ));
         if (!response.ok) {
             return yield* AsyncResult.errTag('fetch_blueprint_geometry_failed', `Failed to fetch blueprint geometry: ${response.statusText}`);

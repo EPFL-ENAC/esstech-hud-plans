@@ -4,6 +4,7 @@ import type { BrushTrainingConfig } from 'src/lib/splats/brush';
 import type { ColmapConfig } from 'src/lib/splats/colmap';
 import type { FFMPEGExtractionConfig } from 'src/lib/splats/ffmpeg';
 import { AsyncResult, delay, type ErrorBase } from 'unwrapped/core';
+import { baseUrl } from 'boot/api';
 
 export interface SplatPipelineSettings {
     video_path: string;
@@ -65,7 +66,7 @@ export const useSplatStore = defineStore('splat', () => {
                 while (true) {
                     try {
                         const fetched = yield* AsyncResult.fromValuePromise(
-                            fetch(`http://localhost:8000/splats/status/${generationId}`),
+                            fetch(`${baseUrl}/splats/status/${generationId}`),
                         );
                         if (fetched.ok) {
                             const statusData: SplatPipelineStatus =
@@ -101,7 +102,7 @@ export const useSplatStore = defineStore('splat', () => {
             }
 
             const fetched = yield* AsyncResult.fromValuePromise(
-                fetch(`http://localhost:8000/splats/get/${generationId}`),
+                fetch(`${baseUrl}/splats/get/${generationId}`),
             );
 
             if (!fetched.ok) {

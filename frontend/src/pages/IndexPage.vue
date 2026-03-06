@@ -38,7 +38,7 @@
             <ffmpeg-settings v-model="ffmpegConfig" class="q-mb-md" />
             <colmap-settings v-model="colmapConfig" class="q-mb-md" />
             <brush-settings v-model="brushConfig" class="q-mb-md" />
-            <blueprint-settings v-model="blueprintConfig" class="q-mb-md" />
+            <!-- <blueprint-settings v-model="blueprintConfig" class="q-mb-md" /> -->
 
             <!-- 3. Submission -->
             <div class="column items-center q-gutter-y-sm q-mt-xl">
@@ -71,8 +71,9 @@ import ColmapSettings from 'src/components/ColmapSettings.vue';
 import { type ColmapConfig, makeAutoDefaults } from 'src/lib/splats/colmap';
 import BrushSettings from 'src/components/BrushSettings.vue';
 import { type BrushTrainingConfig, makeDefaultBrushConfig } from 'src/lib/splats/brush';
-import BlueprintSettings from 'src/components/BlueprintSettings.vue';
+// import BlueprintSettings from 'src/components/BlueprintSettings.vue';
 import { type BlueprintConfig, makeDefaultBlueprintConfig } from 'src/lib/splats/blueprint';
+import { baseUrl } from 'boot/api';
 
 const router = useRouter();
 
@@ -127,7 +128,7 @@ const uploadVideo = async () => {
         uploadStatus.value = 'Starting pipeline...';
         statusClass.value = 'info';
 
-        const response = await fetch('http://localhost:8000/splats/generate', {
+        const response = await fetch(`${baseUrl}/splats/generate`, {
             method: 'POST',
             body: formData,
         });

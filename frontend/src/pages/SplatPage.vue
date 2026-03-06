@@ -10,6 +10,7 @@ import {
     type SplatPipelineStatus,
     useSplatStore,
 } from 'src/stores/splats';
+import { baseUrl } from 'boot/api';
 
 const route = useRoute();
 const generationId = computed(() => route.params.id as string);
@@ -33,7 +34,7 @@ const settingsError = ref<string | null>(null);
 // Fetch settings to determine if blueprint was enabled
 async function fetchSettings(): Promise<void> {
     try {
-        const response = await fetch(`http://localhost:8000/splats/settings/${generationId.value}`);
+        const response = await fetch(`${baseUrl}/splats/settings/${generationId.value}`);
         if (!response.ok) {
             throw new Error(`Failed to fetch settings: ${response.statusText}`);
         }
@@ -68,7 +69,7 @@ onMounted(async () => {
                         <div class="q-mb-md">
                             <h4 class="q-mb-xs">{{ direction.toUpperCase() }}</h4>
                             <img
-                                :src="`http://localhost:8000/splats/blueprints/${generationId}/${direction}`"
+                                :src="`${baseUrl}/splats/blueprints/${generationId}/${direction}`"
                                 :alt="`Blueprint view from the ${direction}`"
                                 style="max-width: 700px; border: 1px solid black"
                             />
