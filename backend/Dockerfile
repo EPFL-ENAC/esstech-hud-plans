@@ -8,7 +8,7 @@ RUN curl -sLo /tmp/runai https://rcp-caas-prod.rcp.epfl.ch/cli/linux \
 	&& mkdir -p ~/.kube \
 	&& curl https://wiki.rcp.epfl.ch/public/files/kube-config.yaml -o ~/.kube/config && chmod 600 ~/.kube/config
 
-# How to run `runai login` (in Python backend)? Requires web browser interaction
+# Must run `runai login` manually. Requires web browser interaction
 
 # System dependencies
 RUN apt update \

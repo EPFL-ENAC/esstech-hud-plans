@@ -282,6 +282,9 @@ class SplatPipeline:
                 os.path.relpath(self.directories["workspace"]),
                 os.path.relpath(self.directories["workspace"]),
             )
+            args[3] = os.path.join(
+                "/scratch", args[3]
+            )  # workspace path must be absolute
             cmd = ["brush"] + args[1:]
             self.logger.start_step("brush", settings=cfg.model_dump(), command=cmd)
             self._run_command_runai(
