@@ -13,10 +13,26 @@ const router = useRouter();
 function handleRelaunchBrush() {
     const splatPath = props.value.output.splat_path;
     const parts = splatPath.split('/');
-    const generationId = parts[parts.indexOf('splats') + 1];
+    const generationId = parts[parts.indexOf('splats') + 1] as string;
+    const brushSettings = props.value.steps.brush.settings;
+
+    const query: Record<string, string | number> = {
+        colmapGenerationId: generationId,
+        brushTotalSteps: brushSettings.totalSteps,
+        brushRenderMode: brushSettings.renderMode,
+        brushShDegree: brushSettings.shDegree,
+        brushMaxSplats: brushSettings.maxSplats,
+        brushGrowthGradThreshold: brushSettings.growthGradThreshold,
+        brushRefineEvery: brushSettings.refineEvery,
+        brushGrowthStopIter: brushSettings.growthStopIter,
+        brushAlphaMode: brushSettings.alphaMode,
+        brushMaxResolution: brushSettings.maxResolution,
+        brushSubsampleFrames: brushSettings.subsampleFrames,
+    };
+
     void router.push({
         path: '/',
-        query: { colmapGenerationId: generationId },
+        query,
     });
 }
 

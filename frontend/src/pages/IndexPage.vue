@@ -83,6 +83,37 @@ onMounted(() => {
         inputConfig.value.colmapGenerationId = colmapGenerationId;
         activeTab.value = 'colmap';
     }
+
+    if (route.query.brushTotalSteps) {
+        brushConfig.value.totalSteps = Number(route.query.brushTotalSteps);
+    }
+    if (route.query.brushRenderMode) {
+        brushConfig.value.renderMode = route.query.brushRenderMode as 'default' | 'mip';
+    }
+    if (route.query.brushShDegree) {
+        brushConfig.value.shDegree = Number(route.query.brushShDegree);
+    }
+    if (route.query.brushMaxSplats) {
+        brushConfig.value.maxSplats = Number(route.query.brushMaxSplats);
+    }
+    if (route.query.brushGrowthGradThreshold) {
+        brushConfig.value.growthGradThreshold = Number(route.query.brushGrowthGradThreshold);
+    }
+    if (route.query.brushRefineEvery) {
+        brushConfig.value.refineEvery = Number(route.query.brushRefineEvery);
+    }
+    if (route.query.brushGrowthStopIter) {
+        brushConfig.value.growthStopIter = Number(route.query.brushGrowthStopIter);
+    }
+    if (route.query.brushAlphaMode) {
+        brushConfig.value.alphaMode = route.query.brushAlphaMode as 'masked' | 'transparent';
+    }
+    if (route.query.brushMaxResolution) {
+        brushConfig.value.maxResolution = Number(route.query.brushMaxResolution);
+    }
+    if (route.query.brushSubsampleFrames) {
+        brushConfig.value.subsampleFrames = Number(route.query.brushSubsampleFrames);
+    }
 });
 
 async function submitJob() {
