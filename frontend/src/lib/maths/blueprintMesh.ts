@@ -6,11 +6,9 @@ import { Histogram } from './histogram';
 export interface BlueprintSplatProcessingParams {
     sectionZStart: number;
     sectionZEnd: number;
-    opacityThreshold: number;
     densityThreshold: number;
     opacityMultiplier: number;
     opacityPower: number;
-    opacityGain: number;
 }
 
 export async function generateBlueprintMesh(
@@ -26,21 +24,19 @@ export async function generateBlueprintMesh(
             fileBytes: clonedBuffer,
             onLoad(mesh) {
                 mesh.packedSplats.forEachSplat((index, center, scales, quaternion, opacity) => {
-                    // const volume = scales.x * scales.y * scales.z;
-                    const projectedArea = scales.x * scales.z;
-                    const powedOpacity = Math.pow(opacity, 5);
-                    const density = projectedArea > 0 ? powedOpacity / projectedArea : 0;
-
+                    const FIXED_OPACITY = 0.3;
+                    const volume = scales.x * scales.y * scales.z;
+                    const density = opacity / volume;
                     let newOpacity = 0;
-                    if (center.y >= params.sectionZStart && center.y <= params.sectionZEnd) {
-                        if (
-                            opacity >= params.opacityThreshold &&
-                            density >= params.densityThreshold
-                        ) {
-                            newOpacity =
-                                Math.pow(opacity * params.opacityMultiplier, params.opacityPower) *
-                                params.opacityGain;
-                        }
+                    if (
+                        density >= params.densityThreshold &&
+                        center.y >= params.sectionZStart &&
+                        center.y <= params.sectionZEnd
+                    ) {
+                        newOpacity =
+                            ((params.opacityMultiplier * opacity) / FIXED_OPACITY) **
+                                (10 ** params.opacityPower) *
+                            FIXED_OPACITY;
                     }
 
                     mesh.packedSplats.setSplat(

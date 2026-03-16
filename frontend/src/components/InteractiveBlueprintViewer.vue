@@ -13,6 +13,9 @@ import {
 } from 'src/lib/maths/blueprintMesh';
 
 const CAMERA_DISTANCE_FACTOR = 3.0;
+const FLOOR_SIZE_FACTOR = 2; // times radius
+const INITIAL_SECTION_HEIGHT_FACTOR = 1; // times radius
+const SECTION_HEIGTHT_FACTOR_RANGE = 5;
 
 const props = defineProps<{
     splatData: ArrayBuffer;
@@ -37,17 +40,16 @@ const displayFloor = ref(true);
 const floorZOffset = ref(0);
 const averageCameraOffsetUnit = ref(1);
 const averageCameraHeightUnit = computed(() => averageCameraOffsetUnit.value - floorZOffset.value);
-const cameramanHeightCm = ref(180);
+const cameramanHeightCm = ref(170);
 const cameraHeightCm = computed(() => cameramanHeightCm.value * 0.9); // Assume camera is at 90% of cameraman height
 const cmPerUnit = computed(() => cameraHeightCm.value / averageCameraHeightUnit.value);
 
-const sectionZStart = ref(0);
-const sectionZEnd = ref(10);
-const densityThreshold = ref(0.01);
-const opacityThreshold = ref(0);
-const opacityMultiplier = ref(0.2);
-const opacityPower = ref(4.0);
-const opacityGain = ref(100.0);
+const sectionZFactor = ref({ min: -1, max: 1 });
+const sectionZFactorStart = computed(() => -sectionZFactor.value.max);
+const sectionZFactorEnd = computed(() => -sectionZFactor.value.min);
+const densityThreshold = ref(5.0);
+const opacityMultiplier = ref(0.35);
+const opacityPower = ref(1.0);
 
 let geometryData: BlueprintGeometry | null = null;
 const initialCameraPosition = ref<THREE.Vector3 | null>(null);
@@ -114,12 +116,12 @@ onMounted(() => {
             camera.lookAt(0, 0, 0);
 
             floorPlaneMesh = new THREE.Mesh(
-                new THREE.PlaneGeometry(geometryData.radius * 10, geometryData.radius * 10),
+                new THREE.CircleGeometry(geometryData.radius * FLOOR_SIZE_FACTOR, 64),
                 new THREE.MeshBasicMaterial({
-                    color: 0xeeeeee,
+                    color: 0xddddff,
                     side: THREE.DoubleSide,
                     transparent: true,
-                    opacity: 0.9,
+                    opacity: 0.8,
                 }),
             );
             group.add(floorPlaneMesh);
@@ -135,8 +137,10 @@ onMounted(() => {
             );
             cameraPositionsPointsMesh.setRotationFromMatrix(geometryData.worldRotationMatrix);
             group.add(cameraPositionsPointsMesh);
-            sectionZStart.value = averageCameraOffsetUnit.value - 0.5;
-            sectionZEnd.value = averageCameraOffsetUnit.value + 0.5;
+            sectionZFactor.value = {
+                min: -INITIAL_SECTION_HEIGHT_FACTOR,
+                max: INITIAL_SECTION_HEIGHT_FACTOR,
+            };
 
             initialCameraPosition.value = camera.position.clone();
             initialCameraTarget.value = new THREE.Vector3(0, 0, 0);
@@ -187,15 +191,7 @@ watch(viewerSize, (newSize) => {
 });
 
 watch(
-    [
-        opacityMultiplier,
-        opacityPower,
-        opacityGain,
-        opacityThreshold,
-        densityThreshold,
-        sectionZStart,
-        sectionZEnd,
-    ],
+    [densityThreshold, opacityMultiplier, opacityPower, sectionZFactorStart, sectionZFactorEnd],
     () => collection.value.add(`generation-${Date.now()}`, generateBlueprint()),
 );
 
@@ -206,13 +202,13 @@ function generateBlueprint(onFinishedLoading?: (mesh: SplatMesh) => void): Async
         }
 
         const params: BlueprintSplatProcessingParams = {
+            densityThreshold: densityThreshold.value * geometryData!.radius ** 3,
             opacityMultiplier: opacityMultiplier.value,
             opacityPower: opacityPower.value,
-            opacityGain: opacityGain.value,
-            opacityThreshold: opacityThreshold.value,
-            densityThreshold: densityThreshold.value,
-            sectionZStart: sectionZStart.value,
-            sectionZEnd: sectionZEnd.value,
+            sectionZStart:
+                averageCameraOffsetUnit.value + sectionZFactorStart.value * geometryData!.radius,
+            sectionZEnd:
+                averageCameraOffsetUnit.value + sectionZFactorEnd.value * geometryData!.radius,
         };
 
         mesh = yield* AsyncResult.fromValuePromise(
@@ -325,15 +321,6 @@ watch(sceneZRotation, (tilt) => {
                                     :disable="collection.anyLoading()"
                                 />
                             </div>
-                            <div>
-                                <q-toggle
-                                    v-model="displayFloor"
-                                    label="Show Floor"
-                                    color="primary"
-                                    dense
-                                    :disable="collection.anyLoading()"
-                                />
-                            </div>
                             <q-btn
                                 label="Save Image"
                                 color="positive"
@@ -350,7 +337,16 @@ watch(sceneZRotation, (tilt) => {
 
                     <!-- Section 2: Floor Height & Scale -->
                     <div class="section-floor q-px-md">
-                        <div class="text-overline text-primary q-mb-sm">Floor Height & Scale</div>
+                        <div class="text-overline text-primary q-mb-sm row items-center">
+                            Floor Height & Scale
+                            <q-icon name="info" size="16px" class="q-ml-xs cursor-pointer">
+                                <q-tooltip max-width="250px">
+                                    Adjust the average camera height and the floor level to allow
+                                    estimation of real-world dimensions.
+                                </q-tooltip>
+                            </q-icon>
+                        </div>
+
                         <div class="row q-col-gutter-sm">
                             <div class="col-6">
                                 <div class="text-caption text-grey-7">Cameraman height (cm)</div>
@@ -360,7 +356,7 @@ watch(sceneZRotation, (tilt) => {
                                     :max="200"
                                     dense
                                     label
-                                    :label-value="cameramanHeightCm.toFixed(2)"
+                                    :label-value="cameramanHeightCm.toFixed(0)"
                                     :disable="collection.anyLoading()"
                                 />
                             </div>
@@ -372,8 +368,6 @@ watch(sceneZRotation, (tilt) => {
                                     :max="10"
                                     :step="0.1"
                                     dense
-                                    label
-                                    :label-value="floorZOffset.toFixed(2)"
                                     :disable="collection.anyLoading()"
                                 />
                             </div>
@@ -391,6 +385,16 @@ watch(sceneZRotation, (tilt) => {
                                 >
                             </div>
                         </div>
+
+                        <div class="q-mt-md">
+                            <q-toggle
+                                v-model="displayFloor"
+                                label="Show Floor"
+                                color="primary"
+                                dense
+                                :disable="collection.anyLoading()"
+                            />
+                        </div>
                     </div>
 
                     <q-separator vertical inset />
@@ -398,62 +402,63 @@ watch(sceneZRotation, (tilt) => {
                     <!-- Section 3: Splat Processing & Clipping -->
                     <div class="section-splat q-px-md">
                         <div class="text-overline text-primary q-mb-sm">Splat Processing</div>
+
                         <div class="splat-processing">
-                            <div class="control-group section-z-start">
-                                <div class="text-caption text-grey-7">Section Start</div>
-                                <q-slider
-                                    v-model="sectionZStart"
-                                    :min="-10.0"
-                                    :max="10.0"
+                            <div class="control-group section-z-range">
+                                <div class="text-caption text-grey-7">
+                                    Section limits (bottom - top)
+                                    <q-icon name="info" size="16px" class="cursor-pointer">
+                                        <q-tooltip max-width="250px">
+                                            Only display the splats within these vertical limits.
+                                        </q-tooltip>
+                                    </q-icon>
+                                </div>
+                                <q-range
+                                    v-model="sectionZFactor"
+                                    :min="-SECTION_HEIGTHT_FACTOR_RANGE"
+                                    :max="SECTION_HEIGTHT_FACTOR_RANGE"
                                     :step="0.01"
                                     label
-                                    :label-value="sectionZStart.toFixed(2)"
-                                    :disable="collection.anyLoading()"
-                                />
-                            </div>
-                            <div class="control-group section-z-end">
-                                <div class="text-caption text-grey-7">Section End</div>
-                                <q-slider
-                                    v-model="sectionZEnd"
-                                    :min="-10.0"
-                                    :max="10.0"
-                                    :step="0.01"
-                                    label
-                                    :label-value="sectionZEnd.toFixed(2)"
+                                    :left-label-value="sectionZFactor.min.toFixed(2)"
+                                    :right-label-value="sectionZFactor.max.toFixed(2)"
                                     :disable="collection.anyLoading()"
                                 />
                             </div>
 
-                            <div class="control-group density-threshold">
-                                <div class="text-caption text-grey-7">Density Threshold</div>
+                            <div class="control-group opacity-threshold">
+                                <div class="text-caption text-grey-7">
+                                    Density Threshold
+                                    <q-icon name="info" size="16px" class="cursor-pointer">
+                                        <q-tooltip max-width="250px">
+                                            Increase this value to hide splats that are less opaque
+                                            or too large.
+                                        </q-tooltip>
+                                    </q-icon>
+                                </div>
                                 <q-slider
                                     v-model="densityThreshold"
-                                    :min="0.001"
-                                    :max="100.0"
-                                    :step="0.001"
+                                    :min="0.01"
+                                    :max="20.0"
+                                    :step="0.01"
                                     label
                                     :label-value="densityThreshold.toFixed(2)"
                                     :disable="collection.anyLoading()"
                                 />
                             </div>
-                            <div class="control-group opacity-threshold">
-                                <div class="text-caption text-grey-7">Opacity Threshold</div>
-                                <q-slider
-                                    v-model="opacityThreshold"
-                                    :min="0.001"
-                                    :max="1.0"
-                                    :step="0.001"
-                                    label
-                                    :label-value="opacityThreshold.toFixed(2)"
-                                    :disable="collection.anyLoading()"
-                                />
-                            </div>
+
                             <div class="control-group opacity-multiplier">
-                                <div class="text-caption text-grey-7">Opacity Multiplier</div>
+                                <div class="text-caption text-grey-7">
+                                    Opacity Multiplier
+                                    <q-icon name="info" size="16px" class="cursor-pointer">
+                                        <q-tooltip max-width="250px">
+                                            Control the darkness of the splats.
+                                        </q-tooltip>
+                                    </q-icon>
+                                </div>
                                 <q-slider
                                     v-model="opacityMultiplier"
                                     :min="0.001"
-                                    :max="1.0"
+                                    :max="2.0"
                                     :step="0.001"
                                     label
                                     :label-value="opacityMultiplier.toFixed(2)"
@@ -461,26 +466,21 @@ watch(sceneZRotation, (tilt) => {
                                 />
                             </div>
                             <div class="control-group opacity-power">
-                                <div class="text-caption text-grey-7">Opacity Power</div>
+                                <div class="text-caption text-grey-7">
+                                    Opacity Power
+                                    <q-icon name="info" size="16px" class="cursor-pointer">
+                                        <q-tooltip max-width="250px">
+                                            Increase this value to increase contrast.
+                                        </q-tooltip>
+                                    </q-icon>
+                                </div>
                                 <q-slider
                                     v-model="opacityPower"
-                                    :min="0.1"
-                                    :max="10.0"
-                                    :step="0.1"
+                                    :min="0"
+                                    :max="2"
+                                    :step="0.01"
                                     label
                                     :label-value="opacityPower.toFixed(2)"
-                                    :disable="collection.anyLoading()"
-                                />
-                            </div>
-                            <div class="control-group opacity-gain">
-                                <div class="text-caption text-grey-7">Opacity Gain</div>
-                                <q-slider
-                                    v-model="opacityGain"
-                                    :min="0.1"
-                                    :max="500.0"
-                                    :step="0.1"
-                                    label
-                                    :label-value="opacityGain.toFixed(2)"
                                     :disable="collection.anyLoading()"
                                 />
                             </div>
@@ -519,26 +519,13 @@ watch(sceneZRotation, (tilt) => {
     gap: 1rem 0.5rem;
 
     grid-template-areas:
-        'section-z-start section-z-end'
-        'density-threshold density-threshold'
-        'opacity-threshold opacity-multiplier'
-        'opacity-power opacity-gain';
+        'section-z-range section-z-range'
+        'opacity-threshold opacity-threshold'
+        'opacity-multiplier opacity-power';
 }
 
-.section-z-start {
-    grid-area: section-z-start;
-}
-
-.section-z-end {
-    grid-area: section-z-end;
-}
-
-.density-threshold {
-    grid-area: density-threshold;
-}
-
-.opacity-threshold {
-    grid-area: opacity-threshold;
+.section-z-range {
+    grid-area: section-z-range;
 }
 
 .opacity-multiplier {
@@ -547,10 +534,6 @@ watch(sceneZRotation, (tilt) => {
 
 .opacity-power {
     grid-area: opacity-power;
-}
-
-.opacity-gain {
-    grid-area: opacity-gain;
 }
 
 .viewer-container {
