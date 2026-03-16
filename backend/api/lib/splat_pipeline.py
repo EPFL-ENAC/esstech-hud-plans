@@ -1,3 +1,4 @@
+import logging
 import os
 import pty
 import re
@@ -20,6 +21,8 @@ from api.models.splats import (
 )
 
 from .pipeline_logger import PipelineLogger
+
+logger = logging.getLogger("uvicorn.error")
 
 RUNAI_POLL_INTERVAL = 5  # seconds
 os.environ["PYTHONUNBUFFERED"] = "1"  # Add at top of file
@@ -583,7 +586,7 @@ class SplatPipeline:
 
         runai.refresh_logs()
         while not os.path.exists(log_file_path):
-            print(f"Waiting for log file {log_file_path} to be created...")
+            logger.info(f"Waiting for log file {log_file_path} to be created...")
             if runai.check_job_terminated(job_name):
                 self.logger.step_failed(
                     step_name,
@@ -593,7 +596,7 @@ class SplatPipeline:
             time.sleep(RUNAI_POLL_INTERVAL)
             runai.refresh_logs()
 
-        print(f"Monitoring log file {log_file_path} for updates...")
+        logger.info(f"Monitoring log file {log_file_path} for updates...")
         buffer = ""
         read_pos = 0
         while True:

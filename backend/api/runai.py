@@ -35,7 +35,14 @@ def copy_data_to_scratch(source_path: str, dest_path: str) -> None:
     full_dest = f"{config.RUNAI_MOUNT_SCRATCH_PATH}/{dest_path.lstrip('/')}"
     logger.info(f"Copying data from {source_path} to {full_dest} using rclone")
     subprocess.run(
-        ["rclone", "copy", source_path, full_dest, "--create-empty-src-dirs"],
+        [
+            "rclone",
+            "copy",
+            source_path,
+            full_dest,
+            "--create-empty-src-dirs",
+            "--copy-links",
+        ],
         check=True,
     )
 
@@ -50,7 +57,14 @@ def copy_data_from_scratch(source_path: str, dest_path: str) -> None:
     full_source = f"{config.RUNAI_MOUNT_SCRATCH_PATH}/{source_path.lstrip('/')}"
     logger.info(f"Copying data from {full_source} to {dest_path} using rclone")
     subprocess.run(
-        ["rclone", "copy", full_source, dest_path, "--create-empty-src-dirs"],
+        [
+            "rclone",
+            "copy",
+            full_source,
+            dest_path,
+            "--create-empty-src-dirs",
+            "--copy-links",
+        ],
         check=True,
     )
 
