@@ -1,11 +1,24 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { useRouter } from 'vue-router';
 import type { SplatPipelineStatus } from 'src/stores/splats';
 import PipelineStepProgress from './PipelineStepProgress.vue';
 
 const props = defineProps<{
     value: SplatPipelineStatus;
 }>();
+
+const router = useRouter();
+
+function handleRelaunchBrush() {
+    const splatPath = props.value.output.splat_path;
+    const parts = splatPath.split('/');
+    const generationId = parts[parts.indexOf('splats') + 1];
+    void router.push({
+        path: '/',
+        query: { colmapGenerationId: generationId },
+    });
+}
 
 const statusColor = computed(() => {
     if (props.value.overall_status === 'completed') return 'positive';
@@ -87,6 +100,17 @@ const statusText = computed(() => {
                 :step="props.value.steps.blueprint_extraction"
             />
         </q-list>
+
+        <!-- Relaunch Brush Button (Visible when completed) -->
+        <div v-if="props.value.overall_status === 'completed'" class="q-pa-md">
+            <q-btn
+                color="primary"
+                label="Relaunch Brush Step"
+                icon="refresh"
+                @click="handleRelaunchBrush"
+                class="full-width"
+            />
+        </div>
 
         <!-- Output Section (Visible when completed) -->
         <q-card v-if="props.value.overall_status === 'completed'" class="q-mt-lg bg-grey-1">

@@ -4,11 +4,7 @@
             <h1 class="text-h5 q-mb-lg">Splat Generation Pipeline</h1>
 
             <!-- 1. Source Selection -->
-            <input-settings
-                :modelValue="inputConfig"
-                @update:modelValue="inputConfig = $event"
-                class="q-mb-md"
-            />
+            <input-settings v-model="inputConfig" v-model:tab="activeTab" class="q-mb-md" />
 
             <!-- 2. Pipeline Stages -->
             <ffmpeg-settings
@@ -47,8 +43,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, type Ref, computed } from 'vue';
-import { useRouter } from 'vue-router';
+import { ref, type Ref, computed, onMounted } from 'vue';
+import { useRouter, useRoute } from 'vue-router';
 import InputSettings from 'src/components/InputSettings.vue';
 import { type InputConfig, makeDefaultInputConfig } from 'src/lib/splats/input';
 import FfmpegSettings from 'src/components/FfmpegSettings.vue';
@@ -62,8 +58,10 @@ import { type BlueprintConfig, makeDefaultBlueprintConfig } from 'src/lib/splats
 import { baseUrl } from 'boot/api';
 
 const router = useRouter();
+const route = useRoute();
 
 const inputConfig: Ref<InputConfig> = ref(makeDefaultInputConfig());
+const activeTab = ref<'video' | 'colmap'>('video');
 const isInputConfigFilled = computed(() => {
     if (inputConfig.value.type === 'video') {
         return !!inputConfig.value.selectedVideoFile;
@@ -77,6 +75,15 @@ const brushConfig = ref<BrushTrainingConfig>(makeDefaultBrushConfig());
 const blueprintConfig = ref<BlueprintConfig>(makeDefaultBlueprintConfig());
 const uploadStatus = ref('');
 const statusClass = ref('');
+
+onMounted(() => {
+    const colmapGenerationId = route.query.colmapGenerationId as string | undefined;
+    if (colmapGenerationId) {
+        inputConfig.value.type = 'colmap';
+        inputConfig.value.colmapGenerationId = colmapGenerationId;
+        activeTab.value = 'colmap';
+    }
+});
 
 async function submitJob() {
     if (inputConfig.value.type === 'video') {
