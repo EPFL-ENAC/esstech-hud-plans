@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import type { SplatMesh } from '@sparkjsdev/spark';
+import { SplatMesh } from '@sparkjsdev/spark';
 import { computed, onMounted, ref, useTemplateRef, watch } from 'vue';
 import { useAsyncResultCollection } from 'unwrapped/vue';
 import { AsyncResult } from 'unwrapped/core';
@@ -197,10 +197,6 @@ watch(
 
 function generateBlueprint(onFinishedLoading?: (mesh: SplatMesh) => void): AsyncResult<SplatMesh> {
     return AsyncResult.run(function* () {
-        if (mesh) {
-            group.remove(mesh);
-        }
-
         const params: BlueprintSplatProcessingParams = {
             densityThreshold: densityThreshold.value * geometryData!.radius ** 3,
             opacityMultiplier: opacityMultiplier.value,
@@ -222,6 +218,11 @@ function generateBlueprint(onFinishedLoading?: (mesh: SplatMesh) => void): Async
             -geometryData!.center.z,
         );
 
+        group.children.forEach((child) => {
+            if (child instanceof SplatMesh) {
+                group.remove(child);
+            }
+        });
         group.add(mesh);
 
         return mesh;
@@ -357,7 +358,6 @@ watch(sceneZRotation, (tilt) => {
                                     dense
                                     label
                                     :label-value="cameramanHeightCm.toFixed(0)"
-                                    :disable="collection.anyLoading()"
                                 />
                             </div>
                             <div class="col-6">
@@ -368,7 +368,6 @@ watch(sceneZRotation, (tilt) => {
                                     :max="10"
                                     :step="0.1"
                                     dense
-                                    :disable="collection.anyLoading()"
                                 />
                             </div>
                         </div>
@@ -421,7 +420,6 @@ watch(sceneZRotation, (tilt) => {
                                     label
                                     :left-label-value="sectionZFactor.min.toFixed(2)"
                                     :right-label-value="sectionZFactor.max.toFixed(2)"
-                                    :disable="collection.anyLoading()"
                                 />
                             </div>
 
@@ -442,7 +440,6 @@ watch(sceneZRotation, (tilt) => {
                                     :step="0.01"
                                     label
                                     :label-value="densityThreshold.toFixed(2)"
-                                    :disable="collection.anyLoading()"
                                 />
                             </div>
 
@@ -462,7 +459,6 @@ watch(sceneZRotation, (tilt) => {
                                     :step="0.001"
                                     label
                                     :label-value="opacityMultiplier.toFixed(2)"
-                                    :disable="collection.anyLoading()"
                                 />
                             </div>
                             <div class="control-group opacity-power">
@@ -481,7 +477,6 @@ watch(sceneZRotation, (tilt) => {
                                     :step="0.01"
                                     label
                                     :label-value="opacityPower.toFixed(2)"
-                                    :disable="collection.anyLoading()"
                                 />
                             </div>
                         </div>
@@ -601,9 +596,8 @@ watch(sceneZRotation, (tilt) => {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    background: rgba(0, 0, 0, 0.9);
+    background: rgba(0, 0, 0, 0.2);
     color: white;
-    backdrop-filter: blur(4px);
     z-index: 20;
 }
 
