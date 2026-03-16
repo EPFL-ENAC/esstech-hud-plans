@@ -6,7 +6,11 @@ import { computed, onMounted, ref, useTemplateRef, watch } from 'vue';
 import { useAsyncResultCollection } from 'unwrapped/vue';
 import { AsyncResult } from 'unwrapped/core';
 import { BlueprintGeometry, fetchBlueprintGeometryJSON } from 'src/lib/maths/blueprintGeometry';
-import { autoDetectFloorOffset, type BlueprintSplatProcessingParams, generateBlueprintMesh } from 'src/lib/maths/blueprintMesh';
+import {
+    autoDetectFloorOffset,
+    type BlueprintSplatProcessingParams,
+    generateBlueprintMesh,
+} from 'src/lib/maths/blueprintMesh';
 
 const CAMERA_DISTANCE_FACTOR = 3.0;
 
@@ -84,78 +88,86 @@ function exportImage(): void {
 const collection = useAsyncResultCollection();
 
 onMounted(() => {
-    collection.value.add('setup', AsyncResult.run(function* () {
-        if (!container.value) {
-            return;
-        }
-
-        const geometryJSON = yield* fetchBlueprintGeometryJSON(props.generationId);
-        geometryData = new BlueprintGeometry(geometryJSON);
-
-        scene = new THREE.Scene();
-        scene.add(group);
-
-        const frustumSize = geometryData.radius * 4;
-        camera = new THREE.OrthographicCamera(
-            -frustumSize / 2,
-            frustumSize / 2,
-            frustumSize / 2,
-            -frustumSize / 2,
-            0.1,
-            geometryData.radius * 10,
-        );
-        camera.position.set(0, 0, geometryData.radius * CAMERA_DISTANCE_FACTOR);
-        camera.lookAt(0, 0, 0);
-
-        floorPlaneMesh = new THREE.Mesh(
-            new THREE.PlaneGeometry(geometryData.radius * 10, geometryData.radius * 10),
-            new THREE.MeshBasicMaterial({
-                color: 0xeeeeee,
-                side: THREE.DoubleSide,
-                transparent: true,
-                opacity: 0.9,
-            }),
-        );
-        group.add(floorPlaneMesh);
-
-        averageCameraOffsetUnit.value = geometryData.averageCameraZ;
-        const cameraPositionsGeometry = new THREE.BufferGeometry().setFromPoints(geometryData.cameraPositions);
-        const cameraPositionsMaterial = new THREE.PointsMaterial({ color: 0xff0000, size: 3 });
-        cameraPositionsPointsMesh = new THREE.Points(cameraPositionsGeometry, cameraPositionsMaterial);
-        cameraPositionsPointsMesh.setRotationFromMatrix(geometryData.worldRotationMatrix);
-        group.add(cameraPositionsPointsMesh);
-        sectionZStart.value = averageCameraOffsetUnit.value - 0.5;
-        sectionZEnd.value = averageCameraOffsetUnit.value + 0.5;
-
-        initialCameraPosition.value = camera.position.clone();
-        initialCameraTarget.value = new THREE.Vector3(0, 0, 0);
-
-        renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-        renderer.setSize(viewerSize.value, viewerSize.value);
-        renderer.setClearColor(0xffffff, 1);
-        container.value.appendChild(renderer.domElement);
-
-        controls = new OrbitControls(camera, renderer.domElement);
-        controls.target.copy(initialCameraTarget.value);
-        controls.enableRotate = true;
-        controls.update();
-        controls.addEventListener('change', updateScaleOverlay);
-        updateScaleOverlay();
-
-        yield* generateBlueprint((mesh) => {
-            if (!geometryData) return;
-
-            floorZOffset.value = autoDetectFloorOffset(mesh, geometryData) ?? 0;
-        });
-
-        renderer.setAnimationLoop(() => {
-            controls?.update();
-
-            if (renderer && scene && camera) {
-                renderer.render(scene, camera);
+    collection.value.add(
+        'setup',
+        AsyncResult.run(function* () {
+            if (!container.value) {
+                return;
             }
-        });
-    }));
+
+            const geometryJSON = yield* fetchBlueprintGeometryJSON(props.generationId);
+            geometryData = new BlueprintGeometry(geometryJSON);
+
+            scene = new THREE.Scene();
+            scene.add(group);
+
+            const frustumSize = geometryData.radius * 4;
+            camera = new THREE.OrthographicCamera(
+                -frustumSize / 2,
+                frustumSize / 2,
+                frustumSize / 2,
+                -frustumSize / 2,
+                0.1,
+                geometryData.radius * 10,
+            );
+            camera.position.set(0, 0, geometryData.radius * CAMERA_DISTANCE_FACTOR);
+            camera.lookAt(0, 0, 0);
+
+            floorPlaneMesh = new THREE.Mesh(
+                new THREE.PlaneGeometry(geometryData.radius * 10, geometryData.radius * 10),
+                new THREE.MeshBasicMaterial({
+                    color: 0xeeeeee,
+                    side: THREE.DoubleSide,
+                    transparent: true,
+                    opacity: 0.9,
+                }),
+            );
+            group.add(floorPlaneMesh);
+
+            averageCameraOffsetUnit.value = geometryData.averageCameraZ;
+            const cameraPositionsGeometry = new THREE.BufferGeometry().setFromPoints(
+                geometryData.cameraPositions,
+            );
+            const cameraPositionsMaterial = new THREE.PointsMaterial({ color: 0xff0000, size: 3 });
+            cameraPositionsPointsMesh = new THREE.Points(
+                cameraPositionsGeometry,
+                cameraPositionsMaterial,
+            );
+            cameraPositionsPointsMesh.setRotationFromMatrix(geometryData.worldRotationMatrix);
+            group.add(cameraPositionsPointsMesh);
+            sectionZStart.value = averageCameraOffsetUnit.value - 0.5;
+            sectionZEnd.value = averageCameraOffsetUnit.value + 0.5;
+
+            initialCameraPosition.value = camera.position.clone();
+            initialCameraTarget.value = new THREE.Vector3(0, 0, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+            renderer.setSize(viewerSize.value, viewerSize.value);
+            renderer.setClearColor(0xffffff, 1);
+            container.value.appendChild(renderer.domElement);
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.target.copy(initialCameraTarget.value);
+            controls.enableRotate = true;
+            controls.update();
+            controls.addEventListener('change', updateScaleOverlay);
+            updateScaleOverlay();
+
+            yield* generateBlueprint((mesh) => {
+                if (!geometryData) return;
+
+                floorZOffset.value = autoDetectFloorOffset(mesh, geometryData) ?? 0;
+            });
+
+            renderer.setAnimationLoop(() => {
+                controls?.update();
+
+                if (renderer && scene && camera) {
+                    renderer.render(scene, camera);
+                }
+            });
+        }),
+    );
 });
 
 watch(viewerSize, (newSize) => {
@@ -175,7 +187,15 @@ watch(viewerSize, (newSize) => {
 });
 
 watch(
-    [opacityMultiplier, opacityPower, opacityGain, opacityThreshold, densityThreshold, sectionZStart, sectionZEnd],
+    [
+        opacityMultiplier,
+        opacityPower,
+        opacityGain,
+        opacityThreshold,
+        densityThreshold,
+        sectionZStart,
+        sectionZEnd,
+    ],
     () => collection.value.add(`generation-${Date.now()}`, generateBlueprint()),
 );
 
@@ -195,10 +215,16 @@ function generateBlueprint(onFinishedLoading?: (mesh: SplatMesh) => void): Async
             sectionZEnd: sectionZEnd.value,
         };
 
-        mesh = yield* AsyncResult.fromValuePromise(generateBlueprintMesh(props.splatData, params, onFinishedLoading));
+        mesh = yield* AsyncResult.fromValuePromise(
+            generateBlueprintMesh(props.splatData, params, onFinishedLoading),
+        );
 
         mesh.setRotationFromMatrix(geometryData!.worldRotationMatrix);
-        mesh.position.set(-geometryData!.center.x, -geometryData!.center.y, -geometryData!.center.z);
+        mesh.position.set(
+            -geometryData!.center.x,
+            -geometryData!.center.y,
+            -geometryData!.center.z,
+        );
 
         group.add(mesh);
 
@@ -279,7 +305,9 @@ watch(sceneZRotation, (tilt) => {
                                 />
                             </div>
                             <div>
-                                <div class="text-caption text-grey-7">Blueprint tilt: {{ sceneZRotation }}°</div>
+                                <div class="text-caption text-grey-7">
+                                    Blueprint tilt: {{ sceneZRotation }}°
+                                </div>
                                 <q-slider
                                     v-model="sceneZRotation"
                                     :min="-90"
@@ -595,7 +623,6 @@ watch(sceneZRotation, (tilt) => {
     backdrop-filter: blur(4px);
     z-index: 20;
 }
-
 
 .scale-overlay {
     position: absolute;

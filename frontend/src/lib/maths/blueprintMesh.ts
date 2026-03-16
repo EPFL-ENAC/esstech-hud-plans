@@ -1,7 +1,7 @@
-import { SplatMesh } from "@sparkjsdev/spark";
+import { SplatMesh } from '@sparkjsdev/spark';
 import * as THREE from 'three';
-import type { BlueprintGeometry } from "./blueprintGeometry";
-import { Histogram } from "./histogram";
+import type { BlueprintGeometry } from './blueprintGeometry';
+import { Histogram } from './histogram';
 
 export interface BlueprintSplatProcessingParams {
     sectionZStart: number;
@@ -13,7 +13,11 @@ export interface BlueprintSplatProcessingParams {
     opacityGain: number;
 }
 
-export async function generateBlueprintMesh(splat: ArrayBuffer, params: BlueprintSplatProcessingParams, onFinishedLoading?: (mesh: SplatMesh) => void): Promise<SplatMesh> {
+export async function generateBlueprintMesh(
+    splat: ArrayBuffer,
+    params: BlueprintSplatProcessingParams,
+    onFinishedLoading?: (mesh: SplatMesh) => void,
+): Promise<SplatMesh> {
     return new Promise((resolve) => {
         const black = new THREE.Color(0x000000);
         const clonedBuffer = splat.slice(0);
@@ -29,8 +33,13 @@ export async function generateBlueprintMesh(splat: ArrayBuffer, params: Blueprin
 
                     let newOpacity = 0;
                     if (center.y >= params.sectionZStart && center.y <= params.sectionZEnd) {
-                        if (opacity >= params.opacityThreshold && density >= params.densityThreshold) {
-                            newOpacity = Math.pow(opacity * params.opacityMultiplier, params.opacityPower) * params.opacityGain;
+                        if (
+                            opacity >= params.opacityThreshold &&
+                            density >= params.densityThreshold
+                        ) {
+                            newOpacity =
+                                Math.pow(opacity * params.opacityMultiplier, params.opacityPower) *
+                                params.opacityGain;
                         }
                     }
 
@@ -52,7 +61,10 @@ export async function generateBlueprintMesh(splat: ArrayBuffer, params: Blueprin
     });
 }
 
-export function autoDetectFloorOffset(mesh: SplatMesh, geometryData: BlueprintGeometry): number | null {
+export function autoDetectFloorOffset(
+    mesh: SplatMesh,
+    geometryData: BlueprintGeometry,
+): number | null {
     const zValues = new Float64Array(mesh.packedSplats.numSplats);
 
     const p = new THREE.Vector3();

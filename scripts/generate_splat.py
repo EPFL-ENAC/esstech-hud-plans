@@ -34,11 +34,11 @@ def prepare_dirs(root_path: str):
     colmap = os.path.join(root_path, 'colmap')
     if not os.path.exists(colmap):
         os.makedirs(colmap)
-    
+
     splats = os.path.join(root_path, 'splats')
     if not os.path.exists(splats):
         os.makedirs(splats)
-    
+
     return {
         'images': images,
         'workspace': root_path,
@@ -51,8 +51,8 @@ def make_frames_stream(input_file, output_directory, fps=5, max_size: tuple[int,
     import os
     if not os.path.exists(output_directory):
         os.makedirs(output_directory)
-    
-    # exports at a certain fps, and resize to 
+
+    # exports at a certain fps, and resize to
     return (
         ffmpeg
         .input(input_file)

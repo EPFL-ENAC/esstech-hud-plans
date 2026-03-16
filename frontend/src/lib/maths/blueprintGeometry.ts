@@ -57,7 +57,11 @@ export class BlueprintGeometry {
     }
 
     get center() {
-        return new THREE.Vector3(this.response.center[0], this.response.center[1], this.response.center[2]);
+        return new THREE.Vector3(
+            this.response.center[0],
+            this.response.center[1],
+            this.response.center[2],
+        );
     }
 
     get radius() {
@@ -67,11 +71,14 @@ export class BlueprintGeometry {
 
 export function fetchBlueprintGeometryJSON(id: string): AsyncResult<BlueprintGeometryResponse> {
     return AsyncResult.run(function* () {
-        const response = yield* AsyncResult.fromValuePromise(fetch(
-            `${baseUrl}/splats/blueprint-geometry/${id}`,
-        ));
+        const response = yield* AsyncResult.fromValuePromise(
+            fetch(`${baseUrl}/splats/blueprint-geometry/${id}`),
+        );
         if (!response.ok) {
-            return yield* AsyncResult.errTag('fetch_blueprint_geometry_failed', `Failed to fetch blueprint geometry: ${response.statusText}`);
+            return yield* AsyncResult.errTag(
+                'fetch_blueprint_geometry_failed',
+                `Failed to fetch blueprint geometry: ${response.statusText}`,
+            );
         }
         return yield* AsyncResult.fromValuePromise(response.json());
     });
