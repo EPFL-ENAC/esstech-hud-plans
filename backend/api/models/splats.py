@@ -62,3 +62,9 @@ class GenerationInputs(BaseModel):
     colmap: Union[ColmapAutoConfig, ColmapManualConfig]
     brush: BrushTrainingConfig
     blueprint: Optional[BlueprintConfig] = None
+
+
+class RestartBrushInputs(BaseModel):
+    colmap_generation_id: str
+    brush: BrushTrainingConfig
+    blueprint: Optional[BlueprintConfig] = None

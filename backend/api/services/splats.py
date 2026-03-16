@@ -13,6 +13,7 @@ from api.models.splats import (
     ColmapManualConfig,
     FFMPEGExtractionConfig,
     GenerationInputs,
+    RestartBrushInputs,
 )
 
 # Add parent directory to path to import other modules
@@ -223,7 +224,109 @@ class GenerationManager:
         except (json.JSONDecodeError, IOError):
             return None
 
+    def run_restart_brush(self, inputs: RestartBrushInputs) -> GenerationRun:
+        backend_root = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", ".."
+        )
+        source_dir = os.path.join(
+            backend_root, f"data/splats/{inputs.colmap_generation_id}"
+        )
+
+        if not os.path.exists(source_dir):
+            raise ValueError(
+                f"Source generation {inputs.colmap_generation_id} not found"
+            )
+
+        new_id = uuid.uuid4().hex
+        new_dir = os.path.join(backend_root, f"data/splats/{new_id}")
+
+        os.makedirs(new_dir, exist_ok=True)
+
+        source_status_file = os.path.join(source_dir, "status.json")
+        new_status_file = os.path.join(new_dir, "status.json")
+
+        steps_list = ["ffmpeg", "colmap", "brush"]
+        if inputs.blueprint is not None:
+            steps_list.append("blueprint_extraction")
+
+        if not os.path.exists(source_status_file):
+            raise ValueError(
+                f"Source status file not found for generation {inputs.colmap_generation_id}"
+            )
+
+        with open(source_status_file, "r") as f:
+            source_status = json.load(f)
+
+        new_status = {
+            "name": new_id,
+            "overall_status": "pending",
+            "progress": 0.0,
+            "message": "Starting brush restart...",
+            "started_at": source_status.get("started_at"),
+            "finished_at": None,
+            "output": None,
+            "settings": {
+                **source_status.get("settings", {}),
+                "brush": inputs.brush.model_dump(),
+                "blueprint": inputs.blueprint.model_dump()
+                if inputs.blueprint
+                else None,
+            },
+            "steps_list": steps_list,
+            "steps": {},
+            "colmap_geometric_data": source_status.get("colmap_geometric_data"),
+        }
+
+        source_steps = source_status.get("steps", {})
+        for step in ["ffmpeg", "colmap"]:
+            if step in source_steps:
+                new_status["steps"][step] = source_steps[step]
+
+        with open(new_status_file, "w") as f:
+            json.dump(new_status, f, indent=2)
+
+        run = GenerationRun(id=new_id, input_video_path="", status="pending")
+        self.runs[new_id] = run
+
+        future = self.executor.submit(
+            _run_restart_brush, inputs, new_id, new_dir, source_dir
+        )
+        self.futures[new_id] = future
+
+        def _on_done(fut):
+            if fut.exception() is not None:
+                run.status = "failed"
+            else:
+                run.status = "completed"
+                run.output_splat_path = fut.result()["splat_path"]
+            self.futures.pop(new_id)
+
+        future.add_done_callback(_on_done)
+
+        return run
+
 
 def _run_generation(inputs: GenerationInputs, job_name: str) -> GenerationRun:
     pipeline = SplatPipeline(job_name=job_name, inputs=inputs)
+    return pipeline.run()
+
+
+def _run_restart_brush(
+    inputs: RestartBrushInputs, job_name: str, workspace_dir: str, source_dir: str
+) -> dict[str, str | list[str] | list]:
+    from api.lib.restart_brush_pipeline import RestartBrushPipeline
+
+    source_status = None
+    source_status_file = os.path.join(source_dir, "status.json")
+    if os.path.exists(source_status_file):
+        with open(source_status_file, "r") as f:
+            source_status = json.load(f)
+
+    pipeline = RestartBrushPipeline(
+        job_name=job_name,
+        inputs=inputs,
+        workspace_dir=workspace_dir,
+        source_dir=source_dir,
+        source_status=source_status,
+    )
     return pipeline.run()

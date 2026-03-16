@@ -8,6 +8,7 @@ from api.models.splats import (
     ColmapAutoConfig,
     FFMPEGExtractionConfig,
     GenerationInputs,
+    RestartBrushInputs,
 )
 from api.services.splats import GenerationManager
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -215,3 +216,40 @@ async def get_generation_settings(generation_id: str):
         )
 
     return settings
+
+
+@router.post(
+    "/restart-brush",
+    status_code=200,
+    description="Restarts brush training on an existing COLMAP pipeline",
+    response_model=PostRunGenerationResponse,
+)
+async def restart_brush(
+    colmap_generation_id: str = Form(...),
+    brush_config: str = Form(...),
+    blueprint_config: str = Form(None),
+) -> PostRunGenerationResponse:
+    try:
+        brush_settings = BrushTrainingConfig(**json.loads(brush_config))
+        blueprint_settings = (
+            BlueprintConfig(**json.loads(blueprint_config))
+            if blueprint_config
+            else None
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=422, detail=f"Invalid configuration format: {str(e)}"
+        )
+
+    inputs = RestartBrushInputs(
+        colmap_generation_id=colmap_generation_id,
+        brush=brush_settings,
+        blueprint=blueprint_settings,
+    )
+
+    try:
+        run = manager.run_restart_brush(inputs)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return PostRunGenerationResponse(generation_id=run.id)

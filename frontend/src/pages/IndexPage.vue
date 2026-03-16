@@ -127,7 +127,40 @@ async function uploadVideo() {
     }
 }
 
-async function restartBrush() {}
+async function restartBrush() {
+    if (!inputConfig.value.colmapGenerationId) return;
+
+    const formData = new FormData();
+    formData.append('colmap_generation_id', inputConfig.value.colmapGenerationId);
+    formData.append('brush_config', JSON.stringify(brushConfig.value));
+    if (blueprintConfig.value.enabled) {
+        formData.append('blueprint_config', JSON.stringify(blueprintConfig.value));
+    }
+
+    try {
+        uploadStatus.value = 'Starting brush restart...';
+        statusClass.value = 'info';
+
+        const response = await fetch(`${baseUrl}/splats/restart-brush`, {
+            method: 'POST',
+            body: formData,
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.detail || 'Processing failed');
+        }
+
+        const result = await response.json();
+        uploadStatus.value = `Success: Generation ${result.generation_id} started`;
+        statusClass.value = 'success';
+
+        return router.push(`/splat/${result.generation_id}`);
+    } catch (error) {
+        uploadStatus.value = 'Error: ' + (error as Error).message;
+        statusClass.value = 'error';
+    }
+}
 </script>
 
 <style scoped>
