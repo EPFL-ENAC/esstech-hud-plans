@@ -107,6 +107,14 @@ const wrapLogs = ref(false);
         @after-show="() => scrollLogsToBottom()"
     >
         <div class="q-pa-md q-gutter-y-sm">
+            <!-- Settings Section -->
+            <div v-if="step.settings && Object.keys(step.settings).length > 0" class="q-mb-md">
+                <div class="text-subtitle2 q-mb-xs">Settings:</div>
+                <pre class="bg-grey-2 q-pa-sm rounded-borders">{{
+                    JSON.stringify(step.settings, null, 2)
+                }}</pre>
+            </div>
+
             <!-- Status and Progress Section -->
             <div class="row items-center q-col-gutter-md">
                 <div class="col-grow">
