@@ -4,39 +4,23 @@
             <h1 class="text-h5 q-mb-lg">Splat Generation Pipeline</h1>
 
             <!-- 1. Source Selection -->
-            <q-card flat bordered class="q-pa-md q-mb-md">
-                <div class="text-subtitle2 q-mb-sm text-primary">1. Input Video</div>
-                <q-file
-                    v-model="selectedFile"
-                    label="Select video source"
-                    filled
-                    clearable
-                    accept="video/*"
-                    @update:model-value="handleFileChange"
-                >
-                    <template v-slot:prepend>
-                        <q-icon name="movie" />
-                    </template>
-                </q-file>
-
-                <!-- Video Preview Section -->
-                <div
-                    v-if="videoPreviewUrl"
-                    class="q-mt-md overflow-hidden rounded-borders border-grey"
-                >
-                    <div class="text-caption text-grey-7 q-mb-xs">Preview:</div>
-                    <video
-                        :src="videoPreviewUrl"
-                        controls
-                        class="full-width rounded-borders shadow-2"
-                        style="max-height: 300px; background: black"
-                    ></video>
-                </div>
-            </q-card>
+            <input-settings
+                :modelValue="inputConfig"
+                @update:modelValue="inputConfig = $event"
+                class="q-mb-md"
+            />
 
             <!-- 2. Pipeline Stages -->
-            <ffmpeg-settings v-model="ffmpegConfig" class="q-mb-md" />
-            <colmap-settings v-model="colmapConfig" class="q-mb-md" />
+            <ffmpeg-settings
+                v-model="ffmpegConfig"
+                v-if="inputConfig.type === 'video'"
+                class="q-mb-md"
+            />
+            <colmap-settings
+                v-model="colmapConfig"
+                v-if="inputConfig.type === 'video'"
+                class="q-mb-md"
+            />
             <brush-settings v-model="brushConfig" class="q-mb-md" />
             <!-- <blueprint-settings v-model="blueprintConfig" class="q-mb-md" /> -->
 
@@ -48,8 +32,8 @@
                     label="Launch Generation"
                     icon="rocket_launch"
                     :loading="uploadStatus === 'Uploading...'"
-                    :disabled="!selectedFile"
-                    @click="uploadVideo"
+                    :disabled="!isInputConfigFilled || uploadStatus === 'Uploading...'"
+                    @click="submitJob"
                     class="full-width"
                 />
 
@@ -63,10 +47,12 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, ref } from 'vue';
+import { ref, type Ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
+import InputSettings from 'src/components/InputSettings.vue';
+import { type InputConfig, makeDefaultInputConfig } from 'src/lib/splats/input';
 import FfmpegSettings from 'src/components/FfmpegSettings.vue';
-import { makeDefaultFFMPEGConfig, type FFMPEGExtractionConfig } from 'src/lib/splats/ffmpeg';
+import { type FFMPEGExtractionConfig, makeDefaultFFMPEGConfig } from 'src/lib/splats/ffmpeg';
 import ColmapSettings from 'src/components/ColmapSettings.vue';
 import { type ColmapConfig, makeAutoDefaults } from 'src/lib/splats/colmap';
 import BrushSettings from 'src/components/BrushSettings.vue';
@@ -77,29 +63,14 @@ import { baseUrl } from 'boot/api';
 
 const router = useRouter();
 
-const selectedFile = ref<File | null>(null);
-const videoPreviewUrl = ref<string | null>(null);
-
-// Handling file selection and preview cleanup
-const handleFileChange = (file: File | null) => {
-    // Revoke old URL to prevent memory leaks
-    if (videoPreviewUrl.value) {
-        URL.revokeObjectURL(videoPreviewUrl.value);
-        videoPreviewUrl.value = null;
-    }
-
-    if (file) {
-        videoPreviewUrl.value = URL.createObjectURL(file);
-    }
-};
-
-// Ensure cleanup if component is unmounted
-onBeforeUnmount(() => {
-    if (videoPreviewUrl.value) {
-        URL.revokeObjectURL(videoPreviewUrl.value);
+const inputConfig: Ref<InputConfig> = ref(makeDefaultInputConfig());
+const isInputConfigFilled = computed(() => {
+    if (inputConfig.value.type === 'video') {
+        return !!inputConfig.value.selectedVideoFile;
+    } else {
+        return !!inputConfig.value.colmapGenerationId;
     }
 });
-
 const ffmpegConfig = ref<FFMPEGExtractionConfig>(makeDefaultFFMPEGConfig());
 const colmapConfig = ref<ColmapConfig>(makeAutoDefaults());
 const brushConfig = ref<BrushTrainingConfig>(makeDefaultBrushConfig());
@@ -107,12 +78,19 @@ const blueprintConfig = ref<BlueprintConfig>(makeDefaultBlueprintConfig());
 const uploadStatus = ref('');
 const statusClass = ref('');
 
-const uploadVideo = async () => {
-    if (!selectedFile.value) return;
+async function submitJob() {
+    if (inputConfig.value.type === 'video') {
+        await uploadVideo();
+    } else {
+        await restartBrush();
+    }
+}
+
+async function uploadVideo() {
+    if (!inputConfig.value.selectedVideoFile) return;
 
     const formData = new FormData();
-    // 1. Append the file
-    formData.append('file', selectedFile.value);
+    formData.append('file', inputConfig.value.selectedVideoFile);
 
     // 2. Append the settings as JSON strings
     // This allows the backend to receive the full pipeline configuration
@@ -147,7 +125,9 @@ const uploadVideo = async () => {
         uploadStatus.value = 'Error: ' + (error as Error).message;
         statusClass.value = 'error';
     }
-};
+}
+
+async function restartBrush() {}
 </script>
 
 <style scoped>
@@ -174,5 +154,12 @@ const uploadVideo = async () => {
 button {
     margin-left: 10px;
     cursor: pointer;
+}
+
+.text-subtitle2 {
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    font-size: 0.75rem;
 }
 </style>
