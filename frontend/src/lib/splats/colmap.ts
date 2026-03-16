@@ -57,7 +57,7 @@ export function makeAutoDefaults(): AutoReconstructorConfig {
         data_type: 'individual',
         quality: 'low',
         camera_model: 'OPENCV',
-        max_image_size: 2000,
+        max_image_size: 1920,
         single_camera: true,
         dense: false,
     };

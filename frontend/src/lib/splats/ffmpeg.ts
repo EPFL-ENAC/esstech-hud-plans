@@ -8,6 +8,6 @@ export function makeDefaultFFMPEGConfig(): FFMPEGExtractionConfig {
     return {
         fps: 2,
         fitInWidth: 1920,
-        fitInHeight: 1080,
+        fitInHeight: 1920,
     };
 }

@@ -14,10 +14,8 @@ const resetToDefaults = () => {
 <template>
     <q-card flat bordered class="q-pa-md q-mb-md">
         <q-card-section>
-            <div class="text-h6 text-weight-light">FFMPEG Extraction</div>
-            <div class="text-caption text-grey">
-                Convert video to image frames for the COLMAP pipeline.
-            </div>
+            <div class="text-h6 text-weight-light">FFMPEG Frame Extraction</div>
+            <div class="text-caption text-grey">Convert video to image frames.</div>
         </q-card-section>
 
         <q-separator />

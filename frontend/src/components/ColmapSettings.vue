@@ -28,6 +28,15 @@ watch(
 
 <template>
     <q-card flat bordered class="q-pa-md q-mb-md">
+        <q-card-section>
+            <div class="text-h6 text-weight-light">COLMAP Camera Pose Estimation</div>
+            <div class="text-caption text-grey">
+                Estimate relative camera positions from image frames.
+            </div>
+        </q-card-section>
+
+        <q-separator />
+
         <q-tabs
             v-model="activeTab"
             dense
