@@ -25,9 +25,14 @@ class PipelineLogger:
         }
         self.save()
 
+    def load_from_file(self, file_path: str):
+        """Load existing status data from a file."""
+        self.file_path = file_path
+        with open(file_path, "r") as f:
+            self.data = json.load(f)
+
     def set_file_path(self, file_path: str):
         self.file_path = file_path
-        self.save()
 
     def save(self):
         if self.file_path is None:
@@ -100,6 +105,11 @@ class PipelineLogger:
             self.data["steps"][step]["return_code"] = return_code
 
         self.save()
+
+    def reset_step(self, step: str):
+        if step in self.data["steps"]:
+            del self.data["steps"][step]
+            self.save()
 
     def add_log(
         self,

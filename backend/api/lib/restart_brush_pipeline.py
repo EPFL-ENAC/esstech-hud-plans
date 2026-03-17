@@ -1,4 +1,3 @@
-import json
 import os
 import shutil
 
@@ -27,54 +26,34 @@ class RestartBrushPipeline(BasePipeline):
                 f"Source status file not found for generation {self.inputs.colmap_generation_id}"
             )
 
-        with open(source_status_file, "r") as f:
-            source_status = json.load(f)
-
         os.makedirs(root_path, exist_ok=True)
         new_status_file = os.path.join(root_path, "status.json")
+        shutil.copy(source_status_file, new_status_file)
+        self.logger.load_from_file(new_status_file)
+
+        self.logger.data["name"] = self.job_name
+        self.logger.data["overall_status"] = "pending"
+        self.logger.data["progress"] = 0.0
+        self.logger.data["message"] = "Starting brush restart..."
+        self.logger.data["finished_at"] = None
+        self.logger.data["output"] = None
 
         steps_list = ["ffmpeg", "colmap", "brush"]
         if self.inputs.blueprint is not None:
             steps_list.append("blueprint_extraction")
+        self.logger.data["steps_list"] = steps_list
 
-        new_status = {
-            "name": self.job_name,
-            "overall_status": "pending",
-            "progress": 0.0,
-            "message": "Starting brush restart...",
-            "started_at": source_status.get("started_at"),
-            "finished_at": None,
-            "output": None,
-            "settings": {
-                **source_status.get("settings", {}),
-                "brush": self.inputs.brush.model_dump(),
-                "blueprint": self.inputs.blueprint.model_dump()
-                if self.inputs.blueprint
-                else None,
-            },
-            "steps_list": steps_list,
-            "steps": {},
-            "colmap_geometric_data": source_status.get("colmap_geometric_data"),
-        }
+        self.logger.data["settings"]["brush"] = self.inputs.brush.model_dump()
+        if self.inputs.blueprint is not None:
+            self.logger.data["settings"]["blueprint"] = (
+                self.inputs.blueprint.model_dump()
+            )
+        else:
+            self.logger.data["settings"]["blueprint"] = None
 
-        source_steps = source_status.get("steps", {})
-        for step in ["ffmpeg", "colmap"]:
-            if step in source_steps:
-                new_status["steps"][step] = source_steps[step]
-
-        with open(new_status_file, "w") as f:
-            json.dump(new_status, f, indent=2)
-
-        self.logger.data["steps_list"] = source_status.get(
-            "steps_list", ["ffmpeg", "colmap", "brush"]
-        )
-        self.logger.data["colmap_geometric_data"] = source_status.get(
-            "colmap_geometric_data"
-        )
-        source_steps = source_status.get("steps", {})
-        for step in ["ffmpeg", "colmap"]:
-            if step in source_steps:
-                self.logger.data["steps"][step] = source_steps[step]
+        self.logger.save()
+        self.logger.reset_step("brush")
+        self.logger.reset_step("blueprint_extraction")
 
         self.directories = {
             "workspace": root_path,
