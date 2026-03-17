@@ -35,7 +35,7 @@ let cameraPositionsPointsMesh: THREE.Points | null = null;
 const scaleBarWidthPx = ref(0);
 const sceneZRotation = ref(0);
 const displayCameraPositions = ref(true);
-const displayFloor = ref(true);
+const displayFloor = ref(false);
 
 const floorZOffset = ref(0);
 const averageCameraOffsetUnit = ref(1);
@@ -47,24 +47,23 @@ const cmPerUnit = computed(() => cameraHeightCm.value / averageCameraHeightUnit.
 const sectionZFactor = ref({ min: -1, max: 1 });
 const sectionZFactorStart = computed(() => -sectionZFactor.value.max);
 const sectionZFactorEnd = computed(() => -sectionZFactor.value.min);
-const densityThreshold = ref(5.0);
-const opacityMultiplier = ref(0.35);
-const opacityPower = ref(1.0);
+const densityThreshold = ref(1.0);
+const opacityMultiplier = ref(0.2);
+const opacityPower = ref(0.0);
+const contrast = ref(2.0);
 
 let geometryData: BlueprintGeometry | null = null;
 const initialCameraPosition = ref<THREE.Vector3 | null>(null);
 const initialCameraTarget = ref<THREE.Vector3 | null>(null);
 const viewerSize = ref(700);
-
-const thresholdEnabled = ref(false);
+const thresholdEnabled = computed(() => !displayFloor.value);
 
 const canvasFilter = computed(() => {
     if (!thresholdEnabled.value) {
         return 'none';
     }
     const brightness = 100;
-    const contrast = 10000;
-    return `contrast(${contrast}%) brightness(${brightness}%)`;
+    return `contrast(${100 * contrast.value}%) brightness(${brightness}%)`;
 });
 
 function resetView(): void {
@@ -124,6 +123,7 @@ onMounted(() => {
                     opacity: 0.8,
                 }),
             );
+            floorPlaneMesh.visible = displayFloor.value;
             group.add(floorPlaneMesh);
 
             averageCameraOffsetUnit.value = geometryData.averageCameraZ;
@@ -461,22 +461,24 @@ watch(sceneZRotation, (tilt) => {
                                     :label-value="opacityMultiplier.toFixed(2)"
                                 />
                             </div>
-                            <div class="control-group opacity-power">
+                            <div class="control-group contrast">
                                 <div class="text-caption text-grey-7">
-                                    Opacity Power
+                                    Contrast
                                     <q-icon name="info" size="16px" class="cursor-pointer">
                                         <q-tooltip max-width="250px">
-                                            Increase this value to increase contrast.
+                                            Increase this value to increase contrast. Disable "Show
+                                            floor" to enable this option.
                                         </q-tooltip>
                                     </q-icon>
                                 </div>
                                 <q-slider
-                                    v-model="opacityPower"
-                                    :min="0"
-                                    :max="2"
+                                    v-model="contrast"
+                                    :min="1"
+                                    :max="10"
                                     :step="0.01"
                                     label
-                                    :label-value="opacityPower.toFixed(2)"
+                                    :label-value="contrast.toFixed(2)"
+                                    :disable="displayFloor"
                                 />
                             </div>
                         </div>
@@ -516,7 +518,7 @@ watch(sceneZRotation, (tilt) => {
     grid-template-areas:
         'section-z-range section-z-range'
         'opacity-threshold opacity-threshold'
-        'opacity-multiplier opacity-power';
+        'opacity-multiplier contrast';
 }
 
 .section-z-range {
@@ -527,8 +529,8 @@ watch(sceneZRotation, (tilt) => {
     grid-area: opacity-multiplier;
 }
 
-.opacity-power {
-    grid-area: opacity-power;
+.contrast {
+    grid-area: contrast;
 }
 
 .viewer-container {
