@@ -1,73 +1,92 @@
+import json
 import os
 import shutil
-from typing import Union
 
-from api.lib.splat_pipeline import SplatPipeline
-from api.models.splats import (
-    BlueprintConfig,
-    BrushTrainingConfig,
-    ColmapAutoConfig,
-    ColmapManualConfig,
-    FFMPEGExtractionConfig,
-    GenerationInputs,
-    RestartBrushInputs,
-)
+from api.lib.splat_pipeline import BasePipeline
+from api.models.splats import RestartBrushInputs
 
 
-class RestartBrushPipeline(SplatPipeline):
-    def __init__(
-        self,
-        job_name: str,
-        inputs: RestartBrushInputs,
-        workspace_dir: str,
-        source_dir: str,
-        source_status: dict | None = None,
-    ):
-        self.source_dir = source_dir
+class RestartBrushPipeline(BasePipeline):
+    def __init__(self, job_name: str, inputs: RestartBrushInputs):
+        self.inputs: RestartBrushInputs
+        super().__init__(job_name=job_name, inputs=inputs)
 
-        placeholder_ffmpeg = FFMPEGExtractionConfig(
-            fps=1, fitInWidth=1920, fitInHeight=1080
-        )
-        placeholder_colmap: Union[ColmapAutoConfig, ColmapManualConfig] = (
-            ColmapAutoConfig(
-                data_type="video",
-                quality="medium",
-                camera_model="OPENCV",
-                max_image_size=1920,
-                single_camera=True,
-                dense=False,
-            )
+    def prepare_dirs(self, root_path: str):
+        source_path = os.path.join(
+            os.path.dirname(root_path), self.inputs.colmap_generation_id
         )
 
-        minimal_inputs = GenerationInputs(
-            video_path="",
-            ffmpeg=placeholder_ffmpeg,
-            colmap=placeholder_colmap,
-            brush=inputs.brush,
-            blueprint=inputs.blueprint,
+        if not os.path.exists(source_path):
+            raise ValueError(
+                f"Source generation {self.inputs.colmap_generation_id} not found"
+            )
+
+        source_status_file = os.path.join(source_path, "status.json")
+        if not os.path.exists(source_status_file):
+            raise ValueError(
+                f"Source status file not found for generation {self.inputs.colmap_generation_id}"
+            )
+
+        with open(source_status_file, "r") as f:
+            source_status = json.load(f)
+
+        os.makedirs(root_path, exist_ok=True)
+        new_status_file = os.path.join(root_path, "status.json")
+
+        steps_list = ["ffmpeg", "colmap", "brush"]
+        if self.inputs.blueprint is not None:
+            steps_list.append("blueprint_extraction")
+
+        new_status = {
+            "name": self.job_name,
+            "overall_status": "pending",
+            "progress": 0.0,
+            "message": "Starting brush restart...",
+            "started_at": source_status.get("started_at"),
+            "finished_at": None,
+            "output": None,
+            "settings": {
+                **source_status.get("settings", {}),
+                "brush": self.inputs.brush.model_dump(),
+                "blueprint": self.inputs.blueprint.model_dump()
+                if self.inputs.blueprint
+                else None,
+            },
+            "steps_list": steps_list,
+            "steps": {},
+            "colmap_geometric_data": source_status.get("colmap_geometric_data"),
+        }
+
+        source_steps = source_status.get("steps", {})
+        for step in ["ffmpeg", "colmap"]:
+            if step in source_steps:
+                new_status["steps"][step] = source_steps[step]
+
+        with open(new_status_file, "w") as f:
+            json.dump(new_status, f, indent=2)
+
+        self.logger.data["steps_list"] = source_status.get(
+            "steps_list", ["ffmpeg", "colmap", "brush"]
         )
+        self.logger.data["colmap_geometric_data"] = source_status.get(
+            "colmap_geometric_data"
+        )
+        source_steps = source_status.get("steps", {})
+        for step in ["ffmpeg", "colmap"]:
+            if step in source_steps:
+                self.logger.data["steps"][step] = source_steps[step]
 
-        super().__init__(job_name=job_name, inputs=minimal_inputs)
+        self.directories = {
+            "workspace": root_path,
+            "images": os.path.join(root_path, "images"),
+            "colmap": os.path.join(root_path, "colmap"),
+        }
 
-        self.prepare_dirs(workspace_dir)
+        self._prepare_symlinks(source_path)
 
-        if source_status:
-            self.logger.data["steps_list"] = source_status.get(
-                "steps_list", ["ffmpeg", "colmap", "brush"]
-            )
-            self.logger.data["colmap_geometric_data"] = source_status.get(
-                "colmap_geometric_data"
-            )
-            source_steps = source_status.get("steps", {})
-            for step in ["ffmpeg", "colmap"]:
-                if step in source_steps:
-                    self.logger.data["steps"][step] = source_steps[step]
-
-        self._prepare_symlinks()
-
-    def _prepare_symlinks(self):
-        source_images_dir = os.path.join(self.source_dir, "images")
-        source_colmap_dir = os.path.join(self.source_dir, "colmap")
+    def _prepare_symlinks(self, source_path: str):
+        source_images_dir = os.path.join(source_path, "images")
+        source_colmap_dir = os.path.join(source_path, "colmap")
 
         if not os.path.exists(source_images_dir):
             raise ValueError(
@@ -78,8 +97,8 @@ class RestartBrushPipeline(SplatPipeline):
                 f"Source COLMAP directory not found at {source_colmap_dir}"
             )
 
-        workspace_images_link = os.path.join(self.directories["images"])
-        workspace_colmap_link = os.path.join(self.directories["colmap"])
+        workspace_images_link = self.directories["images"]
+        workspace_colmap_link = self.directories["colmap"]
 
         if os.path.lexists(workspace_images_link):
             if os.path.isdir(workspace_images_link) and not os.path.islink(
@@ -105,16 +124,11 @@ class RestartBrushPipeline(SplatPipeline):
             workspace_colmap_link,
         )
 
-    def run(self):
-        status_file = os.path.join(self.directories["workspace"], "status.json")
-        self.logger.set_file_path(status_file)
-
-        from datetime import datetime
-
-        self.logger.data["overall_status"] = "running"
-        self.logger.data["started_at"] = datetime.utcnow().isoformat() + "Z"
-        self.logger.data["progress"] = 0
-        self.logger.save()
+    def _run(self) -> dict[str, str | list[str] | list]:
+        self.logger.set_file_path(
+            os.path.join(self.directories["workspace"], "status.json")
+        )
+        self.logger.start()
 
         try:
             self.run_brush(self.inputs.brush)
@@ -137,8 +151,8 @@ class RestartBrushPipeline(SplatPipeline):
                 ]
 
             self.logger.complete(output=pipeline_output)
-
             return pipeline_output
+
         except Exception as e:
             self.logger.fail(message=str(e))
             raise e

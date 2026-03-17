@@ -5,13 +5,14 @@ import re
 import select
 import subprocess
 import time
+from abc import ABC, abstractmethod
 from typing import Callable, Literal, Union
 
 import numpy as np
 from api import runai
 from api.config import config
-from api.data_processing.splats import save_histogram
 from api.models.splats import (
+    BaseGenerationInputs,
     BlueprintConfig,
     BrushTrainingConfig,
     ColmapAutoConfig,
@@ -46,13 +47,21 @@ brush_command = os.path.join(commands_prefix, "brush")
 output_prefix = os.path.join(backend_root, "data", "splats")
 
 
-class SplatPipeline:
-    def __init__(self, job_name: str, inputs: GenerationInputs):
+class BasePipeline(ABC):
+    def __init__(self, job_name: str, inputs: BaseGenerationInputs):
         self.job_name = job_name
         self.inputs = inputs
-        steps_list = ["ffmpeg", "colmap", "brush"]
+
+        steps_list = []
+        if inputs.ffmpeg is not None:
+            steps_list.append("ffmpeg")
+        if inputs.colmap is not None:
+            steps_list.append("colmap")
+        if inputs.brush is not None:
+            steps_list.append("brush")
         if inputs.blueprint is not None:
             steps_list.append("blueprint_extraction")
+
         self.logger = PipelineLogger(
             name=job_name,
             initial_settings=inputs.dict(),
@@ -61,63 +70,17 @@ class SplatPipeline:
 
         self.directories: dict[str, str] = {}
 
+    @abstractmethod
+    def prepare_dirs(self, root_path: str):
+        pass
+
+    @abstractmethod
+    def _run(self) -> dict[str, str | list[str] | list]:
+        pass
+
     def run(self):
         self.prepare_dirs(os.path.join(output_prefix, self.job_name))
-        self.logger.set_file_path(
-            os.path.join(self.directories["workspace"], "status.json")
-        )
-        self.logger.start()
-
-        try:
-            self.run_ffmpeg(
-                self.inputs.video_path, self.directories["images"], self.inputs.ffmpeg
-            )
-
-            self.run_colmap(self.inputs.colmap)
-
-            self.run_brush(self.inputs.brush)
-
-            pipeline_output: dict[str, str | list[str] | list] = {
-                "splat_path": os.path.join(self.directories["workspace"], "splat.ply"),
-                "blueprints": [],
-            }
-
-            if self.inputs.blueprint is not None:
-                self.extract_blueprint_from_splat(
-                    os.path.join(self.directories["workspace"], "splat.ply"),
-                    self.inputs.blueprint,
-                    output_prefix=os.path.join(
-                        self.directories["workspace"], "blueprint"
-                    ),
-                )
-                pipeline_output["blueprints"] = [
-                    os.path.join(self.directories["workspace"], "blueprint_top.png"),
-                ]
-
-            self.logger.complete(output=pipeline_output)
-
-            return pipeline_output
-        except Exception as e:
-            self.logger.fail(message=str(e))
-            raise e
-
-    def prepare_dirs(self, root_path: str):
-        images = os.path.join(root_path, "images")
-
-        if not os.path.exists(images):
-            os.makedirs(images)
-
-        colmap = os.path.join(root_path, "colmap")
-        if not os.path.exists(colmap):
-            os.makedirs(colmap)
-
-        self.directories = {
-            "workspace": root_path,
-            "images": images,
-            "colmap": colmap,
-        }
-
-        return self.directories
+        return self._run()
 
     def run_ffmpeg(
         self, input_file: str, output_directory: str, cfg: FFMPEGExtractionConfig
@@ -634,6 +597,67 @@ class SplatPipeline:
         self.logger.step_completed(step_name, return_code=0)
 
 
+class SplatPipeline(BasePipeline):
+    def __init__(self, job_name: str, inputs: GenerationInputs):
+        self.inputs: GenerationInputs
+        super().__init__(job_name=job_name, inputs=inputs)
+
+    def prepare_dirs(self, root_path: str):
+        images = os.path.join(root_path, "images")
+
+        if not os.path.exists(images):
+            os.makedirs(images)
+
+        colmap = os.path.join(root_path, "colmap")
+        if not os.path.exists(colmap):
+            os.makedirs(colmap)
+
+        self.directories = {
+            "workspace": root_path,
+            "images": images,
+            "colmap": colmap,
+        }
+
+    def _run(self) -> dict[str, str | list[str] | list]:
+        self.logger.set_file_path(
+            os.path.join(self.directories["workspace"], "status.json")
+        )
+        self.logger.start()
+
+        try:
+            self.run_ffmpeg(
+                self.inputs.video_path, self.directories["images"], self.inputs.ffmpeg
+            )
+
+            self.run_colmap(self.inputs.colmap)
+
+            self.run_brush(self.inputs.brush)
+
+            pipeline_output: dict[str, str | list[str] | list] = {
+                "splat_path": os.path.join(self.directories["workspace"], "splat.ply"),
+                "blueprints": [],
+            }
+
+            if self.inputs.blueprint is not None:
+                self.extract_blueprint_from_splat(
+                    os.path.join(self.directories["workspace"], "splat.ply"),
+                    self.inputs.blueprint,
+                    output_prefix=os.path.join(
+                        self.directories["workspace"], "blueprint"
+                    ),
+                )
+                pipeline_output["blueprints"] = [
+                    os.path.join(self.directories["workspace"], "blueprint_top.png"),
+                ]
+
+            self.logger.complete(output=pipeline_output)
+            return pipeline_output
+
+        except Exception as e:
+            self.logger.fail(message=str(e))
+            raise e
+
+
 def _extract_meaningful_log(line: str) -> str | None:
     if line is None:
         return None
@@ -778,9 +802,6 @@ def estimate_colmap_progress(log_text: str) -> float:
         return 1.0
 
     return 0.0
-
-
-import re
 
 
 def estimate_training_progress(log_text: str) -> float:

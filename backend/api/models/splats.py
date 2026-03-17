@@ -1,4 +1,4 @@
-from typing import Literal, Optional, Union
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -56,15 +56,20 @@ class BlueprintConfig(BaseModel):
     opacity: float
 
 
-class GenerationInputs(BaseModel):
+class BaseGenerationInputs(BaseModel):
+    ffmpeg: FFMPEGExtractionConfig | None = None
+    colmap: ColmapAutoConfig | ColmapManualConfig | None = None
+    brush: BrushTrainingConfig | None = None
+    blueprint: BlueprintConfig | None = None
+
+
+class GenerationInputs(BaseGenerationInputs):
     video_path: str
     ffmpeg: FFMPEGExtractionConfig
-    colmap: Union[ColmapAutoConfig, ColmapManualConfig]
+    colmap: ColmapAutoConfig | ColmapManualConfig
     brush: BrushTrainingConfig
-    blueprint: Optional[BlueprintConfig] = None
 
 
-class RestartBrushInputs(BaseModel):
+class RestartBrushInputs(BaseGenerationInputs):
     colmap_generation_id: str
     brush: BrushTrainingConfig
-    blueprint: Optional[BlueprintConfig] = None
