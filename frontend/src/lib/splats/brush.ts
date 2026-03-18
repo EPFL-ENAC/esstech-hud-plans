@@ -45,7 +45,7 @@ export function makeDefaultBrushConfig(): BrushTrainingConfig {
     return {
         totalSteps: 10_000,
         renderMode: 'default',
-        shDegree: 0,
+        shDegree: 3,
         maxSplats: 10_000_000,
         refineEvery: 200,
         growthGradThreshold: 0.003,
