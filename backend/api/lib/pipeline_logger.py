@@ -68,16 +68,17 @@ class PipelineLogger:
         self.data["output"] = output
         self.save()
 
-    def start_step(
+    def submit_step(
         self,
         step: str,
         settings: dict | None = None,
         command: str | list[str] | None = None,
     ):
         self.data["steps"][step] = {
-            "status": "running",
+            "status": "submitted",
             "progress": 0,
-            "started_at": datetime.utcnow().isoformat() + "Z",
+            "submitted_at": datetime.utcnow().isoformat() + "Z",
+            "started_at": None,
             "finished_at": None,
             "settings": settings if settings is not None else {},
             "command": command if command is not None else "",
@@ -86,6 +87,28 @@ class PipelineLogger:
         }
 
         self.save()
+
+    def has_started(self, step: str) -> bool:
+        return step in self.data["steps"] and self.data["steps"][step]["status"] in {
+            "running",
+            "completed",
+            "failed",
+        }
+
+    def start_step(
+        self,
+        step: str,
+        settings: dict | None = None,
+        command: str | list[str] | None = None,
+    ):
+        if step not in self.data["steps"]:
+            self.submit_step(
+                step=step,
+                settings=settings,
+                command=command,
+            )
+        self.data["steps"][step]["status"] = "running"
+        self.data["steps"][step]["started_at"] = datetime.utcnow().isoformat() + "Z"
 
     def step_completed(self, step: str, return_code: int | None = None):
         self.data["steps"][step]["status"] = "completed"

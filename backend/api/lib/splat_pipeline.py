@@ -133,7 +133,7 @@ class BasePipeline(ABC):
                 os.path.relpath(self.directories["workspace"]),
             )
             cmd = ["xvfb-run", "-a", "colmap"] + args
-            self.logger.start_step("colmap", settings=cfg.model_dump(), command=cmd)
+            self.logger.submit_step("colmap", settings=cfg.model_dump(), command=cmd)
             self._run_command_runai(
                 cmd,
                 step_name="colmap",
@@ -252,7 +252,7 @@ class BasePipeline(ABC):
                 "/scratch", args[3]
             )  # workspace path must be absolute
             cmd = ["brush"] + args[1:]
-            self.logger.start_step("brush", settings=cfg.model_dump(), command=cmd)
+            self.logger.submit_step("brush", settings=cfg.model_dump(), command=cmd)
             self._run_command_runai(
                 cmd,
                 step_name="brush",
@@ -550,6 +550,10 @@ class BasePipeline(ABC):
         runai.refresh_logs()
         while not os.path.exists(log_file_path):
             logger.info(f"Waiting for log file {log_file_path} to be created...")
+            if not self.logger.has_started(step_name) and runai.check_job_started(
+                job_name
+            ):
+                self.logger.start_step(step_name)
             if runai.check_job_terminated(job_name):
                 self.logger.step_failed(
                     step_name,
@@ -563,6 +567,10 @@ class BasePipeline(ABC):
         buffer = ""
         read_pos = 0
         while True:
+            if not self.logger.has_started(step_name) and runai.check_job_started(
+                job_name
+            ):
+                self.logger.start_step(step_name)
             runai.refresh_logs()
             with open(log_file_path, "rb") as f:
                 f.seek(read_pos)

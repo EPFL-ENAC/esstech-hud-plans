@@ -154,6 +154,14 @@ def get_job_status(job_name: str) -> str | None:
         return None
 
 
+def check_job_started(job_name: str) -> bool:
+    status = get_job_status(job_name)
+    if status is None:
+        return False
+
+    return status in {"Running", "Completed", "Failed", "Stopped", "Succeeded"}
+
+
 def check_job_terminated(job_name: str) -> bool:
     status = get_job_status(job_name)
     if status is None:

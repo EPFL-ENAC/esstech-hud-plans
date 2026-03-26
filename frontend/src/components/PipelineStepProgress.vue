@@ -141,6 +141,9 @@ const wrapLogs = ref(false);
 
             <!-- Timestamps -->
             <div class="row q-gutter-x-md text-caption text-grey-8">
+                <div v-if="step.submitted_at">
+                    Submitted: {{ formatTimestamp(step.submitted_at) }}
+                </div>
                 <div>Started: {{ formatTimestamp(step.started_at) }}</div>
                 <div>Finished: {{ formatTimestamp(step.finished_at) }}</div>
             </div>
