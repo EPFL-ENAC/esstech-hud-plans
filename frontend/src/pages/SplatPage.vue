@@ -47,6 +47,22 @@ async function fetchSettings(): Promise<void> {
 onMounted(async () => {
     await fetchSettings();
 });
+
+function downloadPly(splatData: ArrayBuffer): void {
+    try {
+        const blob = new Blob([splatData], { type: 'application/octet-stream' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `splat-${generationId.value}.ply`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+    } catch (e) {
+        console.error('Download failed:', e);
+    }
+}
 </script>
 
 <template>
@@ -55,6 +71,13 @@ onMounted(async () => {
             <template v-slot="{ value }">
                 <h3>Splat Viewer</h3>
                 <splat-renderer :splat-data="value" />
+                <q-btn
+                    label="Download .PLY"
+                    color="primary"
+                    icon="file_download"
+                    class="q-ma-md"
+                    @click="downloadPly(value)"
+                />
 
                 <h3>Interactive Blueprint</h3>
                 <interactive-blueprint-viewer
