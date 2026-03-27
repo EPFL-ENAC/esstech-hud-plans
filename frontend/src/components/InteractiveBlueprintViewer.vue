@@ -349,7 +349,7 @@ watch(sceneZRotation, (tilt) => {
 <template>
     <div class="viewer-container q-pa-md">
         <!-- Main Control Toolbar -->
-        <q-card class="toolbar-card q-mb-lg shadow-2">
+        <q-card class="toolbar-card q-mb-lg">
             <q-card-section class="q-py-md">
                 <div class="toolbar-grid">
                     <!-- Section 1: Viewer Settings -->
@@ -564,7 +564,7 @@ watch(sceneZRotation, (tilt) => {
         <!-- Canvas Container -->
         <div
             ref="container"
-            class="canvas-container shadow-8"
+            class="canvas-container shadow-4"
             :style="{
                 filter: canvasFilter,
                 width: `${viewerSize}px`,
@@ -611,8 +611,6 @@ watch(sceneZRotation, (tilt) => {
     display: flex;
     flex-direction: column;
     align-items: center;
-    background-color: #f4f7f9;
-    min-height: 100vh;
 }
 
 .toolbar-card {
@@ -657,7 +655,6 @@ watch(sceneZRotation, (tilt) => {
 }
 
 .canvas-container {
-    border: 4px solid #1a1a1a;
     position: relative;
     background: #000;
     border-radius: 8px;

@@ -31,6 +31,9 @@ const pipelineStatus = ref<SplatPipelineStatus | null>(null);
 const settings = ref<SplatPipelineSettings | null>(null);
 const settingsError = ref<string | null>(null);
 
+// Track expansion state for conditional rendering
+const isSplatViewerExpanded = ref(false);
+
 // Fetch settings to determine if blueprint was enabled
 async function fetchSettings(): Promise<void> {
     try {
@@ -66,20 +69,10 @@ function downloadPly(splatData: ArrayBuffer): void {
 </script>
 
 <template>
-    <q-page class="">
+    <q-page class="q-pa-md">
         <SplatLoader :result="splat">
             <template v-slot="{ value }">
-                <h3>Splat Viewer</h3>
-                <splat-renderer :splat-data="value" />
-                <q-btn
-                    label="Download .PLY"
-                    color="primary"
-                    icon="file_download"
-                    class="q-ma-md"
-                    @click="downloadPly(value)"
-                />
-
-                <h3>Interactive Blueprint</h3>
+                <h3 class="q-my-md">Interactive Blueprint</h3>
                 <interactive-blueprint-viewer
                     :splat-data="value"
                     :generation-id="generationId"
@@ -99,6 +92,27 @@ function downloadPly(splatData: ArrayBuffer): void {
                         </div>
                     </div>
                 </template>
+
+                <q-card class="q-mb-lg">
+                    <q-expansion-item
+                        v-model="isSplatViewerExpanded"
+                        label="Splat Viewer"
+                        icon="visibility"
+                    >
+                        <q-card v-if="isSplatViewerExpanded">
+                            <q-card-section>
+                                <q-btn
+                                    label="Download .PLY"
+                                    color="primary"
+                                    icon="file_download"
+                                    class="q-mb-md"
+                                    @click="downloadPly(value)"
+                                />
+                                <splat-renderer :splat-data="value" />
+                            </q-card-section>
+                        </q-card>
+                    </q-expansion-item>
+                </q-card>
             </template>
             <template v-slot:loading="{ progress }">
                 <div class="loading-progress">
