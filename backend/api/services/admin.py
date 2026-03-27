@@ -168,17 +168,27 @@ def flatten_status_data(status_file_path: str) -> dict:
     )
 
     colmap_step = steps.get("colmap", {})
+    colmap_submitted = colmap_step.get("submitted_at")
     colmap_started = colmap_step.get("started_at")
     colmap_finished = colmap_step.get("finished_at")
+    row["colmap_submitted_at"] = colmap_submitted
     row["colmap_time_seconds"] = calculate_duration_seconds(
         colmap_started, colmap_finished
     )
+    row["colmap_wait_time_seconds"] = calculate_duration_seconds(
+        colmap_submitted, colmap_started
+    )
 
     brush_step = steps.get("brush", {})
+    brush_submitted = brush_step.get("submitted_at")
     brush_started = brush_step.get("started_at")
     brush_finished = brush_step.get("finished_at")
+    row["brush_submitted_at"] = brush_submitted
     row["brush_time_seconds"] = calculate_duration_seconds(
         brush_started, brush_finished
+    )
+    row["brush_wait_time_seconds"] = calculate_duration_seconds(
+        brush_submitted, brush_started
     )
 
     blueprint_step = steps.get("blueprint_extraction", {})
