@@ -75,6 +75,29 @@ onBeforeUnmount(() => {
                     </template>
                 </q-file>
 
+                <q-input
+                    v-model="config.deviceName"
+                    label="Device name (brand & model)"
+                    filled
+                    clearable
+                    class="q-mt-md"
+                />
+
+                <q-select
+                    v-model="config.cameraType"
+                    :options="[
+                        { label: 'Standard', value: 'standard' },
+                        { label: 'Wide-angle', value: 'wide_angle' },
+                        { label: 'Zoom', value: 'zoom' },
+                    ]"
+                    label="Camera Type"
+                    hint="If unknown, leave as standard."
+                    filled
+                    emit-value
+                    map-options
+                    class="q-mt-md"
+                />
+
                 <div
                     v-if="videoPreviewUrl"
                     class="q-mt-md overflow-hidden rounded-borders border-grey"

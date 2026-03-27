@@ -12,6 +12,7 @@ class FFMPEGExtractionConfig(BaseModel):
 ColmapDataType = Literal["individual", "video", "internet"]
 ColmapQuality = Literal["low", "medium", "high", "extreme"]
 ColmapCameraModel = Literal["PINHOLE", "OPENCV", "OPENCV_FISHEYE", "RADIAL"]
+CameraType = Literal["standard", "wide_angle", "zoom"]
 
 
 class ColmapAutoConfig(BaseModel):
@@ -68,6 +69,8 @@ class GenerationInputs(BaseGenerationInputs):
     ffmpeg: FFMPEGExtractionConfig
     colmap: ColmapAutoConfig | ColmapManualConfig
     brush: BrushTrainingConfig
+    device_name: str
+    camera_type: CameraType
 
 
 class RestartBrushInputs(BaseGenerationInputs):

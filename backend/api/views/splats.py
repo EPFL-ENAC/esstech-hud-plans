@@ -5,6 +5,7 @@ import shutil
 from api.models.splats import (
     BlueprintConfig,
     BrushTrainingConfig,
+    CameraType,
     ColmapAutoConfig,
     FFMPEGExtractionConfig,
     GenerationInputs,
@@ -50,6 +51,8 @@ async def generate(
     colmap_config: str = Form(...),
     brush_config: str = Form(...),
     blueprint_config: str = Form(None),
+    device_name: str = Form(""),
+    camera_type: CameraType = Form("standard"),
 ) -> PostRunGenerationResponse:
     # 1. Validate file type
     if not file.content_type or not file.content_type.startswith("video/"):
@@ -93,6 +96,8 @@ async def generate(
         colmap=colmap_settings,
         brush=brush_settings,
         blueprint=blueprint_settings,
+        device_name=device_name,
+        camera_type=camera_type,
     )
 
     run = manager.run_generation(inputs)

@@ -140,6 +140,10 @@ async function uploadVideo() {
         formData.append('blueprint_config', JSON.stringify(blueprintConfig.value));
     }
 
+    // Append device information
+    formData.append('device_name', inputConfig.value.deviceName || '');
+    formData.append('camera_type', inputConfig.value.cameraType);
+
     try {
         uploadStatus.value = 'Starting pipeline...';
         statusClass.value = 'info';
