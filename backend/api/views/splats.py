@@ -8,8 +8,11 @@ from api.models.splats import (
     CameraType,
     ColmapAutoConfig,
     FFMPEGExtractionConfig,
+    GenerationFeedback,
+    GenerationFeedbackSave,
     GenerationInputs,
     InteractiveBlueprintParams,
+    QualityRating,
     RestartBrushInputs,
 )
 from api.services.splats import GenerationManager
@@ -284,6 +287,11 @@ class InteractiveBlueprintParamsResponse(BaseModel):
     contrast: float
 
 
+class GenerationFeedbackResponse(BaseModel):
+    ratings: list[QualityRating]
+    notes: str = ""
+
+
 @router.get(
     "/blueprint-params/{generation_id}",
     status_code=200,
@@ -314,6 +322,51 @@ async def save_interactive_blueprint_params(
     success = manager.save_interactive_blueprint_params(
         generation_id, params.model_dump()
     )
+
+    if not success:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Generation {generation_id} not found or status file unavailable",
+        )
+
+    return {"status": "saved"}
+
+
+@router.get(
+    "/feedback/{generation_id}",
+    status_code=200,
+    description="Retrieves the generation feedback for a generation run",
+    response_model=GenerationFeedbackResponse,
+)
+async def get_generation_feedback(generation_id: str):
+    """Get the generation feedback, with defaults if not saved."""
+    saved_feedback = manager.get_generation_feedback(generation_id)
+
+    if saved_feedback is not None:
+        return GenerationFeedbackResponse(**saved_feedback)
+
+    default_feedback = GenerationFeedbackResponse(
+        ratings=[
+            QualityRating(category="colmap", rating=3),
+            QualityRating(category="splats", rating=3),
+            QualityRating(category="blueprint", rating=3),
+        ],
+        notes="",
+    )
+    return default_feedback
+
+
+@router.post(
+    "/feedback/{generation_id}",
+    status_code=200,
+    description="Saves the generation feedback for a generation run",
+)
+async def save_generation_feedback(
+    generation_id: str,
+    feedback: GenerationFeedbackSave,
+):
+    """Save the generation feedback."""
+    success = manager.save_generation_feedback(generation_id, feedback.model_dump())
 
     if not success:
         raise HTTPException(

@@ -12,6 +12,7 @@ import {
     generateBlueprintMesh,
 } from 'src/lib/maths/blueprintMesh';
 import { baseUrl } from 'boot/api';
+import { Notify } from 'quasar';
 
 const CAMERA_DISTANCE_FACTOR = 3.0;
 const FLOOR_SIZE_FACTOR = 2; // times radius
@@ -93,9 +94,23 @@ async function saveBlueprintParams(): Promise<void> {
         });
         if (!response.ok) {
             console.error('Failed to save blueprint parameters:', response.statusText);
+            Notify.create({
+                message: 'Failed to save blueprint parameters',
+                color: 'negative',
+                icon: 'error',
+                position: 'top',
+                timeout: 3000,
+            });
         }
     } catch (error) {
         console.error('Failed to save blueprint parameters:', error);
+        Notify.create({
+            message: 'Failed to save blueprint parameters',
+            color: 'negative',
+            icon: 'error',
+            position: 'top',
+            timeout: 3000,
+        });
     }
 }
 

@@ -75,6 +75,21 @@ class InteractiveBlueprintParams(BaseModel):
     contrast: float = 2.0
 
 
+class QualityRating(BaseModel):
+    category: str
+    rating: int
+
+
+class GenerationFeedback(BaseModel):
+    ratings: list[QualityRating]
+    notes: str = ""
+
+
+class GenerationFeedbackSave(BaseModel):
+    ratings: list[QualityRating]
+    notes: str = ""
+
+
 class BaseGenerationInputs(BaseModel):
     ffmpeg: FFMPEGExtractionConfig | None = None
     colmap: ColmapAutoConfig | ColmapManualConfig | None = None

@@ -5,6 +5,7 @@ import { makeAsyncResultLoader, useReactiveChain } from 'unwrapped/vue';
 import type { ErrorBase } from 'unwrapped/core';
 import SplatRenderer from '../components/SplatRenderer.vue';
 import InteractiveBlueprintViewer from '../components/InteractiveBlueprintViewer.vue';
+import GenerationFeedbackForm from '../components/GenerationFeedbackForm.vue';
 import {
     type SplatPipelineSettings,
     type SplatPipelineStatus,
@@ -78,6 +79,8 @@ function downloadPly(splatData: ArrayBuffer): void {
                     :generation-id="generationId"
                     class="q-mb-lg"
                 />
+
+                <generation-feedback-form :generation-id="generationId" class="q-mb-lg" />
 
                 <template v-if="settings?.blueprint">
                     <h3>Blueprints</h3>
