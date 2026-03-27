@@ -41,6 +41,8 @@ def flatten_status_data(status_file_path: str) -> dict:
         return {}
 
     generation_id = data.get("name", "")
+    ip_address = data.get("ip_address", "")
+    browser_info = data.get("browser_info", "")
     overall_status = data.get("overall_status", "")
     video_path = data.get("settings", {}).get("video_path", "")
     started_at = data.get("started_at")
@@ -48,6 +50,8 @@ def flatten_status_data(status_file_path: str) -> dict:
 
     row = {
         "generation_id": generation_id,
+        "ip_address": ip_address,
+        "browser_info": browser_info,
         "overall_status": overall_status,
         "video_path": video_path,
         "started_at": started_at,
