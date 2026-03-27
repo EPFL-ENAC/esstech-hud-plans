@@ -9,6 +9,7 @@ from fastapi_cache.backends.inmemory import InMemoryBackend
 from pydantic import BaseModel
 
 from api.config import config
+from api.views.admin import router as admin_router
 from api.views.splats import router as splats_router
 
 # from api.views.files import router as files_router
@@ -91,4 +92,10 @@ app.include_router(
     splats_router,
     prefix="/splats",
     tags=["Splats"],
+)
+
+app.include_router(
+    admin_router,
+    prefix="/admin",
+    tags=["Admin"],
 )

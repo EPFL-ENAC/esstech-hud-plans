@@ -16,6 +16,10 @@ const routes: RouteRecordRaw[] = [
                     drawer: () => import('src/drawers/SplatPipelineDrawer.vue'),
                 },
             },
+            {
+                path: '/admin',
+                component: () => import('pages/AdminPage.vue'),
+            },
         ],
     },
 
