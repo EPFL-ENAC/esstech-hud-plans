@@ -22,6 +22,8 @@ class PipelineLogger:
             "steps_list": steps_list,
             "steps": {},
             "colmap_geometric_data": None,
+            "ip_address": initial_settings.get("ip_address", ""),
+            "browser_info": initial_settings.get("browser_info", ""),
         }
         self.save()
 

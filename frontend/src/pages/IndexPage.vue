@@ -144,6 +144,9 @@ async function uploadVideo() {
     formData.append('device_name', inputConfig.value.deviceName || '');
     formData.append('camera_type', inputConfig.value.cameraType);
 
+    // Append browser info
+    formData.append('browser_info', navigator.userAgent);
+
     try {
         uploadStatus.value = 'Starting pipeline...';
         statusClass.value = 'info';
@@ -178,6 +181,9 @@ async function restartBrush() {
     if (blueprintConfig.value.enabled) {
         formData.append('blueprint_config', JSON.stringify(blueprintConfig.value));
     }
+
+    // Append browser info
+    formData.append('browser_info', navigator.userAgent);
 
     try {
         uploadStatus.value = 'Starting brush restart...';

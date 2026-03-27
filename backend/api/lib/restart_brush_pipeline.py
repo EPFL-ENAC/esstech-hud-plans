@@ -51,6 +51,9 @@ class RestartBrushPipeline(BasePipeline):
         else:
             self.logger.data["settings"]["blueprint"] = None
 
+        self.logger.data["ip_address"] = self.inputs.ip_address
+        self.logger.data["browser_info"] = self.inputs.browser_info
+
         self.logger.save()
         self.logger.reset_step("brush")
         self.logger.reset_step("blueprint_extraction")

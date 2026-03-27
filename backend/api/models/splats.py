@@ -71,8 +71,12 @@ class GenerationInputs(BaseGenerationInputs):
     brush: BrushTrainingConfig
     device_name: str
     camera_type: CameraType
+    ip_address: str = ""
+    browser_info: str = ""
 
 
 class RestartBrushInputs(BaseGenerationInputs):
     colmap_generation_id: str
     brush: BrushTrainingConfig
+    ip_address: str = ""
+    browser_info: str = ""

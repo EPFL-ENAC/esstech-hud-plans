@@ -28,7 +28,7 @@ const StatusLoader = makeAsyncResultLoader<SplatPipelineStatus, ErrorBase, Splat
                 </template>
                 <template v-slot:loading="{ progress }">
                     <splat-pipeline-progress v-if="progress" :value="progress" />
-                    <h3 v-else>Pending...</h3>
+                    <h3 v-else class="q-ma-md">Pending...</h3>
                 </template>
                 <template v-slot:error="{ error }">
                     <h3>Error while getting status !</h3>

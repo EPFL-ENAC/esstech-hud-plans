@@ -12,7 +12,7 @@ from api.models.splats import (
     RestartBrushInputs,
 )
 from api.services.splats import GenerationManager
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from fastapi_cache.decorator import cache
 from pydantic import BaseModel
@@ -46,6 +46,7 @@ async def hello() -> str:
     response_model=PostRunGenerationResponse,
 )
 async def generate(
+    request: Request,
     file: UploadFile = File(...),
     ffmpeg_config: str = Form(...),
     colmap_config: str = Form(...),
@@ -53,6 +54,7 @@ async def generate(
     blueprint_config: str = Form(None),
     device_name: str = Form(""),
     camera_type: CameraType = Form("standard"),
+    browser_info: str = Form(""),
 ) -> PostRunGenerationResponse:
     # 1. Validate file type
     if not file.content_type or not file.content_type.startswith("video/"):
@@ -90,6 +92,7 @@ async def generate(
         await file.close()
 
     # 4. Run generation with all inputs
+    client_host = request.client.host if request.client else ""
     inputs = GenerationInputs(
         video_path=file_path,
         ffmpeg=ffmpeg_settings,
@@ -98,6 +101,8 @@ async def generate(
         blueprint=blueprint_settings,
         device_name=device_name,
         camera_type=camera_type,
+        ip_address=client_host,
+        browser_info=browser_info,
     )
 
     run = manager.run_generation(inputs)
@@ -230,9 +235,11 @@ async def get_generation_settings(generation_id: str):
     response_model=PostRunGenerationResponse,
 )
 async def restart_brush(
+    request: Request,
     colmap_generation_id: str = Form(...),
     brush_config: str = Form(...),
     blueprint_config: str = Form(None),
+    browser_info: str = Form(""),
 ) -> PostRunGenerationResponse:
     try:
         brush_settings = BrushTrainingConfig(**json.loads(brush_config))
@@ -246,10 +253,13 @@ async def restart_brush(
             status_code=422, detail=f"Invalid configuration format: {str(e)}"
         )
 
+    client_host = request.client.host if request.client else ""
     inputs = RestartBrushInputs(
         colmap_generation_id=colmap_generation_id,
         brush=brush_settings,
         blueprint=blueprint_settings,
+        ip_address=client_host,
+        browser_info=browser_info,
     )
 
     try:
