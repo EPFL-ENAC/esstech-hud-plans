@@ -57,6 +57,24 @@ class BlueprintConfig(BaseModel):
     opacity: float
 
 
+class SectionZFactor(BaseModel):
+    min: float
+    max: float
+
+
+class InteractiveBlueprintParams(BaseModel):
+    viewerSize: int = 700
+    sceneZRotation: float = 0
+    displayCameraPositions: bool = True
+    displayFloor: bool = False
+    floorZOffset: float = 0
+    cameramanHeightCm: float = 170
+    sectionZFactor: SectionZFactor | None = None
+    densityThreshold: float = 1.0
+    opacityMultiplier: float = 0.2
+    contrast: float = 2.0
+
+
 class BaseGenerationInputs(BaseModel):
     ffmpeg: FFMPEGExtractionConfig | None = None
     colmap: ColmapAutoConfig | ColmapManualConfig | None = None

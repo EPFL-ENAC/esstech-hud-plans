@@ -11,6 +11,7 @@ import {
     type BlueprintSplatProcessingParams,
     generateBlueprintMesh,
 } from 'src/lib/maths/blueprintMesh';
+import { baseUrl } from 'boot/api';
 
 const CAMERA_DISTANCE_FACTOR = 3.0;
 const FLOOR_SIZE_FACTOR = 2; // times radius
@@ -66,6 +67,47 @@ const canvasFilter = computed(() => {
     return `contrast(${100 * contrast.value}%) brightness(${brightness}%)`;
 });
 
+let paramsSaveTimeout: ReturnType<typeof setTimeout> | null = null;
+
+async function saveBlueprintParams(): Promise<void> {
+    const params = {
+        viewerSize: viewerSize.value,
+        sceneZRotation: sceneZRotation.value,
+        displayCameraPositions: displayCameraPositions.value,
+        displayFloor: displayFloor.value,
+        floorZOffset: floorZOffset.value,
+        cameramanHeightCm: cameramanHeightCm.value,
+        sectionZFactor: sectionZFactor.value,
+        densityThreshold: densityThreshold.value,
+        opacityMultiplier: opacityMultiplier.value,
+        contrast: contrast.value,
+    };
+
+    try {
+        const response = await fetch(`${baseUrl}/splats/blueprint-params/${props.generationId}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(params),
+        });
+        if (!response.ok) {
+            console.error('Failed to save blueprint parameters:', response.statusText);
+        }
+    } catch (error) {
+        console.error('Failed to save blueprint parameters:', error);
+    }
+}
+
+function scheduleParamsSave(): void {
+    if (paramsSaveTimeout) {
+        clearTimeout(paramsSaveTimeout);
+    }
+    paramsSaveTimeout = setTimeout(() => {
+        void saveBlueprintParams();
+    }, 500);
+}
+
 function resetView(): void {
     if (controls && initialCameraPosition.value && initialCameraTarget.value) {
         camera?.position.copy(initialCameraPosition.value);
@@ -95,6 +137,27 @@ onMounted(() => {
             if (!container.value) {
                 return;
             }
+
+            const response = yield* AsyncResult.fromValuePromise(
+                fetch(`${baseUrl}/splats/blueprint-params/${props.generationId}`),
+            );
+            const params = response.ok ? yield* AsyncResult.fromValuePromise(response.json()) : {};
+            if (!response.ok) {
+                console.error('Failed to load blueprint parameters:', response.statusText);
+            }
+            if (params.viewerSize) viewerSize.value = params.viewerSize;
+            if (params.sceneZRotation !== undefined) sceneZRotation.value = params.sceneZRotation;
+            if (params.displayCameraPositions !== undefined)
+                displayCameraPositions.value = params.displayCameraPositions;
+            if (params.displayFloor !== undefined) displayFloor.value = params.displayFloor;
+            if (params.floorZOffset !== undefined) floorZOffset.value = params.floorZOffset;
+            if (params.cameramanHeightCm) cameramanHeightCm.value = params.cameramanHeightCm;
+            if (params.sectionZFactor) {
+                sectionZFactor.value = params.sectionZFactor;
+            }
+            if (params.densityThreshold) densityThreshold.value = params.densityThreshold;
+            if (params.opacityMultiplier) opacityMultiplier.value = params.opacityMultiplier;
+            if (params.contrast) contrast.value = params.contrast;
 
             const geometryJSON = yield* fetchBlueprintGeometryJSON(props.generationId);
             geometryData = new BlueprintGeometry(geometryJSON);
@@ -188,12 +251,23 @@ watch(viewerSize, (newSize) => {
         camera.updateProjectionMatrix();
     }
     updateScaleOverlay();
+    scheduleParamsSave();
 });
 
 watch(
     [densityThreshold, opacityMultiplier, opacityPower, sectionZFactorStart, sectionZFactorEnd],
-    () => collection.value.add(`generation-${Date.now()}`, generateBlueprint()),
+    () => {
+        collection.value.add(`generation-${Date.now()}`, generateBlueprint());
+        scheduleParamsSave();
+    },
 );
+
+watch(sceneZRotation, () => scheduleParamsSave());
+watch(displayCameraPositions, () => scheduleParamsSave());
+watch(displayFloor, () => scheduleParamsSave());
+watch(floorZOffset, () => scheduleParamsSave());
+watch(cameramanHeightCm, () => scheduleParamsSave());
+watch(contrast, () => scheduleParamsSave());
 
 function generateBlueprint(onFinishedLoading?: (mesh: SplatMesh) => void): AsyncResult<SplatMesh> {
     return AsyncResult.run(function* () {

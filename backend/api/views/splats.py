@@ -9,6 +9,7 @@ from api.models.splats import (
     ColmapAutoConfig,
     FFMPEGExtractionConfig,
     GenerationInputs,
+    InteractiveBlueprintParams,
     RestartBrushInputs,
 )
 from api.services.splats import GenerationManager
@@ -268,3 +269,56 @@ async def restart_brush(
         raise HTTPException(status_code=400, detail=str(e))
 
     return PostRunGenerationResponse(generation_id=run.id)
+
+
+class InteractiveBlueprintParamsResponse(BaseModel):
+    viewerSize: int
+    sceneZRotation: float
+    displayCameraPositions: bool
+    displayFloor: bool
+    floorZOffset: float
+    cameramanHeightCm: float
+    sectionZFactor: dict | None = None
+    densityThreshold: float
+    opacityMultiplier: float
+    contrast: float
+
+
+@router.get(
+    "/blueprint-params/{generation_id}",
+    status_code=200,
+    description="Retrieves the interactive blueprint parameters for a generation run",
+    response_model=InteractiveBlueprintParamsResponse,
+)
+async def get_interactive_blueprint_params(generation_id: str):
+    """Get the interactive blueprint parameters, with defaults if not saved."""
+    saved_params = manager.get_interactive_blueprint_params(generation_id)
+
+    if saved_params is not None:
+        return InteractiveBlueprintParamsResponse(**saved_params)
+
+    default_params = InteractiveBlueprintParams()
+    return default_params
+
+
+@router.post(
+    "/blueprint-params/{generation_id}",
+    status_code=200,
+    description="Saves the interactive blueprint parameters for a generation run",
+)
+async def save_interactive_blueprint_params(
+    generation_id: str,
+    params: InteractiveBlueprintParams,
+):
+    """Save the interactive blueprint parameters."""
+    success = manager.save_interactive_blueprint_params(
+        generation_id, params.model_dump()
+    )
+
+    if not success:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Generation {generation_id} not found or status file unavailable",
+        )
+
+    return {"status": "saved"}

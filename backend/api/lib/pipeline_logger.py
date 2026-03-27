@@ -192,6 +192,13 @@ class PipelineLogger:
     def get_colmap_geometric_data(self) -> dict | None:
         return self.data.get("colmap_geometric_data")
 
+    def set_interactive_blueprint_params(self, params: dict):
+        self.data["interactive_blueprint_params"] = params
+        self.save()
+
+    def get_interactive_blueprint_params(self) -> dict | None:
+        return self.data.get("interactive_blueprint_params")
+
 
 def _strip_ansi(text: str) -> str:
     """Remove ANSI escape codes and control characters"""

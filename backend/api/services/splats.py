@@ -225,6 +225,49 @@ class GenerationManager:
         except (json.JSONDecodeError, IOError):
             return None
 
+    def get_interactive_blueprint_params(self, generation_id: str) -> dict | None:
+        """Retrieve the interactive blueprint parameters for a generation run."""
+        backend_root = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", ".."
+        )
+        status_file = os.path.join(
+            backend_root, f"data/splats/{generation_id}/status.json"
+        )
+
+        if not os.path.exists(status_file):
+            return None
+
+        try:
+            with open(status_file, "r") as f:
+                data = json.load(f)
+            return data.get("interactive_blueprint_params")
+        except (json.JSONDecodeError, IOError):
+            return None
+
+    def save_interactive_blueprint_params(
+        self, generation_id: str, params: dict
+    ) -> bool:
+        """Save the interactive blueprint parameters for a generation run."""
+        backend_root = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", ".."
+        )
+        status_file = os.path.join(
+            backend_root, f"data/splats/{generation_id}/status.json"
+        )
+
+        if not os.path.exists(status_file):
+            return False
+
+        try:
+            with open(status_file, "r") as f:
+                data = json.load(f)
+            data["interactive_blueprint_params"] = params
+            with open(status_file, "w") as f:
+                json.dump(data, f, indent=2)
+            return True
+        except (json.JSONDecodeError, IOError):
+            return False
+
     def run_restart_brush(self, inputs: RestartBrushInputs) -> GenerationRun:
         new_id = uuid.uuid4().hex
         run = GenerationRun(id=new_id, input_video_path="", status="pending")
