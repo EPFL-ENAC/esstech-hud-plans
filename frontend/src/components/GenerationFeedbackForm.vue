@@ -123,17 +123,13 @@ onMounted(() => {
                         <q-icon name="location_searching" size="sm" class="q-mr-xs" />
                         COLMAP Tracking Quality
                     </div>
-                    <div class="star-rating">
-                        <q-icon
-                            v-for="star in 5"
-                            :key="star"
-                            :name="star <= colmapRating ? 'star' : 'star_border'"
-                            size="lg"
-                            color="warning"
-                            class="cursor-pointer"
-                            @click="colmapRating = star"
-                        />
-                    </div>
+                    <q-rating
+                        v-model="colmapRating"
+                        size="lg"
+                        color="warning"
+                        icon="star_border"
+                        icon-selected="star"
+                    />
                     <div class="feedback-value">{{ colmapRating }}/5</div>
                 </div>
 
@@ -142,17 +138,13 @@ onMounted(() => {
                         <q-icon name="view_in_ar" size="sm" class="q-mr-xs" />
                         Gaussian Splats Reconstruction Quality
                     </div>
-                    <div class="star-rating">
-                        <q-icon
-                            v-for="star in 5"
-                            :key="star"
-                            :name="star <= splatsRating ? 'star' : 'star_border'"
-                            size="lg"
-                            color="warning"
-                            class="cursor-pointer"
-                            @click="splatsRating = star"
-                        />
-                    </div>
+                    <q-rating
+                        v-model="splatsRating"
+                        size="lg"
+                        color="warning"
+                        icon="star_border"
+                        icon-selected="star"
+                    />
                     <div class="feedback-value">{{ splatsRating }}/5</div>
                 </div>
 
@@ -161,17 +153,13 @@ onMounted(() => {
                         <q-icon name="map" size="sm" class="q-mr-xs" />
                         2D Blueprint Quality
                     </div>
-                    <div class="star-rating">
-                        <q-icon
-                            v-for="star in 5"
-                            :key="star"
-                            :name="star <= blueprintRating ? 'star' : 'star_border'"
-                            size="lg"
-                            color="warning"
-                            class="cursor-pointer"
-                            @click="blueprintRating = star"
-                        />
-                    </div>
+                    <q-rating
+                        v-model="blueprintRating"
+                        size="lg"
+                        color="warning"
+                        icon="star_border"
+                        icon-selected="star"
+                    />
                     <div class="feedback-value">{{ blueprintRating }}/5</div>
                 </div>
 
@@ -184,6 +172,7 @@ onMounted(() => {
                         rows="4"
                         maxlength="1000"
                         hint="Max 1000 characters"
+                        :debounce="500"
                         counter
                         dense
                     />
@@ -219,15 +208,6 @@ onMounted(() => {
     font-weight: 500;
     display: flex;
     align-items: center;
-}
-
-.star-rating {
-    display: flex;
-    gap: 2px;
-}
-
-.star-rating :deep(.q-icon) {
-    font-size: 1.2rem;
 }
 
 .feedback-value {
