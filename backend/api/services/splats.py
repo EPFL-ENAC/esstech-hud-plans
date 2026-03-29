@@ -65,10 +65,7 @@ class GenerationManager:
             return run
 
         # Check if generation exists on disk after restart
-        backend_root = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", ".."
-        )
-        splat_dir = os.path.join(backend_root, f"data/splats/{generation_id}")
+        splat_dir = self._make_generation_folder_path(generation_id)
         status_file = os.path.join(splat_dir, "status.json")
 
         if not os.path.exists(status_file):
@@ -189,125 +186,39 @@ class GenerationManager:
 
     def get_colmap_geometry(self, generation_id: str) -> dict | None:
         """Retrieve the COLMAP geometric data for a generation run."""
-        backend_root = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", ".."
-        )
-        status_file = os.path.join(
-            backend_root, f"data/splats/{generation_id}/status.json"
-        )
-
-        if not os.path.exists(status_file):
-            return None
-
-        try:
-            with open(status_file, "r") as f:
-                data = json.load(f)
-            return data.get("colmap_geometric_data")
-        except (json.JSONDecodeError, IOError):
-            return None
+        status = self.get_status(generation_id)
+        return status.get("colmap_geometric_data")
 
     def get_settings(self, generation_id: str) -> dict | None:
         """Retrieve the settings for a generation run."""
-        backend_root = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", ".."
-        )
-        status_file = os.path.join(
-            backend_root, f"data/splats/{generation_id}/status.json"
-        )
-
-        if not os.path.exists(status_file):
-            return None
-
-        try:
-            with open(status_file, "r") as f:
-                data = json.load(f)
-            return data.get("settings")
-        except (json.JSONDecodeError, IOError):
-            return None
+        status = self.get_status(generation_id)
+        return status.get("settings")
 
     def get_interactive_blueprint_params(self, generation_id: str) -> dict | None:
         """Retrieve the interactive blueprint parameters for a generation run."""
-        backend_root = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", ".."
-        )
-        status_file = os.path.join(
-            backend_root, f"data/splats/{generation_id}/status.json"
-        )
-
-        if not os.path.exists(status_file):
-            return None
-
-        try:
-            with open(status_file, "r") as f:
-                data = json.load(f)
-            return data.get("interactive_blueprint_params")
-        except (json.JSONDecodeError, IOError):
-            return None
+        status = self.get_status(generation_id)
+        return status.get("interactive_blueprint_params")
 
     def save_interactive_blueprint_params(
         self, generation_id: str, params: dict
     ) -> bool:
         """Save the interactive blueprint parameters for a generation run."""
-        backend_root = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", ".."
-        )
-        status_file = os.path.join(
-            backend_root, f"data/splats/{generation_id}/status.json"
-        )
+        status = self.get_status(generation_id)
+        status["interactive_blueprint_params"] = params
 
-        if not os.path.exists(status_file):
-            return False
-
-        try:
-            with open(status_file, "r") as f:
-                data = json.load(f)
-            data["interactive_blueprint_params"] = params
-            with open(status_file, "w") as f:
-                json.dump(data, f, indent=2)
-            return True
-        except (json.JSONDecodeError, IOError):
-            return False
+        return self._save_status(generation_id, status)
 
     def get_generation_feedback(self, generation_id: str) -> dict | None:
         """Retrieve the generation feedback for a generation run."""
-        backend_root = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", ".."
-        )
-        status_file = os.path.join(
-            backend_root, f"data/splats/{generation_id}/status.json"
-        )
-
-        if not os.path.exists(status_file):
-            return None
-
-        try:
-            with open(status_file, "r") as f:
-                data = json.load(f)
-            return data.get("generation_feedback")
-        except (json.JSONDecodeError, IOError):
-            return None
+        status = self.get_status(generation_id)
+        return status.get("generation_feedback")
 
     def save_generation_feedback(self, generation_id: str, feedback: dict) -> bool:
         """Save the generation feedback for a generation run."""
-        backend_root = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", ".."
-        )
-        status_file = os.path.join(
-            backend_root, f"data/splats/{generation_id}/status.json"
-        )
+        status = self.get_status(generation_id)
+        status["generation_feedback"] = feedback
 
-        if not os.path.exists(status_file):
-            return False
-
-        try:
-            with open(status_file, "r") as f:
-                data = json.load(f)
-            data["generation_feedback"] = feedback
-            with open(status_file, "w") as f:
-                json.dump(data, f, indent=2)
-            return True
-        except (json.JSONDecodeError, IOError):
-            return False
+        return self._save_status(generation_id, status)
 
     def run_restart_brush(self, inputs: RestartBrushInputs) -> GenerationRun:
         new_id = uuid.uuid4().hex
@@ -328,6 +239,24 @@ class GenerationManager:
         future.add_done_callback(_on_done)
 
         return run
+
+    def _make_generation_folder_path(self, generation_id: str) -> str:
+        backend_root = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", ".."
+        )
+        return os.path.join(backend_root, f"data/splats/{generation_id}")
+
+    def _save_status(self, generation_id: str, data: dict) -> bool:
+        file = os.path.join(
+            self._make_generation_folder_path(generation_id), "status.json"
+        )
+
+        try:
+            with open(file, "w") as f:
+                json.dump(data, f, indent=2)
+            return True
+        except:
+            return False
 
 
 def _run_generation(inputs: GenerationInputs, job_name: str) -> GenerationRun:

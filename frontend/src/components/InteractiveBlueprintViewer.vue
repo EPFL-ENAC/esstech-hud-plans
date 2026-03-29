@@ -161,11 +161,17 @@ onMounted(() => {
                 console.error('Failed to load blueprint parameters:', response.statusText);
             }
             if (params.viewerSize) viewerSize.value = params.viewerSize;
-            if (params.sceneZRotation !== undefined) sceneZRotation.value = params.sceneZRotation;
-            if (params.displayCameraPositions !== undefined)
+            if (params.sceneZRotation !== undefined && params.sceneZRotation !== null)
+                sceneZRotation.value = params.sceneZRotation;
+            if (
+                params.displayCameraPositions !== undefined &&
+                params.displayCameraPositions !== null
+            )
                 displayCameraPositions.value = params.displayCameraPositions;
-            if (params.displayFloor !== undefined) displayFloor.value = params.displayFloor;
-            if (params.floorZOffset !== undefined) floorZOffset.value = params.floorZOffset;
+            if (params.displayFloor !== undefined && params.displayCameraPositions !== null)
+                displayFloor.value = params.displayFloor;
+            if (params.floorZOffset !== undefined && params.displayCameraPositions !== null)
+                floorZOffset.value = params.floorZOffset;
             if (params.cameramanHeightCm) cameramanHeightCm.value = params.cameramanHeightCm;
             if (params.sectionZFactor) {
                 sectionZFactor.value = params.sectionZFactor;

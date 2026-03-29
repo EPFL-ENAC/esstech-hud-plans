@@ -275,16 +275,16 @@ async def restart_brush(
 
 
 class InteractiveBlueprintParamsResponse(BaseModel):
-    viewerSize: int
-    sceneZRotation: float
-    displayCameraPositions: bool
-    displayFloor: bool
-    floorZOffset: float
-    cameramanHeightCm: float
+    viewerSize: int | None = None
+    sceneZRotation: float | None = None
+    displayCameraPositions: bool | None = None
+    displayFloor: bool | None = None
+    floorZOffset: float | None = None
+    cameramanHeightCm: float | None = None
     sectionZFactor: dict | None = None
-    densityThreshold: float
-    opacityMultiplier: float
-    contrast: float
+    densityThreshold: float | None = None
+    opacityMultiplier: float | None = None
+    contrast: float | None = None
 
 
 class GenerationFeedbackResponse(BaseModel):

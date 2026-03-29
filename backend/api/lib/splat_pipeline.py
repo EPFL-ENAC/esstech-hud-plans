@@ -214,11 +214,17 @@ class BasePipeline(ABC):
         )
 
     def run_brush(self, cfg: BrushTrainingConfig):
+        workspace_dir = (
+            os.path.relpath(self.directories["workspace"])
+            if config.USE_RUNAI
+            else os.path.abspath(self.directories["workspace"])
+        )
+
         args = [
             brush_command,
-            os.path.relpath(self.directories["workspace"]),
+            workspace_dir,
             "--export-path",
-            os.path.relpath(self.directories["workspace"]),
+            workspace_dir,
             "--export-name",
             "splat.ply",
             "--total-steps",
@@ -245,8 +251,8 @@ class BasePipeline(ABC):
 
         if config.USE_RUNAI:
             runai.copy_data_to_scratch(
-                os.path.relpath(self.directories["workspace"]),
-                os.path.relpath(self.directories["workspace"]),
+                workspace_dir,
+                workspace_dir,
             )
             args[3] = os.path.join(
                 "/scratch", args[3]
@@ -260,8 +266,8 @@ class BasePipeline(ABC):
                 unbuffer=True,
             )
             runai.copy_data_from_scratch(
-                os.path.relpath(self.directories["workspace"]),
-                os.path.relpath(self.directories["workspace"]),
+                workspace_dir,
+                workspace_dir,
             )
         elif IS_DOCKER:
             command: str = " ".join(args)

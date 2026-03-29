@@ -172,7 +172,6 @@ onMounted(() => {
                         rows="4"
                         maxlength="1000"
                         hint="Max 1000 characters"
-                        :debounce="500"
                         counter
                         dense
                     />

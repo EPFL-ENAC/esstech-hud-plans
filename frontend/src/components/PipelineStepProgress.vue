@@ -162,9 +162,9 @@ const wrapLogs = ref(false);
                         @click="copyText(commandString, 'Command')"
                     />
                 </div>
-                <pre class="bg-grey-2 q-pa-sm rounded-borders scroll-x q-mt-xs">
-                    {{ commandString.trim() }}
-                </pre>
+                <pre class="bg-grey-2 q-pa-sm rounded-borders scroll-x q-mt-xs">{{
+                    commandString.trim()
+                }}</pre>
             </div>
 
             <!-- Logs Section -->
