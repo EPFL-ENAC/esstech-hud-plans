@@ -1,6 +1,7 @@
 import math
 import statistics
-from dataclasses import dataclass
+
+from pydantic import BaseModel
 
 
 def safe_mean(values: list[int] | list[float]) -> float:
@@ -73,8 +74,7 @@ def clamp01(value: float) -> float:
     return max(0.0, min(1.0, value))
 
 
-@dataclass
-class MeanMedianMinMax:
+class MeanMedianMinMax(BaseModel):
     mean: float | None
     median: float | None
     min: float | None
@@ -86,15 +86,14 @@ class MeanMedianMinMax:
             return MeanMedianMinMax(mean=None, median=None, min=None, max=None)
 
         return MeanMedianMinMax(
-            mean=statistics.mean(values),
+            mean=safe_mean(values),
             median=safe_median(values),
             min=float(min(values)) if values else 0.0,
             max=float(max(values)) if values else 0.0,
         )
 
 
-@dataclass
-class StatisticsSummary:
+class StatisticsSummary(BaseModel):
     mean: float | None
     median: float | None
     p90: float | None
@@ -108,7 +107,7 @@ class StatisticsSummary:
         sorted_values = sorted(float(v) for v in values)
 
         return StatisticsSummary(
-            mean=statistics.mean(values),
+            mean=safe_mean(values),
             median=safe_median(values),
             p90=_percentile_from_sorted_values(sorted_values, 90.0),
             p95=_percentile_from_sorted_values(sorted_values, 95.0),
