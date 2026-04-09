@@ -218,7 +218,7 @@ def _evaluate_one_model(
 
     reproj_errors: list[float] = [p.error for p in points3D if p.error != -1.0]
     track_lengths: list[int] = [
-        len(p.track.elements) for p in points3D if len(p.track.elements) is not None
+        len(p.track.elements) for p in points3D if p.track.elements is not None
     ]
     total_observations = sum(track_lengths)
 

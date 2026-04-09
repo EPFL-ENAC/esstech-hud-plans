@@ -46,15 +46,19 @@ function formatValue(val: number | null | undefined): string {
                 <q-card
                     flat
                     bordered
-                    :class="{ 'best-model-border': index === evaluation.best_model_index }"
+                    :class="{ 'best-model-border': index === props.evaluation.best_model_index }"
                 >
                     <q-item>
                         <q-item-section avatar>
                             <q-chip
-                                :color="index === evaluation.best_model_index ? 'gold' : 'grey-7'"
+                                :color="
+                                    index === props.evaluation.best_model_index ? 'gold' : 'grey-7'
+                                "
                                 text-color="white"
                                 :icon="
-                                    index === evaluation.best_model_index ? 'star' : 'account_tree'
+                                    index === props.evaluation.best_model_index
+                                        ? 'star'
+                                        : 'account_tree'
                                 "
                             >
                                 Model {{ ev.metrics.model_name }}

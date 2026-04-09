@@ -16,7 +16,7 @@ export interface SplatPipelineSettings {
 }
 
 export interface SplatPipelineStep<T extends object, E extends object = object> {
-    status: 'running' | 'completed' | 'failed';
+    status: 'submitted' | 'running' | 'completed' | 'failed';
     progress: number;
     submitted_at?: string | null;
     started_at: string | null;
@@ -29,7 +29,7 @@ export interface SplatPipelineStep<T extends object, E extends object = object> 
 }
 
 export interface SplatPipelineStatus {
-    overall_status: 'running' | 'completed' | 'failed';
+    overall_status: 'submitted' | 'running' | 'completed' | 'failed';
     progress: number;
     message?: string;
     started_at: string | null;

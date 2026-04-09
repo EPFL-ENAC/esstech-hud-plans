@@ -31,7 +31,7 @@ def colmap_compute_geometric_data(sparse_dir: str):
     up_vectors = np.array(up_vectors)
     average_up = np.mean(up_vectors, axis=0)
 
-    # Find the normal to a plane fitted to the camera posisions
+    # Find the normal to a plane fitted to the camera positions
     center = np.mean(positions, axis=0)
     centered_positions = positions - center
     cov = np.cov(centered_positions, rowvar=False)
@@ -57,7 +57,11 @@ def compute_blueprint_view_matrix(
     """Compute the 4x4 view matrix for the blueprint top-down view.
 
     Args:
-        colmap_geometry: Dictionary with 'center', 'world_rotation', and 'radius' keys
+        colmap_geometry: `ColmapGeometricData` containing:
+            - `center`: scene center as ``[x, y, z]``
+            - `world_rotation`: 3x3 world rotation matrix
+            - `radius`: scene radius used to place the top-down camera
+            - `positions`: camera positions as ``[[x, y, z], ...]``
         distance_scale: Multiplier for radius to determine view distance (default: 1000.0)
 
     Returns:

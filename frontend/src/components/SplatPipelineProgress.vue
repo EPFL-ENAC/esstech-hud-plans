@@ -51,6 +51,8 @@ const statusText = computed(() => {
             return 'Failed';
         case 'running':
             return 'Processing...';
+        case 'submitted':
+            return 'Submitted';
         default:
             return 'Unknown';
     }

@@ -240,7 +240,7 @@ class GenerationManager:
 
         return run
 
-    def evaluate_colmap_reconstruction(self, generation_id: str) -> dict:
+    def evaluate_colmap_reconstruction(self, generation_id: str):
         from api.lib.compute.evaluate_colmap import evaluate_sparse_reconstructions
 
         folder = self._make_generation_folder_path(generation_id)
