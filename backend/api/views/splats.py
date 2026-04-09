@@ -375,3 +375,18 @@ async def save_generation_feedback(
         )
 
     return {"status": "saved"}
+
+
+@router.get(
+    "/evaluation/{generation_id}",
+    status_code=200,
+    description="Evaluates the COLMAP reconstruction of a generation run",
+)
+async def evaluate_colmap_reconstruction(generation_id: str):
+    """Evaluate the COLMAP reconstruction of a generation run and return metrics."""
+    try:
+        metrics = manager.evaluate_colmap_reconstruction(generation_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    return metrics

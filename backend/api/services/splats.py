@@ -240,6 +240,33 @@ class GenerationManager:
 
         return run
 
+    def evaluate_colmap_reconstruction(self, generation_id: str) -> dict:
+        from api.lib.compute.evaluate_colmap import evaluate_sparse_reconstructions
+
+        folder = self._make_generation_folder_path(generation_id)
+        sparse_dir = os.path.join(folder, "colmap", "sparse")
+        if not os.path.exists(sparse_dir):
+            raise ValueError(
+                f"COLMAP sparse directory not found for generation {generation_id}"
+            )
+
+        frames_dir = os.path.join(folder, "images")
+        frames_count = (
+            len(
+                [
+                    f
+                    for f in os.listdir(frames_dir)
+                    if os.path.isfile(os.path.join(frames_dir, f))
+                ]
+            )
+            if os.path.exists(frames_dir)
+            else None
+        )
+
+        return evaluate_sparse_reconstructions(
+            sparse_dir=sparse_dir, total_input_frames=frames_count
+        )
+
     def _make_generation_folder_path(self, generation_id: str) -> str:
         backend_root = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "..", ".."

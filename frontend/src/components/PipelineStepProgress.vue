@@ -204,6 +204,8 @@ const wrapLogs = ref(false);
                     </div>
                 </div>
             </div>
+
+            <slot />
         </div>
     </q-expansion-item>
 </template>

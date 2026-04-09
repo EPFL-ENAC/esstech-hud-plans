@@ -131,6 +131,10 @@ class PipelineLogger:
 
         self.save()
 
+    def evaluate_step(self, step: str, evaluation: dict):
+        self.data["steps"][step]["evaluation"] = evaluation
+        self.save()
+
     def reset_step(self, step: str):
         if step in self.data["steps"]:
             del self.data["steps"][step]

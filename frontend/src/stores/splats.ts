@@ -5,6 +5,7 @@ import type { ColmapConfig } from 'src/lib/splats/colmap';
 import type { FFMPEGExtractionConfig } from 'src/lib/splats/ffmpeg';
 import { AsyncResult, delay, type ErrorBase } from 'unwrapped/core';
 import { baseUrl } from 'boot/api';
+import type { ColmapSparseEvaluation } from 'src/lib/splats/evaluations';
 
 export interface SplatPipelineSettings {
     video_path: string;
@@ -14,13 +15,14 @@ export interface SplatPipelineSettings {
     blueprint: BlueprintConfig;
 }
 
-export interface SplatPipelineStep<T extends object> {
+export interface SplatPipelineStep<T extends object, E extends object = object> {
     status: 'running' | 'completed' | 'failed';
     progress: number;
     submitted_at?: string | null;
     started_at: string | null;
     finished_at: string | null;
     settings: T;
+    evaluation?: E;
     command: string | string[];
     logs: string[];
     return_code: number;
@@ -43,7 +45,7 @@ export interface SplatPipelineStatus {
 
     steps: {
         ffmpeg: SplatPipelineStep<FFMPEGExtractionConfig>;
-        colmap: SplatPipelineStep<ColmapConfig>;
+        colmap: SplatPipelineStep<ColmapConfig, ColmapSparseEvaluation>;
         brush: SplatPipelineStep<BrushTrainingConfig>;
         blueprint_extraction?: SplatPipelineStep<BlueprintConfig>;
     };

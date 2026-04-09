@@ -11,6 +11,11 @@ from typing import Callable, Literal, Union
 import numpy as np
 from api import runai
 from api.config import config
+from api.lib.compute.colmap_geometric_data import (
+    ColmapGeometricData,
+    colmap_compute_geometric_data,
+    compute_blueprint_view_matrix,
+)
 from api.models.splats import (
     BaseGenerationInputs,
     BlueprintConfig,
@@ -164,54 +169,39 @@ class BasePipeline(ABC):
                 estimate_progress_callback=estimate_colmap_progress,
             )
 
+        sparse_dir = os.path.join(self.directories["colmap"], "sparse")
+        self._colmap_evaluate_reconstruction()
+
         # TODO: do one reconstruction per directory in `colmap/sparse`
         # based on config.MIN_COLMAP_IMAGES_KEEP
-        sparse_dir = os.path.join(self.directories["colmap"], "sparse", "0")
-        self._colmap_compute_geometric_data(sparse_dir)
+        sparse_dir_0 = os.path.join(sparse_dir, "0")
+        self._colmap_compute_geometric_data(sparse_dir_0)
+
+    def _colmap_evaluate_reconstruction(self) -> dict:
+        from api.lib.compute.evaluate_colmap import evaluate_sparse_reconstructions
+
+        sparse_dir = os.path.join(self.directories["colmap"], "sparse")
+        frames_count = (
+            len(
+                [
+                    f
+                    for f in os.listdir(self.directories["images"])
+                    if os.path.isfile(os.path.join(self.directories["images"], f))
+                ]
+            )
+            if os.path.exists(self.directories["images"])
+            else None
+        )
+
+        evaluation = evaluate_sparse_reconstructions(
+            sparse_dir, total_input_frames=frames_count
+        )
+        self.logger.evaluate_step("colmap", evaluation.model_dump(mode="json"))
+        return evaluation
 
     def _colmap_compute_geometric_data(self, sparse_dir: str):
-        import pycolmap
-
-        reconstruction = pycolmap.Reconstruction(sparse_dir)
-        positions = []
-        up_vectors = []
-
-        sorted_image_ids = sorted(reconstruction.images.keys())
-
-        for image_id in sorted_image_ids:
-            image = reconstruction.images[image_id]
-            pose = image.cam_from_world()
-
-            translation = pose.translation
-            rotation = pose.rotation.matrix()
-
-            positions.append(-rotation.T @ translation)
-            up_vectors.append(-rotation.T @ np.array([0, 1, 0]))
-
-        positions = np.array(positions)
-        up_vectors = np.array(up_vectors)
-        average_up = np.mean(up_vectors, axis=0)
-
-        # Find the normal to a plane fitted to the camera posisions
-        center = np.mean(positions, axis=0)
-        centered_positions = positions - center
-        cov = np.cov(centered_positions, rowvar=False)
-        eigenvalues, eigenvectors = np.linalg.eig(cov)
-        normal = eigenvectors[:, np.argmin(eigenvalues)]
-        tangent = eigenvectors[:, np.argmax(eigenvalues)]
-        normal *= np.sign(np.dot(normal, average_up))
-        normal /= np.linalg.norm(normal)
-        world_rotation = np.stack([tangent, np.cross(normal, tangent), normal], axis=1)
-        radius = np.max(np.linalg.norm(centered_positions, axis=1))
-
-        self.logger.set_colmap_geometric_data(
-            {
-                "center": center.tolist(),
-                "world_rotation": world_rotation.tolist(),
-                "radius": radius,
-                "positions": positions.tolist(),
-            }
-        )
+        colmap_data = colmap_compute_geometric_data(sparse_dir)
+        self.logger.set_colmap_geometric_data(colmap_data.model_dump(mode="json"))
 
     def run_brush(self, cfg: BrushTrainingConfig):
         workspace_dir = (
@@ -290,32 +280,9 @@ class BasePipeline(ABC):
     def compute_blueprint_view_matrix(
         self, colmap_geometry: dict, distance_scale: float = 1000.0
     ) -> np.ndarray:
-        """Compute the 4x4 view matrix for the blueprint top-down view.
-
-        Args:
-            colmap_geometry: Dictionary with 'center', 'world_rotation', and 'radius' keys
-            distance_scale: Multiplier for radius to determine view distance (default: 1000.0)
-
-        Returns:
-            4x4 numpy array representing the view matrix
-        """
-        center = np.array(colmap_geometry["center"])
-        world_rotation = np.array(colmap_geometry["world_rotation"])
-        radius = colmap_geometry["radius"]
-
-        D = distance_scale * radius  # Large distance to flatten perspective
-
-        # Top-down view rotation matrix (converts from world space to top-down view)
-        R_td = np.array([[1, 0, 0], [0, -1, 0], [0, 0, 1]], dtype=np.float32)
-        R_combined = R_td @ world_rotation.T
-        t_combined = -R_combined @ center
-        t_combined[2] += D
-
-        view_mat = np.eye(4, dtype=np.float32)
-        view_mat[:3, :3] = R_combined
-        view_mat[:3, 3] = t_combined
-
-        return view_mat
+        return compute_blueprint_view_matrix(
+            ColmapGeometricData(**colmap_geometry), distance_scale
+        )
 
     def extract_blueprint_from_splat(
         self, ply_path: str, cfg: BlueprintConfig, output_prefix: str = "blueprint"

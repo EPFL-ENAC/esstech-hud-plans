@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { useRouter } from 'vue-router';
 import type { SplatPipelineStatus } from 'src/stores/splats';
 import PipelineStepProgress from './PipelineStepProgress.vue';
+import ColmapEvaluation from './ColmapEvaluation.vue';
 
 const props = defineProps<{
     value: SplatPipelineStatus;
@@ -104,7 +105,12 @@ const statusText = computed(() => {
                 v-if="props.value.steps.colmap"
                 :step="props.value.steps.colmap"
                 title="Colmap"
-            />
+            >
+                <colmap-evaluation
+                    v-if="props.value.steps.colmap.evaluation"
+                    :evaluation="props.value.steps.colmap.evaluation"
+                />
+            </pipeline-step-progress>
             <pipeline-step-progress
                 v-if="props.value.steps.brush"
                 title="Brush"
@@ -139,11 +145,11 @@ const statusText = computed(() => {
                         </q-item-section>
                         <q-item-section>
                             <q-item-label>Splat Path</q-item-label>
-                            <q-item-label caption
-                                ><div class="path">
+                            <q-item-label caption>
+                                <div class="path">
                                     {{ props.value.output.splat_path }}
-                                </div></q-item-label
-                            >
+                                </div>
+                            </q-item-label>
                         </q-item-section>
                     </q-item>
                 </div>
