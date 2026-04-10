@@ -119,7 +119,20 @@ watch(
                         filled
                     />
 
-                    <q-toggle v-model="config.single_camera" label="Shared Camera Intrinsic" />
+                    <div class="row">
+                        <div class="col-6">
+                            <q-toggle
+                                v-model="config.single_camera"
+                                label="Shared Camera Intrinsic"
+                            />
+                        </div>
+                        <div class="col-6">
+                            <q-toggle
+                                v-model="config.use_global_mapper"
+                                label="Use global mapper"
+                            />
+                        </div>
+                    </div>
                 </div>
             </q-tab-panel>
 

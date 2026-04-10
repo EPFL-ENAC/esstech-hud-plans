@@ -22,6 +22,7 @@ class ColmapAutoConfig(BaseModel):
     max_image_size: int
     single_camera: bool
     dense: bool
+    use_global_mapper: bool = False
 
 
 class ColmapManualConfig(BaseModel):

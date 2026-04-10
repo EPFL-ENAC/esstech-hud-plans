@@ -9,6 +9,7 @@ export interface AutoReconstructorConfig {
     max_image_size: number;
     single_camera: boolean;
     dense: boolean;
+    use_global_mapper: boolean;
 }
 
 export interface ManualPipelineConfig {
@@ -60,6 +61,7 @@ export function makeAutoDefaults(): AutoReconstructorConfig {
         max_image_size: 1920,
         single_camera: true,
         dense: false,
+        use_global_mapper: false,
     };
 }
 

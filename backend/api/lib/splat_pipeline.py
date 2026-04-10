@@ -131,6 +131,8 @@ class BasePipeline(ABC):
                     # "--max_image_size", str(cfg.max_image_size)
                 ]
             )
+            if cfg.use_global_mapper:
+                args.extend(["--mapper", "global"])
 
         if config.USE_RUNAI:
             runai.copy_data_to_scratch(

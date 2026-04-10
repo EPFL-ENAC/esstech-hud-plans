@@ -70,9 +70,10 @@ def flatten_status_data(status_file_path: str) -> dict:
     row["colmap_data_type"] = colmap_settings.get("data_type")
     row["colmap_quality"] = colmap_settings.get("quality")
     row["colmap_camera_model"] = colmap_settings.get("camera_model")
-    row["colmap_max_image_size"] = colmap_settings.get("max_image_size")
+    # row["colmap_max_image_size"] = colmap_settings.get("max_image_size")
     row["colmap_single_camera"] = colmap_settings.get("single_camera")
     row["colmap_dense"] = colmap_settings.get("dense")
+    row["colmap_use_global_mapper"] = colmap_settings.get("use_global_mapper", False)
 
     brush_settings = settings.get("brush", {})
     row["brush_totalSteps"] = brush_settings.get("totalSteps")
