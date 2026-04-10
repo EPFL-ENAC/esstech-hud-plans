@@ -1,4 +1,160 @@
-FROM colmap/colmap:20260224.6006
+########################################
+# COLMAP Dockerfile
+########################################
+# Edited from https://github.com/colmap/colmap/blob/main/docker/Dockerfile
+# Adding Ceres build with CUDA and CuDSS support
+
+ARG UBUNTU_VERSION=24.04
+ARG NVIDIA_CUDA_VERSION=12.9.1
+
+#
+# Docker builder stage.
+#
+FROM nvidia/cuda:${NVIDIA_CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION} AS builder
+
+ARG ABSEIL_VERSION=20260107.1
+ARG CERES_VERSION=806af056feb22a1236baca247b4f4b6e1ea911e5  # Latest tagged version doesn't support cuDSS
+ARG COLMAP_VERSION=4.0.3
+ARG CUDA_ARCHITECTURES=all-major
+ENV QT_XCB_GL_INTEGRATION=xcb_egl
+ARG FETCHCONTENT_FULLY_DISCONNECTED=OFF
+ENV CCACHE_DIR=/colmap/build/.ccache
+ENV CCACHE_BASEDIR=/colmap
+ENV MAKE_NPROCS=2
+
+# Prevent stop building ubuntu at time zone selection.
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Prepare and empty machine for building.
+RUN apt-get update && \
+    apt-get install -y \
+	    git \
+        ccache \
+        cmake \
+        ninja-build \
+        build-essential \
+		libgoogle-glog-dev \
+		libgflags-dev \
+		libatlas-base-dev \
+		libsuitesparse-dev \
+		cudss-cuda-12 \
+        libboost-program-options-dev \
+        libboost-graph-dev \
+        libboost-system-dev \
+        libeigen3-dev \
+        libopenimageio-dev \
+        openimageio-tools \
+        libmetis-dev \
+        libgoogle-glog-dev \
+        libgtest-dev \
+        libgmock-dev \
+        libsqlite3-dev \
+        libglew-dev \
+        qt6-base-dev \
+        libqt6opengl6-dev \
+        libqt6openglwidgets6 \
+        libcgal-dev \
+        libcurl4-openssl-dev \
+        libssl-dev \
+        libmkl-full-dev
+
+# Fix issue in Ubuntu's openimageio CMake config.
+# We don't depend on any of openimageio's OpenCV functionality,
+# but it still requires the OpenCV include directory to exist.
+RUN mkdir -p /usr/include/opencv4
+
+
+# Clone and build Abseil
+RUN git clone --branch ${ABSEIL_VERSION} --single-branch --depth 1 https://github.com/abseil/abseil-cpp.git && \
+	cd abseil-cpp && \
+	mkdir -p build && \
+	cd build && \
+	cmake .. && \
+	make -j${MAKE_NPROCS} && \
+	make install
+
+
+# Clone and build Ceres
+RUN git clone https://github.com/ceres-solver/ceres-solver.git && \
+	cd ceres-solver && \
+	git checkout ${CERES_VERSION} && \
+	mkdir -p build && \
+	cd build && \
+	cmake .. \
+		-USE_CUDA \
+        -DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHITECTURES} \
+		-Dcudss_DIR=/usr/lib/x86_64-linux-gnu/libcudss/12/cmake/cudss \
+		-Dcudss_INCLUDE_DIR=/usr/include/libcudss/12 \
+	    && \
+	make -j${MAKE_NPROCS} && \
+	make install
+
+
+# Clone and build COLMAP
+RUN git clone --branch ${COLMAP_VERSION} --single-branch --depth 1 https://github.com/colmap/colmap.git && \
+	cd colmap && \
+    mkdir -p build/.ccache && \
+    cd build && \
+    cmake .. \
+        -GNinja \
+        -DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHITECTURES} \
+        -DCMAKE_INSTALL_PREFIX=/colmap-install \
+        -DFETCHCONTENT_FULLY_DISCONNECTED=${FETCHCONTENT_FULLY_DISCONNECTED} \
+        -DBLA_VENDOR=Intel10_64lp && \
+	ninja -j${MAKE_NPROCS} && \
+    ninja install
+
+#
+# Stage to export build caches for CI round-tripping via actions/cache.
+#
+FROM scratch AS cache-export
+COPY --from=builder /colmap/build/.ccache/ /.ccache/
+COPY --from=builder /colmap/build/_deps/ /_deps/
+
+#
+# Docker runtime stage.
+#
+FROM nvidia/cuda:${NVIDIA_CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION} AS runtime
+
+# Minimal dependencies to run COLMAP binary compiled in the builder stage.
+# Note: this reduces the size of the final image considerably, since all the
+# build dependencies are not needed.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends --no-install-suggests \
+        libboost-program-options1.83.0 \
+        libc6 \
+        libomp5 \
+        libopengl0 \
+        libmetis5 \
+        libopenimageio2.4t64 \
+        libgcc-s1 \
+        libgl1 \
+        libglew2.2 \
+        libgoogle-glog0v6t64 \
+        libqt6core6 \
+        libqt6gui6 \
+        libqt6widgets6 \
+        libqt6openglwidgets6 \
+        libcurl4 \
+        libssl3t64 \
+        libmkl-locale \
+        libmkl-intel-lp64 \
+        libmkl-intel-thread \
+        libmkl-core \
+		libcholmod5 \
+		libspqr4 \
+		libcudss0-cuda-12 && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy all files from /colmap-install/ in the builder stage to /usr/local/ in
+# the runtime stage. This simulates installing COLMAP in the default location
+# (/usr/local/), which simplifies environment variables. It also allows the user
+# of this Docker image to use it as a base image for compiling against COLMAP as
+# a library. For instance, CMake will be able to find COLMAP easily with the
+# command: find_package(COLMAP REQUIRED).
+COPY --from=builder /colmap-install/ /usr/local/
+ENV LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/libcudss/12:${LD_LIBRARY_PATH}
 
 ########################################
 # RCP CaaS requirement
