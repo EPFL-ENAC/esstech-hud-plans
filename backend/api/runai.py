@@ -12,6 +12,17 @@ logger = logging.getLogger("uvicorn.error")
 
 
 LOGS_DIR_PATH = "log"
+RUNAI_STATUSES_RUNNING = {"Running"}
+RUNAI_STATUSES_COMPLETED = {"Completed", "Stopped", "Succeeded"}
+RUNAI_STATUSES_FAILED = {
+    "Failed",
+    "ImagePullBackOff",
+    "ErrImagePull",
+    "CrashLoopBackOff",
+    "OOMKilled",
+    "Evicted",
+    "Error",
+}
 
 
 def get_log_file_path(job_name: str) -> str:
@@ -159,7 +170,10 @@ def check_job_started(job_name: str) -> bool:
     if status is None:
         return False
 
-    return status in {"Running", "Completed", "Failed", "Stopped", "Succeeded"}
+    return (
+        status
+        in RUNAI_STATUSES_RUNNING | RUNAI_STATUSES_COMPLETED | RUNAI_STATUSES_FAILED
+    )
 
 
 def check_job_terminated(job_name: str) -> bool:
@@ -167,7 +181,7 @@ def check_job_terminated(job_name: str) -> bool:
     if status is None:
         return False
 
-    return status in {"Completed", "Failed", "Stopped", "Succeeded"}
+    return status in RUNAI_STATUSES_COMPLETED | RUNAI_STATUSES_FAILED
 
 
 # def get_access_token() -> str:
