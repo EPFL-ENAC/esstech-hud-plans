@@ -55,9 +55,9 @@ class ReconstructionMetrics(BaseModel):
 
 
 RECONSTRUCTION_EVALUATION_WEIGHTS = {
-    "coverage_score": 0.4,
-    "continuity_score": 0.2,
-    "accuracy_score": 0.3,
+    "coverage_score": 0.6,
+    "continuity_score": 0.1,
+    "accuracy_score": 0.2,
     "points_density_score": 0.1,
 }
 
