@@ -30,6 +30,7 @@ RUN apt update && \
 COPY backend/scripts/linux/install_brush.sh /home/${LDAP_USERNAME}/install_brush.sh
 RUN /home/${LDAP_USERNAME}/install_brush.sh
 RUN apt clean && rm -rf /var/lib/apt/lists/*
-RUN ln -s /external/bin/brush /usr/local/bin/brush
+COPY docker/brush_unbuferred.sh /external/bin/brush_unbuffered.sh
+RUN ln -s /external/bin/brush_unbuffered.sh /usr/local/bin/brush
 
 USER ${LDAP_USERNAME}

@@ -102,13 +102,13 @@ def submit_job(
     )
 
     if unbuffer:
-        shell_command = (
-            "cd /scratch"
-            + f" && mkdir -p {LOGS_DIR_PATH}"
-            + f' && script -q -e -f -c \\"{" ".join(command)}\\" /dev/null'
-            + " | stdbuf -o0 tr \\'\\r\\' \\'\\n\\'"
-            + " | stdbuf -o0 tee "
-            + os.path.join("/scratch", get_log_file_path(job_name))
+        shell_command = " ".join(
+            [
+                f"cd /scratch && mkdir -p {LOGS_DIR_PATH} && ",
+                *command,
+                " | stdbuf -o0 tee",
+                os.path.join("/scratch", get_log_file_path(job_name)),
+            ]
         )
     else:
         shell_command = " ".join(
