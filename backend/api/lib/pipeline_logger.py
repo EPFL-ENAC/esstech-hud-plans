@@ -97,6 +97,17 @@ class PipelineLogger:
             "failed",
         }
 
+    def has_failed(self, step: str) -> bool:
+        return (
+            step in self.data["steps"]
+            and self.data["steps"][step]["status"] == "failed"
+        )
+
+    def get_fail_message(self, step: str) -> str | None:
+        if self.has_failed(step):
+            return self.data["steps"][step].get("message")
+        return None
+
     def start_step(
         self,
         step: str,

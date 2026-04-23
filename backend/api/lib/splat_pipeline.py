@@ -172,11 +172,23 @@ class BasePipeline(ABC):
             )
 
         sparse_dir = os.path.join(self.directories["colmap"], "sparse")
+        if not os.path.exists(sparse_dir):
+            self.logger.step_failed(
+                "colmap",
+                f"Expected COLMAP output directory not found: {sparse_dir}",
+            )
+            return
+
+        sparse_dir_0 = os.path.join(sparse_dir, "0")
+        if not os.path.exists(sparse_dir_0):
+            self.logger.step_failed(
+                "colmap",
+                f"Expected COLMAP sparse reconstruction directory not found: {sparse_dir_0}",
+            )
+            return
+
         self._colmap_evaluate_reconstruction()
 
-        # TODO: do one reconstruction per directory in `colmap/sparse`
-        # based on config.MIN_COLMAP_IMAGES_KEEP
-        sparse_dir_0 = os.path.join(sparse_dir, "0")
         self._colmap_compute_geometric_data(sparse_dir_0)
 
     def _colmap_evaluate_reconstruction(self) -> dict:
@@ -613,6 +625,11 @@ class SplatPipeline(BasePipeline):
             )
 
             self.run_colmap(self.inputs.colmap)
+            if self.logger.has_failed("colmap"):
+                self.logger.fail(
+                    message=f"COLMAP reconstruction failed. Aborting pipeline. {self.logger.get_fail_message('colmap')}"
+                )
+                return {}
 
             self.run_brush(self.inputs.brush)
 
