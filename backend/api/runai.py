@@ -12,7 +12,7 @@ logger = logging.getLogger("uvicorn.error")
 
 
 LOGS_DIR_PATH = "log"
-RUNAI_STATUSES_RUNNING = {"Running"}
+RUNAI_STATUSES_RUNNING = {"Running", "Terminating"}
 RUNAI_STATUSES_COMPLETED = {"Completed", "Stopped", "Succeeded"}
 RUNAI_STATUSES_FAILED = {
     "Failed",
@@ -176,9 +176,9 @@ def check_job_started(job_name: str) -> bool:
     )
 
 
-def check_job_terminated(job_name: str) -> bool:
+def check_job_terminated(job_name: str) -> bool | None:
     status = get_job_status(job_name)
     if status is None:
-        return False
+        return None
 
     return status in RUNAI_STATUSES_COMPLETED | RUNAI_STATUSES_FAILED

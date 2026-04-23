@@ -31,6 +31,7 @@ from .pipeline_logger import PipelineLogger
 logger = logging.getLogger("uvicorn.error")
 
 RUNAI_POLL_INTERVAL = 5  # seconds
+RUNAI_CHECK_STATUS_MAX_FAILS = 5
 os.environ["PYTHONUNBUFFERED"] = "1"  # Add at top of file
 
 # Check if running inside a Docker container
@@ -170,6 +171,9 @@ class BasePipeline(ABC):
                 step_name="colmap",
                 estimate_progress_callback=estimate_colmap_progress,
             )
+
+        if self.logger.has_failed("colmap"):
+            return
 
         sparse_dir = os.path.join(self.directories["colmap"], "sparse")
         if not os.path.exists(sparse_dir):
@@ -534,55 +538,58 @@ class BasePipeline(ABC):
                 ),
             )
 
-        runai.refresh_logs()
-        while not os.path.exists(log_file_path):
-            logger.info(f"Waiting for log file {log_file_path} to be created...")
-            if not self.logger.has_started(step_name) and runai.check_job_started(
-                job_name
-            ):
-                self.logger.start_step(step_name)
-            if runai.check_job_terminated(job_name):
-                self.logger.step_failed(
-                    step_name,
-                    f"RunAI job {job_name} terminated before log file was created.",
-                )
-                return
-            time.sleep(RUNAI_POLL_INTERVAL)
-            runai.refresh_logs()
-
-        logger.info(f"Monitoring log file {log_file_path} for updates...")
         buffer = ""
         read_pos = 0
-        while True:
+        runai_check_fails = 0
+
+        while runai_check_fails < RUNAI_CHECK_STATUS_MAX_FAILS:
             if not self.logger.has_started(step_name) and runai.check_job_started(
                 job_name
             ):
                 self.logger.start_step(step_name)
+
             runai.refresh_logs()
-            with open(log_file_path, "rb") as f:
-                f.seek(read_pos)
-                raw_chunk = f.read(1024)
-                read_pos = f.tell()
-            if raw_chunk:
-                chunk = raw_chunk.decode("utf-8", errors="replace")
-                buffer += chunk
-                lines = buffer.split("\n")
-                buffer = lines[-1]
-                for line in lines[:-1]:
-                    if line.strip():
-                        log_and_estimate_progress(line.rstrip("\r"))
-                if "\r" in buffer:
-                    parts = buffer.split("\r")
-                    for part in parts[:-1]:
-                        if part.strip():
-                            log_and_estimate_progress(part)
-                    buffer = parts[-1]
-            else:
-                if runai.check_job_terminated(job_name):
-                    if buffer.strip():
-                        log_and_estimate_progress(buffer.rstrip("\r"))
-                    break
-                time.sleep(RUNAI_POLL_INTERVAL)
+            try:
+                with open(log_file_path, "rb") as f:
+                    f.seek(read_pos)
+                    raw_chunk = f.read()
+                    read_pos = f.tell()
+
+                    chunk = raw_chunk.decode("utf-8", errors="replace")
+                    buffer += chunk
+                    lines = buffer.split("\n")
+                    buffer = lines[-1]
+                    for line in lines[:-1]:
+                        if line.strip():
+                            log_and_estimate_progress(line.rstrip("\r"))
+                    if "\r" in buffer:
+                        parts = buffer.split("\r")
+                        for part in parts[:-1]:
+                            if part.strip():
+                                log_and_estimate_progress(part)
+                        buffer = parts[-1]
+
+            except Exception as e:
+                pass
+
+            runai_check_terminated = runai.check_job_terminated(job_name)
+
+            if runai_check_terminated:
+                if buffer.strip():
+                    log_and_estimate_progress(buffer.rstrip("\r"))
+                break
+
+            if runai_check_terminated is None:
+                runai_check_fails += 1
+
+            time.sleep(RUNAI_POLL_INTERVAL)
+
+        if runai_check_fails >= RUNAI_CHECK_STATUS_MAX_FAILS:
+            self.logger.step_failed(
+                step_name,
+                f"Failed to get status from RunAI after {RUNAI_CHECK_STATUS_MAX_FAILS} attempts.",
+            )
+            return
 
         self.logger.add_log(
             step_name,
