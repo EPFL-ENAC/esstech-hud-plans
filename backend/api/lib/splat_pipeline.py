@@ -636,7 +636,10 @@ class SplatPipeline(BasePipeline):
                 self.logger.fail(
                     message=f"COLMAP reconstruction failed. Aborting pipeline. {self.logger.get_fail_message('colmap')}"
                 )
-                return {}
+                return {
+                    "splat_path": "",
+                    "blueprints": [],
+                }
 
             self.run_brush(self.inputs.brush)
 
