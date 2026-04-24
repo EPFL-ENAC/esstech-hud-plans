@@ -55,6 +55,7 @@ def copy_data_to_scratch(source_path: str, dest_path: str) -> None:
             "--copy-links",
         ],
         check=True,
+        capture_output=True,
     )
 
 
@@ -77,6 +78,7 @@ def copy_data_from_scratch(source_path: str, dest_path: str) -> None:
             "--copy-links",
         ],
         check=True,
+        capture_output=True,
     )
 
 
@@ -92,7 +94,6 @@ def submit_job(
     tool: Literal["ffmpeg", "colmap", "brush"],
     command: list[str],
     n_gpu: int = 1,
-    unbuffer: bool = False,
 ) -> str:
     hex_suffix = secrets.token_hex(4)
     job_name = f"{tool}-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{hex_suffix}"
@@ -101,24 +102,14 @@ def submit_job(
         f"Submitting Run:AI job {job_name} with command: {tool} {' '.join(command)}"
     )
 
-    if unbuffer:
-        shell_command = " ".join(
-            [
-                f"cd /scratch && mkdir -p {LOGS_DIR_PATH} && ",
-                *command,
-                " | stdbuf -o0 tee",
-                os.path.join("/scratch", get_log_file_path(job_name)),
-            ]
-        )
-    else:
-        shell_command = " ".join(
-            [
-                f"cd /scratch && mkdir -p {LOGS_DIR_PATH} && ",
-                *command,
-                "2>&1 | tee",
-                os.path.join("/scratch", get_log_file_path(job_name)),
-            ]
-        )
+    shell_command = " ".join(
+        [
+            f"cd /scratch && mkdir -p {LOGS_DIR_PATH} && ",
+            *command,
+            "2>&1 | tee",
+            os.path.join("/scratch", get_log_file_path(job_name)),
+        ]
+    )
 
     subprocess.run(
         [
@@ -132,6 +123,8 @@ def submit_job(
             "--existing-pvc",
             f"claimname={config.RUNAI_PVC_SCRATCH_NAME},path=/scratch",
             "--interactive",
+            "--tty",
+            "--stdin",
             "--command",
             "--",
             "/bin/sh",
@@ -139,6 +132,7 @@ def submit_job(
             shell_command,
         ],
         check=True,
+        capture_output=True,
     )
 
     return job_name

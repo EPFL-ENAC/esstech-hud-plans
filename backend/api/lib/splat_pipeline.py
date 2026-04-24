@@ -271,7 +271,6 @@ class BasePipeline(ABC):
                 cmd,
                 step_name="brush",
                 estimate_progress_callback=estimate_training_progress,
-                unbuffer=True,
             )
             runai.copy_data_from_scratch(
                 workspace_dir,
@@ -522,9 +521,8 @@ class BasePipeline(ABC):
         cmd: list[str],
         step_name: Literal["ffmpeg", "colmap", "brush"],
         estimate_progress_callback: Callable[[str], float],
-        unbuffer: bool = False,
     ):
-        job_name = runai.submit_job(tool=step_name, command=cmd, unbuffer=unbuffer)
+        job_name = runai.submit_job(tool=step_name, command=cmd)
         log_file_path = runai.get_log_file_path(job_name)
 
         def log_and_estimate_progress(line: str):

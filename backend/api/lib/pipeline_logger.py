@@ -157,6 +157,7 @@ class PipelineLogger:
         line: str,
         heading_level: int = 0,
         cleanup_for_file: Callable[[str], str | None] | None = None,
+        print_to_console: bool = False,
     ):
         cleaned_line = _strip_ansi(line)
         if cleanup_for_file:
@@ -167,16 +168,18 @@ class PipelineLogger:
         if cleaned_line_or_none is not None:
             self.data["steps"][step]["logs"].append(cleaned_line_or_none)
 
-        extra_lines = (
-            max(0, MAX_HEADING_LEVEL - heading_level) if heading_level > 0 else 0
-        )
-        text = (
-            ("\n" * extra_lines)
-            + f"[#{self.data['name']}/{step}] "
-            + line
-            + ("\n" * max(extra_lines - 1, 0))
-        )
-        print(text, flush=True)
+        if print_to_console:
+            extra_lines = (
+                max(0, MAX_HEADING_LEVEL - heading_level) if heading_level > 0 else 0
+            )
+
+            text = (
+                ("\n" * extra_lines)
+                + f"[#{self.data['name']}/{step}] "
+                + line
+                + ("\n" * max(extra_lines - 1, 0))
+            )
+            print(text, flush=True)
 
         self.save()
 
