@@ -48,7 +48,7 @@ export function makeDefaultBrushConfig(): BrushTrainingConfig {
         shDegree: 3,
         maxSplats: 10_000_000,
         refineEvery: 200,
-        growthGradThreshold: 0.003,
+        growthGradThreshold: 0.0025,
         growthStopIter: 15_000,
         maxResolution: 1920,
         subsampleFrames: 1,

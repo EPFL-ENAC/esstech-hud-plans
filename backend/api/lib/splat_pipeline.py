@@ -235,7 +235,7 @@ class BasePipeline(ABC):
             workspace_dir,
             "--export-name",
             "splat.ply",
-            "--total-steps",
+            "--total-train-iters",
             str(cfg.totalSteps),
             "--render-mode",
             cfg.renderMode,
