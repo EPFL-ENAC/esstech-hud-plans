@@ -1,14 +1,16 @@
 <script setup lang="ts" generic="T extends object">
 import type { SplatPipelineStep } from 'src/stores/splats';
-import { computed, nextTick, ref, useTemplateRef, watch } from 'vue';
-import { copyToClipboard, useQuasar } from 'quasar';
+import { computed, nextTick, useTemplateRef, watch } from 'vue';
+import CopyButton from './CopyButton.vue';
+import StepLogs from './StepLogs.vue';
+import type { LogParser } from 'src/lib/utils/logs';
 
 const props = defineProps<{
     step: SplatPipelineStep<T>;
+    logsParser?: LogParser;
     title: string;
 }>();
 
-const $q = useQuasar();
 const logsContainerRef = useTemplateRef<HTMLDivElement>('logsContainer');
 
 const commandString = computed(() => {
@@ -17,8 +19,6 @@ const commandString = computed(() => {
     }
     return props.step.command;
 });
-
-const logString = computed(() => props.step.logs.join('\n'));
 
 const statusColor = computed(() => {
     switch (props.step.status) {
@@ -61,24 +61,6 @@ watch(
     { deep: true },
 );
 
-async function copyText(text: string, label: string) {
-    try {
-        await copyToClipboard(text);
-        $q.notify({
-            message: `${label} copied to clipboard`,
-            color: 'positive',
-            icon: 'content_copy',
-            timeout: 2000,
-        });
-    } catch (e) {
-        console.error('Failed to copy text:', e);
-        $q.notify({
-            message: 'Failed to copy',
-            color: 'negative',
-        });
-    }
-}
-
 function formatTimestamp(timestamp: string | null | undefined): string {
     if (!timestamp) {
         return 'N/A';
@@ -94,8 +76,6 @@ function formatTimestamp(timestamp: string | null | undefined): string {
     const date = new Date(timestamp);
     return formatter.format(date);
 }
-
-const wrapLogs = ref(false);
 </script>
 
 <template>
@@ -152,14 +132,14 @@ const wrapLogs = ref(false);
             <div v-if="step.command" class="relative-position q-mt-md">
                 <div class="row items-center justify-between q-mb-xs">
                     <div class="text-subtitle2 q-mb-xs">Command:</div>
-                    <q-btn
-                        icon="content_copy"
+                    <copy-button
+                        :get-text="() => commandString"
+                        message="Command copied to clipboard"
                         label="Copy Command"
                         flat
                         dense
                         size="sm"
                         class="q-pa-sm"
-                        @click="copyText(commandString, 'Command')"
                     />
                 </div>
                 <pre class="bg-grey-2 q-pa-sm rounded-borders scroll-x q-mt-xs">{{
@@ -169,40 +149,7 @@ const wrapLogs = ref(false);
 
             <!-- Logs Section -->
             <div class="relative-position q-mt-md">
-                <div class="row items-center justify-between q-mb-xs">
-                    <div class="text-subtitle2">Logs:</div>
-                    <div class="row items-center q-gutter-x-sm">
-                        <q-toggle
-                            v-model="wrapLogs"
-                            label="Line wrap"
-                            size="xs"
-                            dense
-                            class="text-caption"
-                        />
-                        <q-btn
-                            icon="content_copy"
-                            label="Copy Logs"
-                            flat
-                            dense
-                            size="sm"
-                            class="q-pa-sm"
-                            @click="copyText(logString, 'Logs')"
-                        />
-                    </div>
-                </div>
-                <div
-                    ref="logsContainer"
-                    :class="[
-                        'logs-container bg-black text-white q-pa-sm rounded-borders',
-                        { 'scroll-x': !wrapLogs },
-                    ]"
-                    :style="`--line-number-width: ${`${props.step.logs.length}`.length + 1}ch`"
-                >
-                    <div v-for="(line, index) in step.logs" :key="index" class="log-line">
-                        <span class="line-number">{{ index + 1 }}</span>
-                        <span>{{ line }}</span>
-                    </div>
-                </div>
+                <step-logs :step="step" :parse-log-category="logsParser" />
             </div>
 
             <slot />

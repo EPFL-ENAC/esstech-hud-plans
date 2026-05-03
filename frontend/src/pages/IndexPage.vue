@@ -3,12 +3,9 @@
         <div class="wrapper">
             <h1 class="text-h5 q-mb-lg">Splat Generation Pipeline</h1>
 
-            <!-- 1. Source Selection -->
             <input-settings v-model="inputConfig" v-model:tab="activeTab" class="q-mb-md" />
-
-            <!-- 2. Pipeline Stages -->
-            <ffmpeg-settings
-                v-model="ffmpegConfig"
+            <frame-extraction-settings
+                v-model="frameExtractionConfig"
                 v-if="inputConfig.type === 'video'"
                 class="q-mb-md"
             />
@@ -47,8 +44,11 @@ import { ref, type Ref, computed, onMounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import InputSettings from 'src/components/InputSettings.vue';
 import { type InputConfig, makeDefaultInputConfig } from 'src/lib/splats/input';
-import FfmpegSettings from 'src/components/FfmpegSettings.vue';
-import { type FFMPEGExtractionConfig, makeDefaultFFMPEGConfig } from 'src/lib/splats/ffmpeg';
+import FrameExtractionSettings from 'src/components/FrameExtractionSettings.vue';
+import {
+    type FrameExtractionConfig,
+    makeDefaultFrameExtractionConfig,
+} from 'src/lib/splats/frameExtraction';
 import ColmapSettings from 'src/components/ColmapSettings.vue';
 import { type ColmapConfig, makeAutoDefaults } from 'src/lib/splats/colmap';
 import BrushSettings from 'src/components/BrushSettings.vue';
@@ -69,7 +69,7 @@ const isInputConfigFilled = computed(() => {
         return !!inputConfig.value.colmapGenerationId;
     }
 });
-const ffmpegConfig = ref<FFMPEGExtractionConfig>(makeDefaultFFMPEGConfig());
+const frameExtractionConfig = ref<FrameExtractionConfig>(makeDefaultFrameExtractionConfig());
 const colmapConfig = ref<ColmapConfig>(makeAutoDefaults());
 const brushConfig = ref<BrushTrainingConfig>(makeDefaultBrushConfig());
 const blueprintConfig = ref<BlueprintConfig>(makeDefaultBlueprintConfig());
@@ -132,8 +132,8 @@ async function uploadVideo() {
 
     // 2. Append the settings as JSON strings
     // This allows the backend to receive the full pipeline configuration
-    formData.append('ffmpeg_config', JSON.stringify(ffmpegConfig.value));
     formData.append('colmap_config', JSON.stringify(colmapConfig.value));
+    formData.append('frame_extraction_config', JSON.stringify(frameExtractionConfig.value));
     formData.append('brush_config', JSON.stringify(brushConfig.value));
     // Only include blueprint config if enabled
     if (blueprintConfig.value.enabled) {
@@ -178,6 +178,7 @@ async function restartBrush() {
     const formData = new FormData();
     formData.append('colmap_generation_id', inputConfig.value.colmapGenerationId);
     formData.append('brush_config', JSON.stringify(brushConfig.value));
+    formData.append('frame_extraction_config', JSON.stringify(frameExtractionConfig.value));
     if (blueprintConfig.value.enabled) {
         formData.append('blueprint_config', JSON.stringify(blueprintConfig.value));
     }

@@ -23,7 +23,9 @@ from api.models.splats import (
     ColmapAutoConfig,
     ColmapManualConfig,
     FFMPEGExtractionConfig,
+    FrameExtractionConfig,
     GenerationInputs,
+    SmartExtractionConfig,
 )
 
 from .pipeline_logger import PipelineLogger
@@ -59,8 +61,10 @@ class BasePipeline(ABC):
         self.inputs = inputs
 
         steps_list = []
-        if inputs.ffmpeg is not None:
+        if inputs.frame_extraction is not None:
             steps_list.append("ffmpeg")
+            if inputs.frame_extraction.mode == "smart":
+                steps_list.append("frame_picker")
         if inputs.colmap is not None:
             steps_list.append("colmap")
         if inputs.brush is not None:
@@ -89,22 +93,67 @@ class BasePipeline(ABC):
         return self._run()
 
     def run_ffmpeg(
-        self, input_file: str, output_directory: str, cfg: FFMPEGExtractionConfig
+        self,
+        input_file: str,
+        output_directory: str,
+        cfg: FFMPEGExtractionConfig,
     ):
+        # Prepare the filter chain
+        filters = f"scale={cfg.fitInWidth}:{cfg.fitInHeight}:force_original_aspect_ratio=decrease"
+
+        # Append fps filter only if a value is provided
+        if cfg.fps is not None and cfg.fps > 0:
+            filters += f",fps={cfg.fps}"
+
         cmd: list[str] = [
             ffmpeg_command,
             "-i",
             input_file,
             "-vf",
-            f"scale={cfg.fitInWidth}:{cfg.fitInHeight}:force_original_aspect_ratio=decrease,fps={cfg.fps}",
+            filters,
             f"{output_directory}/frame_%04d.png",
         ]
 
         self.logger.start_step("ffmpeg", settings=cfg.model_dump(), command=cmd)
 
         return self._run_command(
-            cmd, step_name="ffmpeg", estimate_progress_callback=estimate_ffmpeg_progress
+            cmd,
+            step_name="ffmpeg",
+            estimate_progress_callback=estimate_ffmpeg_progress,
         )
+
+    def run_frame_picker(
+        self,
+        video_source_path: str,
+        input_frames: str,
+        output_directory: str,
+        cfg: SmartExtractionConfig,
+    ):
+        from api.lib.compute.evaluate_video_frame import pick_frames
+
+        def on_progress(msg: str, progress: float | None = None):
+            self.logger.add_log("frame_picker", msg)
+            if progress is not None:
+                self.logger.update_step_progress("frame_picker", progress)
+            print(f"[Frame Picker] {msg}")
+
+        self.logger.start_step("frame_picker", settings=cfg.model_dump())
+        self.logger.add_log("frame_picker", "Evaluating frames for selection...")
+        evaluation = pick_frames(
+            video_source_path,
+            input_frames,
+            output_directory,
+            distance_threshold=cfg.distance_threshold,
+            min_fps=cfg.min_fps,
+            remove_outliers=cfg.remove_outliers,
+            outlier_window_size=7,
+            outlier_sharpness_ratio=getattr(cfg, "outlier_sharpness_ratio", 0.5),
+            on_progress=on_progress,
+        )
+        self.logger.add_log(
+            "frame_picker", f"Selected {len(evaluation)} frames after evaluation."
+        )
+        self.logger.step_completed("frame_picker")
 
     def run_colmap(self, cfg: Union[ColmapAutoConfig, ColmapManualConfig]):
         # Base arguments common to both
@@ -604,9 +653,12 @@ class SplatPipeline(BasePipeline):
 
     def prepare_dirs(self, root_path: str):
         images = os.path.join(root_path, "images")
-
         if not os.path.exists(images):
             os.makedirs(images)
+
+        images_raw = os.path.join(root_path, "images_raw")
+        if not os.path.exists(images_raw):
+            os.makedirs(images_raw)
 
         colmap = os.path.join(root_path, "colmap")
         if not os.path.exists(colmap):
@@ -615,6 +667,7 @@ class SplatPipeline(BasePipeline):
         self.directories = {
             "workspace": root_path,
             "images": images,
+            "images_raw": images_raw,
             "colmap": colmap,
         }
 
@@ -625,9 +678,31 @@ class SplatPipeline(BasePipeline):
         self.logger.start()
 
         try:
-            self.run_ffmpeg(
-                self.inputs.video_path, self.directories["images"], self.inputs.ffmpeg
-            )
+            if self.inputs.frame_extraction.mode == "smart":
+                self.run_ffmpeg(
+                    self.inputs.video_path,
+                    self.directories["images_raw"],
+                    FFMPEGExtractionConfig(
+                        fitInWidth=self.inputs.frame_extraction.fitInWidth,
+                        fitInHeight=self.inputs.frame_extraction.fitInHeight,
+                    ),
+                )
+                self.run_frame_picker(
+                    self.inputs.video_path,
+                    self.directories["images_raw"],
+                    self.directories["images"],
+                    self.inputs.frame_extraction,
+                )
+            else:
+                self.run_ffmpeg(
+                    self.inputs.video_path,
+                    self.directories["images"],
+                    FFMPEGExtractionConfig(
+                        fitInWidth=self.inputs.frame_extraction.fitInWidth,
+                        fitInHeight=self.inputs.frame_extraction.fitInHeight,
+                        fps=self.inputs.frame_extraction.fps,
+                    ),
+                )
 
             self.run_colmap(self.inputs.colmap)
             if self.logger.has_failed("colmap"):

@@ -3,10 +3,47 @@ from typing import Literal
 from pydantic import BaseModel
 
 
+class FrameExtractionBase(BaseModel):
+    """Common settings shared by both extraction modes."""
+
+    fitInWidth: int = 1920
+    fitInHeight: int = 1920
+
+
+class FixedExtractionConfig(FrameExtractionBase):
+    """Configuration for standard constant FPS extraction."""
+
+    mode: Literal["fixed"] = "fixed"
+    fps: float = 2.0
+
+
+class SmartExtractionConfig(FrameExtractionBase):
+    """Configuration for movement and sharpness based extraction."""
+
+    mode: Literal["smart"] = "smart"
+    min_fps: int = 1
+    distance_threshold: float = 0.2
+    remove_outliers: bool = False
+    outlier_sharpness_ratio: float = 0.1
+
+
+# This type alias allows Pydantic to choose the right class based on the "mode" field
+FrameExtractionConfig = FixedExtractionConfig | SmartExtractionConfig
+
+
 class FFMPEGExtractionConfig(BaseModel):
-    fps: float
+    fps: float | None = None
     fitInWidth: int
     fitInHeight: int
+
+
+class FramePickerConfig(BaseModel):
+    enabled: bool = False
+    sharpness_threshold: float = 0.5
+    distance_threshold: float = 0.2
+    max_bin_length: int = 10
+    grid_cols: int = 8
+    grid_rows: int = 8
 
 
 ColmapDataType = Literal["individual", "video", "internet"]
@@ -92,7 +129,7 @@ class GenerationFeedbackSave(BaseModel):
 
 
 class BaseGenerationInputs(BaseModel):
-    ffmpeg: FFMPEGExtractionConfig | None = None
+    frame_extraction: FrameExtractionConfig | None = None
     colmap: ColmapAutoConfig | ColmapManualConfig | None = None
     brush: BrushTrainingConfig | None = None
     blueprint: BlueprintConfig | None = None
@@ -100,7 +137,7 @@ class BaseGenerationInputs(BaseModel):
 
 class GenerationInputs(BaseGenerationInputs):
     video_path: str
-    ffmpeg: FFMPEGExtractionConfig
+    frame_extraction: FrameExtractionConfig
     colmap: ColmapAutoConfig | ColmapManualConfig
     brush: BrushTrainingConfig
     device_name: str

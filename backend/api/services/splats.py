@@ -4,15 +4,10 @@ import sys
 import uuid
 from concurrent.futures import Future, ProcessPoolExecutor
 from dataclasses import dataclass
-from typing import Union
 
 from api.lib.restart_brush_pipeline import RestartBrushPipeline
 from api.lib.splat_pipeline import SplatPipeline
 from api.models.splats import (
-    BrushTrainingConfig,
-    ColmapAutoConfig,
-    ColmapManualConfig,
-    FFMPEGExtractionConfig,
     GenerationInputs,
     RestartBrushInputs,
 )

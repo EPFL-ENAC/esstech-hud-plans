@@ -2,12 +2,16 @@ import json
 import os
 import shutil
 
+from api.lib.compute.evaluate_video_frame import pick_frames
+from api.lib.compute.video_frame import VideoFrame
 from api.models.splats import (
     BlueprintConfig,
     BrushTrainingConfig,
     CameraType,
     ColmapAutoConfig,
     FFMPEGExtractionConfig,
+    FrameExtractionConfig,
+    FramePickerConfig,
     GenerationFeedback,
     GenerationFeedbackSave,
     GenerationInputs,
@@ -19,7 +23,7 @@ from api.services.splats import GenerationManager
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from fastapi_cache.decorator import cache
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
 router = APIRouter()
 
@@ -52,7 +56,7 @@ async def hello() -> str:
 async def generate(
     request: Request,
     file: UploadFile = File(...),
-    ffmpeg_config: str = Form(...),
+    frame_extraction_config: str = Form(...),
     colmap_config: str = Form(...),
     brush_config: str = Form(...),
     blueprint_config: str = Form(None),
@@ -67,7 +71,10 @@ async def generate(
     # 2. Parse and Validate JSON Settings
     try:
         # We parse the strings and load them into Pydantic models for validation
-        ffmpeg_settings = FFMPEGExtractionConfig(**json.loads(ffmpeg_config))
+        # ffmpeg_settings = FFMPEGExtractionConfig(**json.loads(ffmpeg_config))
+        frame_extraction_settings = TypeAdapter(FrameExtractionConfig).validate_python(
+            json.loads(frame_extraction_config)
+        )
         colmap_settings = ColmapAutoConfig(**json.loads(colmap_config))
         brush_settings = BrushTrainingConfig(**json.loads(brush_config))
         blueprint_settings = (
@@ -99,7 +106,7 @@ async def generate(
     client_host = request.client.host if request.client else ""
     inputs = GenerationInputs(
         video_path=file_path,
-        ffmpeg=ffmpeg_settings,
+        frame_extraction=frame_extraction_settings,
         colmap=colmap_settings,
         brush=brush_settings,
         blueprint=blueprint_settings,
@@ -390,3 +397,23 @@ async def evaluate_colmap_reconstruction(generation_id: str):
         raise HTTPException(status_code=404, detail=str(e))
 
     return metrics
+
+
+@router.get(
+    "/compute-distance/{generation_id}/{frame1}/{frame2}",
+    status_code=200,
+    description="Computes the distance between two video frames based on their HSV thumbnails",
+)
+async def compute_frame_distance(generation_id: str, frame1: str, frame2: str):
+    """Compute the distance between two video frames based on their HSV thumbnails."""
+    try:
+        base_path = manager._make_generation_folder_path(generation_id)
+        input_frames_path = os.path.join(base_path, "images_raw")
+
+        video_frame1 = VideoFrame.from_file(os.path.join(input_frames_path, frame1))
+        video_frame2 = VideoFrame.from_file(os.path.join(input_frames_path, frame2))
+        distance = video_frame1.distance(video_frame2)
+        return distance
+
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))

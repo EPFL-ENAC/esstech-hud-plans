@@ -59,6 +59,7 @@ RECONSTRUCTION_EVALUATION_WEIGHTS = {
     "continuity_score": 0.1,
     "accuracy_score": 0.2,
     "points_density_score": 0.1,
+    "fragmentation_penalty": 0.1,
 }
 
 
@@ -86,7 +87,8 @@ class ReconstructionEvaluation(BaseModel):
         )
         points_density_score = clamp01(math.log1p(metrics.num_points3D / 2_000) ** 2)
 
-        fragmentation = 0.05 * max(metrics.num_temporal_segments - 1, 0)
+        # fragmentation = 0.05 * max(metrics.num_temporal_segments - 1, 0)
+        fragmentation = 1 - math.exp(-0.0005 * metrics.num_temporal_segments)
 
         score = (
             RECONSTRUCTION_EVALUATION_WEIGHTS["coverage_score"] * coverage_score
@@ -94,7 +96,7 @@ class ReconstructionEvaluation(BaseModel):
             + RECONSTRUCTION_EVALUATION_WEIGHTS["accuracy_score"] * accuracy_score
             + RECONSTRUCTION_EVALUATION_WEIGHTS["points_density_score"]
             * points_density_score
-            - fragmentation
+            - RECONSTRUCTION_EVALUATION_WEIGHTS["fragmentation_penalty"] * fragmentation
         )
 
         return ReconstructionEvaluation(

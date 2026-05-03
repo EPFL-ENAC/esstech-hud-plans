@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router';
 import type { SplatPipelineStatus } from 'src/stores/splats';
 import PipelineStepProgress from './PipelineStepProgress.vue';
 import ColmapEvaluation from './ColmapEvaluation.vue';
+import { colmapLogsParser } from 'src/lib/utils/logs';
 
 const props = defineProps<{
     value: SplatPipelineStatus;
@@ -104,8 +105,14 @@ const statusText = computed(() => {
                 title="FFMPEG"
             />
             <pipeline-step-progress
+                v-if="props.value.steps.frame_picker"
+                :step="props.value.steps.frame_picker"
+                title="Frame Picker"
+            />
+            <pipeline-step-progress
                 v-if="props.value.steps.colmap"
                 :step="props.value.steps.colmap"
+                :logs-parser="colmapLogsParser"
                 title="Colmap"
             >
                 <colmap-evaluation

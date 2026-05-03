@@ -3,6 +3,7 @@ import type { BlueprintConfig } from 'src/lib/splats/blueprint';
 import type { BrushTrainingConfig } from 'src/lib/splats/brush';
 import type { ColmapConfig } from 'src/lib/splats/colmap';
 import type { FFMPEGExtractionConfig } from 'src/lib/splats/ffmpeg';
+import type { FrameExtractionConfig } from 'src/lib/splats/frameExtraction';
 import { AsyncResult, delay, type ErrorBase } from 'unwrapped/core';
 import { baseUrl } from 'boot/api';
 import type { ColmapSparseEvaluation } from 'src/lib/splats/evaluations';
@@ -45,6 +46,7 @@ export interface SplatPipelineStatus {
 
     steps: {
         ffmpeg: SplatPipelineStep<FFMPEGExtractionConfig>;
+        frame_picker: SplatPipelineStep<FrameExtractionConfig>;
         colmap: SplatPipelineStep<ColmapConfig, ColmapSparseEvaluation>;
         brush: SplatPipelineStep<BrushTrainingConfig>;
         blueprint_extraction?: SplatPipelineStep<BlueprintConfig>;
