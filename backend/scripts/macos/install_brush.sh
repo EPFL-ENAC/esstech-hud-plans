@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
+BRUSH_VERSION="a6a1468fa51a71b74d4bb7d5ccb8976148afdbfd"
 
 # Default logic for ROOT_DIR
 DEFAULT_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -61,6 +61,7 @@ build_brush() {
     cd "${SRC_DIR}"
     git clone https://github.com/ArthurBrussee/brush.git || true
     cd brush
+	git checkout ${BRUSH_VERSION}
     cargo build --release
 
     cp target/release/brush "${BIN_DIR}/"
