@@ -120,8 +120,15 @@ class VideoFrame:
             other.busyness_map.astype(np.float32),
         )
         smart_max_diff = np.sum(common_busyness_map)
+        smart_max_diff_counts = np.sum(
+            common_busyness_map > 0.01
+        )  # count only pixels with some busyness
 
         max_diff = self.hsv_thumbnail.shape[0] * self.hsv_thumbnail.shape[1]
+
+        print(
+            f"Frame: {self.name} Max diff: {max_diff}, Smart max diff: {smart_max_diff}, Smart max diff counts: {smart_max_diff_counts} (common busyness avg: {np.mean(common_busyness_map):.4f})"
+        )
 
         hue_sum = np.sum(dh)
         hue_count = np.sum(dh > hue_change_threshold)
@@ -171,7 +178,9 @@ class VideoFrame:
             changes_count=changes_count,
             changes_score=changes_count / max_diff if max_diff > 0 else 0,
             changes_score_smart=(
-                changes_count / smart_max_diff if smart_max_diff > 0 else 0
+                changes_count / smart_max_diff_counts
+                if smart_max_diff_counts > 0
+                else 0
             ),
             score=(
                 np.sum([hue_sum, saturation_sum, brightness_sum]) / (3 * max_diff)

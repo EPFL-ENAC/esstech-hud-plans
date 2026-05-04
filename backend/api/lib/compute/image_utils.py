@@ -37,10 +37,14 @@ def compute_busyness_map(
     image: np.ndarray, squash_to_fit: tuple[int, int] | None = None
 ) -> np.ndarray:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    avg_brightness = np.mean(gray) / 255.0
     laplacian = cv2.Laplacian(gray, cv2.CV_64F)
-    busyness_map = np.abs(laplacian)
+
+    busyness_map = (
+        np.abs(laplacian) / 1020.0 / avg_brightness
+    )  # max value of laplacian is 255*4, so 1020 normalizes it to [0,1]
 
     if squash_to_fit:
         busyness_map = resize_to_fit(busyness_map, *squash_to_fit)
 
-    return busyness_map
+    return busyness_map  # np.clip(busyness_map, 0, 1)

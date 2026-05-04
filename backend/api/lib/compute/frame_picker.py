@@ -43,7 +43,9 @@ class ImageBin:
             return False
 
         representative = self.images[0]
-        dist = representative.distance(image).changes_score_smart
+        dist = representative.distance(
+            image
+        ).changes_score  # TODO : investigate changes_score_smart
 
         if dist >= threshold:
             log(
