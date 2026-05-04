@@ -2,7 +2,7 @@
 import type { SplatPipelineStep } from 'src/stores/splats';
 import LogPanel from './LogPanel.vue';
 import type { LogParser } from 'src/lib/utils/logs';
-import { ref } from 'vue';
+import { ref, useTemplateRef } from 'vue';
 
 const props = defineProps<{
     step: SplatPipelineStep<T>;
@@ -10,11 +10,23 @@ const props = defineProps<{
 }>();
 
 const showModal = ref(false);
+
+const smallLogsContainerRef = useTemplateRef('smallLogsContainer');
+
+defineExpose({
+    scrollLogsToBottom: () => {
+        smallLogsContainerRef.value?.scrollLogsToBottom();
+    },
+});
 </script>
 
 <template>
     <div>
-        <log-panel :step="props.step" :parse-log-category="props.parseLogCategory" />
+        <log-panel
+            ref="smallLogsContainer"
+            :step="props.step"
+            :parse-log-category="props.parseLogCategory"
+        />
 
         <div class="q-pt-sm">
             <q-btn color="primary" icon="open_in_full" label="expand" @click="showModal = true" />

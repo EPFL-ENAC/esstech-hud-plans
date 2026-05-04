@@ -40,7 +40,7 @@ def pick_frames(
         log(f"Video source FPS: {fps}")
     video.release()
 
-    max_bin_length = int(fps / min_fps) if min_fps > 0 else 1
+    max_bin_length = max(int(fps / min_fps) if min_fps > 0 else 1, 1)
     log(f"Max bin length: {max_bin_length}")
 
     def progress_wrapper(msg: str, progress: float | None = None):

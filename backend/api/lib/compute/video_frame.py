@@ -39,6 +39,7 @@ class VideoFrameDistance(BaseModel):
 class VideoFrame:
     name: str
     full_path: str
+    index: int
 
     image: np.ndarray
     hsv_thumbnail: np.ndarray
@@ -50,6 +51,7 @@ class VideoFrame:
         self,
         name,
         full_path,
+        index,
         image=None,
         hsv_thumbnail=None,
         overall_sharpness=None,
@@ -57,13 +59,14 @@ class VideoFrame:
     ):
         self.name = name
         self.full_path = full_path
+        self.index = index
         self.image = image
         self.hsv_thumbnail = hsv_thumbnail
         self.overall_sharpness = overall_sharpness
         self.busyness_map = busyness_map
 
     @staticmethod
-    def from_file(path, thumbnail_size=64):
+    def from_file(path, index, thumbnail_size=64):
         img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
 
         thumb = resize_to_fit(img, thumbnail_size, thumbnail_size)
@@ -74,6 +77,7 @@ class VideoFrame:
         return VideoFrame(
             name=path.split("/")[-1],
             full_path=path,
+            index=index,
             image=img,
             hsv_thumbnail=hsv_thumb,
             overall_sharpness=overall_sharpness,

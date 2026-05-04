@@ -122,9 +122,9 @@ class VideoAnalysis:
     ) -> Iterator[VideoFrame]:
         log = on_progress or (lambda msg: print(f"[VideoAnalysis._iter_frames] {msg}"))
 
-        for path in paths:
+        for index, path in enumerate(paths):
             try:
-                yield VideoFrame.from_file(path, thumbnail_size=thumbnail_size)
+                yield VideoFrame.from_file(path, index, thumbnail_size=thumbnail_size)
             except Exception as e:
                 log(f"Warning: Failed to analyze image at {path}: {e}")
 
@@ -154,9 +154,9 @@ class VideoAnalysis:
         emitted_leading_edges = False
         outliers_removed = 0
 
-        for path in paths:
+        for index, path in enumerate(paths):
             try:
-                frame = VideoFrame.from_file(path, thumbnail_size=thumbnail_size)
+                frame = VideoFrame.from_file(path, index, thumbnail_size=thumbnail_size)
             except Exception as e:
                 log(f"Warning: Failed to analyze image at {path}: {e}")
                 continue
@@ -241,8 +241,7 @@ class VideoAnalysis:
             )
 
         for frame in frames_iter:
-            index_in_path = paths.index(frame.full_path)
-            progress = index_in_path / len(paths)
+            progress = frame.index / len(paths)
             log(f"Processing frame: {frame.name}", progress)
             analysis.add_image(
                 frame,

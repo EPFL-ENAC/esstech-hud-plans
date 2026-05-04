@@ -17,6 +17,13 @@ const props = defineProps<{
 }>();
 
 const logsContainerRef = useTemplateRef<typeof ScrollableContainer>('logsContainer');
+
+defineExpose({
+    scrollLogsToBottom: () => {
+        logsContainerRef.value?.scrollToBottom();
+    },
+});
+
 const wrapLogs = ref(false);
 
 const processor = new LogProcessor(props.parseLogCategory);

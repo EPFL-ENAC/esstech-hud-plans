@@ -2,17 +2,13 @@ import json
 import os
 import shutil
 
-from api.lib.compute.evaluate_video_frame import pick_frames
 from api.lib.compute.video_frame import VideoFrame
 from api.models.splats import (
     BlueprintConfig,
     BrushTrainingConfig,
     CameraType,
     ColmapAutoConfig,
-    FFMPEGExtractionConfig,
     FrameExtractionConfig,
-    FramePickerConfig,
-    GenerationFeedback,
     GenerationFeedbackSave,
     GenerationInputs,
     InteractiveBlueprintParams,
@@ -410,8 +406,8 @@ async def compute_frame_distance(generation_id: str, frame1: str, frame2: str):
         base_path = manager._make_generation_folder_path(generation_id)
         input_frames_path = os.path.join(base_path, "images_raw")
 
-        video_frame1 = VideoFrame.from_file(os.path.join(input_frames_path, frame1))
-        video_frame2 = VideoFrame.from_file(os.path.join(input_frames_path, frame2))
+        video_frame1 = VideoFrame.from_file(os.path.join(input_frames_path, frame1), 0)
+        video_frame2 = VideoFrame.from_file(os.path.join(input_frames_path, frame2), 1)
         distance = video_frame1.distance(video_frame2)
         return distance
 

@@ -1,6 +1,6 @@
 <script setup lang="ts" generic="T extends object">
 import type { SplatPipelineStep } from 'src/stores/splats';
-import { computed, nextTick, useTemplateRef, watch } from 'vue';
+import { computed, useTemplateRef } from 'vue';
 import CopyButton from './CopyButton.vue';
 import StepLogs from './StepLogs.vue';
 import type { LogParser } from 'src/lib/utils/logs';
@@ -11,7 +11,7 @@ const props = defineProps<{
     title: string;
 }>();
 
-const logsContainerRef = useTemplateRef<HTMLDivElement>('logsContainer');
+const stepLogsRef = useTemplateRef('stepLogs');
 
 const commandString = computed(() => {
     if (Array.isArray(props.step.command)) {
@@ -33,34 +33,6 @@ const statusColor = computed(() => {
     }
 });
 
-async function scrollLogsToBottom() {
-    const el = logsContainerRef.value;
-    if (!el) return;
-
-    await nextTick();
-    el.scrollTo({
-        top: el.scrollHeight,
-        behavior: 'smooth',
-    });
-}
-
-// Watch for new logs
-watch(
-    () => props.step.logs,
-    async () => {
-        const el = logsContainerRef.value;
-        if (!el) return;
-
-        // Check if user is near the bottom (within 20px) before the DOM updates
-        const isAtBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 20;
-
-        if (isAtBottom) {
-            await scrollLogsToBottom();
-        }
-    },
-    { deep: true },
-);
-
 function formatTimestamp(timestamp: string | null | undefined): string {
     if (!timestamp) {
         return 'N/A';
@@ -75,6 +47,10 @@ function formatTimestamp(timestamp: string | null | undefined): string {
     });
     const date = new Date(timestamp);
     return formatter.format(date);
+}
+
+function scrollLogsToBottom() {
+    stepLogsRef.value?.scrollLogsToBottom();
 }
 </script>
 
@@ -149,7 +125,7 @@ function formatTimestamp(timestamp: string | null | undefined): string {
 
             <!-- Logs Section -->
             <div class="relative-position q-mt-md">
-                <step-logs :step="step" :parse-log-category="logsParser" />
+                <step-logs ref="stepLogs" :step="step" :parse-log-category="logsParser" />
             </div>
 
             <slot />

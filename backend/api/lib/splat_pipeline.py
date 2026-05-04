@@ -135,7 +135,6 @@ class BasePipeline(ABC):
             self.logger.add_log("frame_picker", msg)
             if progress is not None:
                 self.logger.update_step_progress("frame_picker", progress)
-            print(f"[Frame Picker] {msg}")
 
         self.logger.start_step("frame_picker", settings=cfg.model_dump())
         self.logger.add_log("frame_picker", "Evaluating frames for selection...")
