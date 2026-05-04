@@ -23,7 +23,7 @@ class SmartExtractionConfig(FrameExtractionBase):
     mode: Literal["smart"] = "smart"
     min_fps: int = 1
     distance_threshold: float = 0.2
-    remove_outliers: bool = False
+    remove_outliers: bool = True
     outlier_sharpness_ratio: float = 0.1
 
 

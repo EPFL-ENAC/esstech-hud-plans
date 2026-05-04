@@ -12,10 +12,11 @@ def pick_frames(
     output_folder: str,
     distance_threshold: float = 0.2,
     min_fps: int = 3,
-    remove_outliers: bool = False,
+    remove_outliers: bool = True,
     outlier_window_size: int = 5,
     outlier_sharpness_ratio: float = 0.5,
     on_progress: ProgressCallback | None = None,
+    output_symlink_relative_to: str | None = None,
 ):
     log = on_progress or (lambda msg, progress=None: print(f"[pick_frames] {msg}"))
 
@@ -58,10 +59,14 @@ def pick_frames(
         on_progress=progress_wrapper,
     )
 
-    video_analysis.export_to_folders(input_folder)
+    video_analysis.export_to_folders(
+        input_folder, symlink_relative_to=output_symlink_relative_to
+    )
 
     picked_frames = video_analysis.export_best_frames(
-        output_folder, on_progress=on_progress
+        output_folder,
+        on_progress=on_progress,
+        symlink_relative_to=output_symlink_relative_to,
     )
 
     log(

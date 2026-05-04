@@ -1,7 +1,6 @@
 import os
 from collections import deque
 from collections.abc import Iterable, Iterator
-from typing import Callable
 
 from api.lib.types import ProgressCallback
 
@@ -9,7 +8,7 @@ from .video_frame import VideoFrame
 
 
 class ImageBin:
-    images: list[VideoFrame] = []
+    images: list[VideoFrame]
 
     def __init__(self, images: list[VideoFrame] | None = None):
         if images is not None:
@@ -44,7 +43,7 @@ class ImageBin:
             return False
 
         representative = self.images[0]
-        dist = representative.distance(image).changes_score
+        dist = representative.distance(image).changes_score_smart
 
         if dist >= threshold:
             log(
@@ -82,7 +81,7 @@ class ImageBin:
 
 
 class VideoAnalysis:
-    bins: list[ImageBin] = []
+    bins: list[ImageBin]
 
     def __init__(self):
         self.bins = []
@@ -212,7 +211,7 @@ class VideoAnalysis:
         paths: list[str],
         distance_threshold: float = 0.3,
         max_bin_size: int = 10,
-        remove_outliers: bool = False,
+        remove_outliers: bool = True,
         outlier_window_size: int = 5,
         outlier_sharpness_ratio: float = 0.5,
         on_progress: ProgressCallback | None = None,
@@ -252,7 +251,9 @@ class VideoAnalysis:
 
         return analysis
 
-    def export_to_folders(self, output_folder: str):
+    def export_to_folders(
+        self, output_folder: str, symlink_relative_to: str | None = None
+    ):
         os.makedirs(output_folder, exist_ok=True)
         for i, bin in enumerate(self.bins):
             bin_folder = os.path.join(output_folder, f"bin_{i}")
@@ -260,12 +261,20 @@ class VideoAnalysis:
             for image in bin.images:
                 dst = os.path.join(bin_folder, image.name)
 
-                if os.path.exists(dst):
+                src = image.full_path
+                if symlink_relative_to:
+                    # Calculate the source path relative to the destination directory
+                    src = os.path.relpath(image.full_path, bin_folder)
+
+                if os.path.lexists(dst):
                     os.remove(dst)
-                os.link(image.full_path, dst)
+                os.symlink(src, dst)
 
     def export_best_frames(
-        self, output_folder: str, on_progress: ProgressCallback | None = None
+        self,
+        output_folder: str,
+        on_progress: ProgressCallback | None = None,
+        symlink_relative_to: str | None = None,
     ):
         log = on_progress or (
             lambda msg: print(f"[VideoAnalysis.export_best_frames] {msg}")
@@ -283,9 +292,14 @@ class VideoAnalysis:
             )
             dst = os.path.join(output_folder, image.name)
 
-            if os.path.exists(dst):
+            src = image.full_path
+            if symlink_relative_to:
+                # Calculate the source path relative to the destination directory
+                src = os.path.relpath(image.full_path, output_folder)
+
+            if os.path.lexists(dst):
                 os.remove(dst)
-            os.link(image.full_path, dst)
+            os.symlink(src, dst)
 
             final_images.append(image)
 

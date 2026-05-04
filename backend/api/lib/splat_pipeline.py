@@ -147,6 +147,7 @@ class BasePipeline(ABC):
             remove_outliers=cfg.remove_outliers,
             outlier_window_size=7,
             outlier_sharpness_ratio=getattr(cfg, "outlier_sharpness_ratio", 0.5),
+            output_symlink_relative_to=self.directories["workspace"],
             on_progress=on_progress,
         )
         self.logger.add_log(

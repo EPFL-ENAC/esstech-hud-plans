@@ -2,30 +2,6 @@ import cv2
 import numpy as np
 
 
-def hellinger_distance(a: list[float], b: list[float]) -> float:
-    if len(a) != len(b):
-        raise ValueError("Hue histograms must have the same size.")
-
-    pa = np.asarray(a, dtype=np.float32)
-    pb = np.asarray(b, dtype=np.float32)
-
-    sa = float(pa.sum())
-    sb = float(pb.sum())
-
-    if sa == 0.0 and sb == 0.0:
-        return 0.0
-    if sa == 0.0 or sb == 0.0:
-        return 1.0
-
-    pa /= sa
-    pb /= sb
-
-    bc = float(np.sum(np.sqrt(pa * pb)))
-    bc = max(0.0, min(1.0, bc))
-
-    return float(np.sqrt(1.0 - bc))
-
-
 def calibrated_sharpness(img_bgr, threshold=70.0):
     # 1. Resize to a consistent scale
     img = cv2.resize(img_bgr, (1024, 768))
