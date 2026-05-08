@@ -23,6 +23,7 @@ const handleFileChange = (file: File | null) => {
     }
 
     if (file) {
+        console.log(`File: ${file.name}, MIME type: ${file.type}`);
         videoPreviewUrl.value = URL.createObjectURL(file);
     }
 };
@@ -67,7 +68,7 @@ onBeforeUnmount(() => {
                     label="Select video source"
                     filled
                     clearable
-                    accept="video/*"
+                    accept="*"
                     @update:model-value="handleFileChange"
                 >
                     <template v-slot:prepend>
