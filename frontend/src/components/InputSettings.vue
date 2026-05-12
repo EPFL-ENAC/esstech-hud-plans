@@ -68,7 +68,7 @@ onBeforeUnmount(() => {
                     label="Select video source"
                     filled
                     clearable
-                    accept="*"
+                    accept="video/*,"
                     @update:model-value="handleFileChange"
                 >
                     <template v-slot:prepend>

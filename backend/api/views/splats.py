@@ -1,4 +1,5 @@
 import json
+import mimetypes
 import os
 import shutil
 
@@ -60,11 +61,7 @@ async def generate(
     camera_type: CameraType = Form("standard"),
     browser_info: str = Form(""),
 ) -> PostRunGenerationResponse:
-    # 1. Validate file type
-    if not file.content_type or not file.content_type.startswith("video/"):
-        raise HTTPException(status_code=400, detail="File must be a video")
-
-    # 2. Parse and Validate JSON Settings
+    # 1. Parse and Validate JSON Settings
     try:
         # We parse the strings and load them into Pydantic models for validation
         # ffmpeg_settings = FFMPEGExtractionConfig(**json.loads(ffmpeg_config))
@@ -83,7 +80,7 @@ async def generate(
             status_code=422, detail=f"Invalid configuration format: {str(e)}"
         )
 
-    # 3. Save the file
+    # 2. Save the file
     if not file.filename:
         raise HTTPException(status_code=400, detail="File must have a filename")
 
@@ -97,6 +94,14 @@ async def generate(
             shutil.copyfileobj(file.file, buffer)
     finally:
         await file.close()
+
+    # 3. Validate file type
+    mime_type, _ = mimetypes.guess_type(file_path)
+    if mime_type is None or not mime_type.startswith("video"):
+        os.remove(file_path)  # Clean up the uploaded file
+        raise HTTPException(
+            status_code=400, detail="Uploaded file is not a valid video"
+        )
 
     # 4. Run generation with all inputs
     client_host = request.client.host if request.client else ""
