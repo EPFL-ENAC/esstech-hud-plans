@@ -6,6 +6,7 @@ import select
 import subprocess
 import time
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Callable, Literal, Union
 
 import numpy as np
@@ -263,8 +264,54 @@ class BasePipeline(ABC):
         evaluation = evaluate_sparse_reconstructions(
             sparse_dir, total_input_frames=frames_count
         )
+        self._colmap_postprocess()
+        self._colmap_pick_reconstruction(
+            evaluation.evaluations[evaluation.best_model_index].metrics.model_name
+        )
+
         self.logger.evaluate_step("colmap", evaluation.model_dump(mode="json"))
         return evaluation
+
+    def _colmap_postprocess(self):
+        sparse_dir = os.path.join(self.directories["colmap"], "sparse")
+        reconstructions_folder = [f for f in Path(sparse_dir).iterdir() if f.is_dir()]
+        if len(reconstructions_folder) < 2:
+            self.logger.add_log(
+                "colmap",
+                "Only one reconstruction found, skipping post-processing.",
+            )
+            return
+
+        for folder in reconstructions_folder:
+            if folder.name.isdigit():
+                new_name = f"original_{folder.name}"
+                new_path = folder.with_name(new_name)
+
+                # Safety check: don't overwrite if original_X already exists
+                if not new_path.exists():
+                    folder.rename(new_path)
+
+    def _colmap_pick_reconstruction(self, reconstruction: int | str):
+        reconstruction = str(reconstruction)
+        sparse_dir = os.path.join(self.directories["colmap"], "sparse")
+
+        picked_path = os.path.join(sparse_dir, "0")
+
+        if os.path.exists(picked_path):
+            if os.path.islink(picked_path):
+                os.unlink(picked_path)
+            else:
+                return  # We expect "0" to be a symlink to the chosen reconstruction. If it's not a symlink, it means there is only 1 reconstruction and it's already in place, so we do nothing.
+
+        os.symlink(
+            os.path.join(sparse_dir, f"original_{reconstruction}"),
+            picked_path,
+            target_is_directory=True,
+        )
+        self.logger.add_log(
+            "colmap",
+            f"Selected reconstruction {reconstruction} and created symlink at {picked_path}",
+        )
 
     def _colmap_compute_geometric_data(self, sparse_dir: str):
         colmap_data = colmap_compute_geometric_data(sparse_dir)

@@ -148,6 +148,7 @@ class GenerationInputs(BaseGenerationInputs):
 
 class RestartBrushInputs(BaseGenerationInputs):
     colmap_generation_id: str
+    colmap_sparse_reconstruction_id: int | str = 0
     brush: BrushTrainingConfig
     ip_address: str = ""
     browser_info: str = ""

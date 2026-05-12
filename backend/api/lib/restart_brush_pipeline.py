@@ -3,6 +3,7 @@ import shutil
 
 from api.lib.splat_pipeline import BasePipeline
 from api.models.splats import RestartBrushInputs
+from api.utils.files import symlink_filtered_contents
 
 
 class RestartBrushPipeline(BasePipeline):
@@ -101,10 +102,35 @@ class RestartBrushPipeline(BasePipeline):
             os.path.relpath(source_images_dir, self.directories["workspace"]),
             workspace_images_link,
         )
-        os.symlink(
-            os.path.relpath(source_colmap_dir, self.directories["workspace"]),
-            workspace_colmap_link,
+        self._make_colmap_symlink_tree(
+            source_colmap_dir,
+            picked_reconstruction=self.inputs.colmap_sparse_reconstruction_id,
         )
+
+    def _make_colmap_symlink_tree(
+        self, source_colmap_dir: str, picked_reconstruction: int | str
+    ):
+        picked_reconstruction = str(picked_reconstruction)
+        os.makedirs(self.directories["colmap"], exist_ok=True)
+
+        # symlink to everything other than the sparse folder
+        symlink_filtered_contents(
+            source_colmap_dir, self.directories["colmap"], ["sparse"]
+        )
+
+        sparse_dir = os.path.join(self.directories["colmap"], "sparse")
+        os.makedirs(sparse_dir, exist_ok=True)
+
+        source_path = os.path.join(
+            source_colmap_dir, "sparse", f"original_{picked_reconstruction}"
+        )
+        relative_source = os.path.relpath(source_path, sparse_dir)
+        target = os.path.join(sparse_dir, "0")
+
+        if os.path.lexists(target):
+            os.remove(target)
+
+        os.symlink(relative_source, target)
 
     def _run(self) -> dict[str, str | list[str] | list]:
         self.logger.set_file_path(
