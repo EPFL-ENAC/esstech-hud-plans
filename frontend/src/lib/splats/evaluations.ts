@@ -60,4 +60,5 @@ export interface ColmapSparseEvaluation {
     num_models: number;
     evaluations: ColmapReconstructionEvaluation[];
     best_model_index: number;
+    selected_reconstruction_id?: string;
 }

@@ -24,6 +24,7 @@ export interface SplatPipelineStep<T extends object, E extends object = object> 
     finished_at: string | null;
     settings: T;
     evaluation?: E;
+    selected_reconstruction_id?: string;
     command: string | string[];
     logs: string[];
     return_code: number;
@@ -36,6 +37,7 @@ export interface SplatPipelineStatus {
     started_at: string | null;
     finished_at: string | null;
     name: string;
+    root_job_name: string;
     settings: SplatPipelineSettings;
     steps_list: string[];
 

@@ -121,6 +121,24 @@ onBeforeUnmount(() => {
                     filled
                     clearable
                 />
+                <q-card
+                    v-if="config.colmapSparseReconstructionId !== undefined"
+                    flat
+                    bordered
+                    class="q-mt-md bg-primary-1"
+                >
+                    <q-card-section class="q-py-sm">
+                        <div class="row items-center q-gutter-md">
+                            <q-icon name="account_tree" color="primary" size="md" />
+                            <div>
+                                <div class="text-subtitle2 text-primary">Picked Reconstruction</div>
+                                <div class="text-caption text-grey-7">
+                                    Model {{ config.colmapSparseReconstructionId }}
+                                </div>
+                            </div>
+                        </div>
+                    </q-card-section>
+                </q-card>
             </q-tab-panel>
         </q-tab-panels>
     </q-card>

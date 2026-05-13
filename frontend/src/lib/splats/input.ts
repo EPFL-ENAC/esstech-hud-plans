@@ -4,6 +4,7 @@ export interface InputConfig {
     type: 'video' | 'colmap';
     selectedVideoFile: File | null;
     colmapGenerationId?: string;
+    colmapSparseReconstructionId?: number;
     deviceName: string;
     cameraType: CameraType;
 }

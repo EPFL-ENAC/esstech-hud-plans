@@ -12,14 +12,11 @@ const props = defineProps<{
 
 const router = useRouter();
 
-function handleRelaunchBrush() {
-    const splatPath = props.value.output.splat_path;
-    const parts = splatPath.split('/');
-    const generationId = parts[parts.indexOf('splats') + 1] as string;
+function handleRelaunchBrush(sparseReconstructionId?: number) {
     const brushSettings = props.value.steps.brush.settings;
 
     const query: Record<string, string | number> = {
-        colmapGenerationId: generationId,
+        colmapGenerationId: props.value.root_job_name,
         brushTotalSteps: brushSettings.totalSteps,
         brushRenderMode: brushSettings.renderMode,
         brushShDegree: brushSettings.shDegree,
@@ -31,6 +28,18 @@ function handleRelaunchBrush() {
         brushMaxResolution: brushSettings.maxResolution,
         brushSubsampleFrames: brushSettings.subsampleFrames,
     };
+
+    if (sparseReconstructionId !== undefined) {
+        query.colmapSparseReconstructionId = sparseReconstructionId;
+    } else if (props.value.steps.colmap.selected_reconstruction_id !== undefined) {
+        query.colmapSparseReconstructionId = props.value.steps.colmap.selected_reconstruction_id;
+    } else if (props.value.steps.colmap.evaluation) {
+        const currentEvaluation =
+            props.value.steps.colmap.evaluation.evaluations[
+                props.value.steps.colmap.evaluation.best_model_index
+            ];
+        query.colmapSparseReconstructionId = currentEvaluation?.metrics.model_name || 0;
+    }
 
     void router.push({
         path: '/',
@@ -118,6 +127,7 @@ const statusText = computed(() => {
                 <colmap-evaluation
                     v-if="props.value.steps.colmap.evaluation"
                     :evaluation="props.value.steps.colmap.evaluation"
+                    :rootGenerationId="props.value.root_job_name"
                 />
             </pipeline-step-progress>
             <pipeline-step-progress
@@ -138,8 +148,8 @@ const statusText = computed(() => {
                 color="primary"
                 label="Relaunch Brush Step"
                 icon="refresh"
-                @click="handleRelaunchBrush"
-                class="full-width"
+                @click="handleRelaunchBrush()"
+                class="full-width q-mb-md"
             />
         </div>
 

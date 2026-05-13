@@ -249,6 +249,7 @@ async def get_generation_settings(generation_id: str):
 async def restart_brush(
     request: Request,
     colmap_generation_id: str = Form(...),
+    colmap_sparse_reconstruction_id: int | None = Form(None),
     brush_config: str = Form(...),
     blueprint_config: str = Form(None),
     browser_info: str = Form(""),
@@ -268,6 +269,7 @@ async def restart_brush(
     client_host = request.client.host if request.client else ""
     inputs = RestartBrushInputs(
         colmap_generation_id=colmap_generation_id,
+        colmap_sparse_reconstruction_id=colmap_sparse_reconstruction_id or 0,
         brush=brush_settings,
         blueprint=blueprint_settings,
         ip_address=client_host,

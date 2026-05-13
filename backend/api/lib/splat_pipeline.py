@@ -276,10 +276,22 @@ class BasePipeline(ABC):
         sparse_dir = os.path.join(self.directories["colmap"], "sparse")
         reconstructions_folder = [f for f in Path(sparse_dir).iterdir() if f.is_dir()]
         if len(reconstructions_folder) < 2:
-            self.logger.add_log(
-                "colmap",
-                "Only one reconstruction found, skipping post-processing.",
-            )
+            if len(reconstructions_folder) == 1:
+                folder = reconstructions_folder[0]
+                if folder.name.isdigit():
+                    new_name = f"original_{folder.name}"
+                    new_path = folder.with_name(new_name)
+                    if not new_path.exists():
+                        folder.rename(new_path)
+                        self.logger.add_log(
+                            "colmap",
+                            f"Renamed single reconstruction to {new_name}",
+                        )
+            else:
+                self.logger.add_log(
+                    "colmap",
+                    "No reconstruction found, skipping post-processing.",
+                )
             return
 
         for folder in reconstructions_folder:
@@ -287,7 +299,6 @@ class BasePipeline(ABC):
                 new_name = f"original_{folder.name}"
                 new_path = folder.with_name(new_name)
 
-                # Safety check: don't overwrite if original_X already exists
                 if not new_path.exists():
                     folder.rename(new_path)
 
@@ -301,13 +312,15 @@ class BasePipeline(ABC):
             if os.path.islink(picked_path):
                 os.unlink(picked_path)
             else:
-                return  # We expect "0" to be a symlink to the chosen reconstruction. If it's not a symlink, it means there is only 1 reconstruction and it's already in place, so we do nothing.
+                self.logger.set_selected_colmap_reconstruction(reconstruction)
+                return
 
         os.symlink(
             os.path.join(sparse_dir, f"original_{reconstruction}"),
             picked_path,
             target_is_directory=True,
         )
+        self.logger.set_selected_colmap_reconstruction(reconstruction)
         self.logger.add_log(
             "colmap",
             f"Selected reconstruction {reconstruction} and created symlink at {picked_path}",

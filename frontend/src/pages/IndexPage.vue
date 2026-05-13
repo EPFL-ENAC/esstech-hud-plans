@@ -84,6 +84,12 @@ onMounted(() => {
         activeTab.value = 'colmap';
     }
 
+    if (route.query.colmapSparseReconstructionId) {
+        inputConfig.value.colmapSparseReconstructionId = Number(
+            route.query.colmapSparseReconstructionId,
+        );
+    }
+
     if (route.query.brushTotalSteps) {
         brushConfig.value.totalSteps = Number(route.query.brushTotalSteps);
     }
@@ -177,6 +183,12 @@ async function restartBrush() {
 
     const formData = new FormData();
     formData.append('colmap_generation_id', inputConfig.value.colmapGenerationId);
+    if (inputConfig.value.colmapSparseReconstructionId !== undefined) {
+        formData.append(
+            'colmap_sparse_reconstruction_id',
+            String(inputConfig.value.colmapSparseReconstructionId),
+        );
+    }
     formData.append('brush_config', JSON.stringify(brushConfig.value));
     formData.append('frame_extraction_config', JSON.stringify(frameExtractionConfig.value));
     if (blueprintConfig.value.enabled) {

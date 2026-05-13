@@ -19,7 +19,18 @@ const StatusLoader = makeAsyncResultLoader<SplatPipelineStatus, ErrorBase, Splat
     <div class="fit">
         <div class="q-pa-md">
             <h2>Pipeline status</h2>
-            <div class="text-subtitle1">Job #{{ generationId }}</div>
+            <div class="text-subtitle1">
+                Job #{{ generationId }}
+                <span
+                    v-if="
+                        status.unwrapOrNull()?.root_job_name &&
+                        status.unwrapOrNull()?.root_job_name !== generationId
+                    "
+                    class="text-grey-6"
+                >
+                    (from #{{ status.unwrapOrNull()?.root_job_name }})
+                </span>
+            </div>
         </div>
         <div class="q-my-md">
             <StatusLoader :result="status">

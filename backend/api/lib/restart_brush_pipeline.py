@@ -106,6 +106,9 @@ class RestartBrushPipeline(BasePipeline):
             source_colmap_dir,
             picked_reconstruction=self.inputs.colmap_sparse_reconstruction_id,
         )
+        self.logger.set_selected_colmap_reconstruction(
+            self.inputs.colmap_sparse_reconstruction_id
+        )
 
     def _make_colmap_symlink_tree(
         self, source_colmap_dir: str, picked_reconstruction: int | str
@@ -130,7 +133,7 @@ class RestartBrushPipeline(BasePipeline):
         if os.path.lexists(target):
             os.remove(target)
 
-        os.symlink(relative_source, target)
+        os.symlink(relative_source, target, target_is_directory=True)
 
     def _run(self) -> dict[str, str | list[str] | list]:
         self.logger.set_file_path(

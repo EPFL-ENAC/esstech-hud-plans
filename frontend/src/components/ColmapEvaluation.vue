@@ -1,12 +1,28 @@
 <script setup lang="ts">
 import { ref } from 'vue';
+import { useRouter } from 'vue-router';
 import type { ColmapSparseEvaluation } from 'src/lib/splats/evaluations';
+
+const router = useRouter();
 
 const props = defineProps<{
     evaluation: ColmapSparseEvaluation;
+    rootGenerationId: string;
 }>();
 
 const showFullMetrics = ref(false);
+
+function handleRelaunchWithReconstruction(modelIndex: number) {
+    const query: Record<string, string | number> = {
+        colmapGenerationId: props.rootGenerationId,
+        colmapSparseReconstructionId: modelIndex,
+    };
+
+    void router.push({
+        path: '/',
+        query,
+    });
+}
 
 function getScoreColor(score: number): string {
     if (score > 0.7) return 'positive';
@@ -162,10 +178,21 @@ function formatValue(val: number | null | undefined): string {
                                 <div class="text-subtitle2 q-mb-xs">Full Raw Metrics:</div>
                                 <pre
                                     class="metrics-pre bg-black text-lime-13 q-pa-md rounded-borders"
-                                    >{{ JSON.stringify(ev.metrics, null, 2) }}</pre
                                 >
+                                    {{ JSON.stringify(ev.metrics, null, 2) }}
+                                </pre>
                             </div>
                         </q-slide-transition>
+                    </q-card-section>
+
+                    <q-card-section>
+                        <q-btn
+                            outline
+                            color="primary"
+                            icon="play_arrow"
+                            label="Launch Brush with this reconstruction"
+                            @click="handleRelaunchWithReconstruction(index)"
+                        />
                     </q-card-section>
                 </q-card>
             </div>

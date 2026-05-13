@@ -13,6 +13,7 @@ class PipelineLogger:
         self.data: dict[str, Any] = {
             "overall_status": "running",
             "name": name,
+            "root_job_name": name,
             "settings": initial_settings,
             "progress": 0,
             "message": "",
@@ -32,6 +33,11 @@ class PipelineLogger:
         self.file_path = file_path
         with open(file_path, "r") as f:
             self.data = json.load(f)
+            print(
+                f"[Pipeline #{self.data['name']}] Loaded existing status from {file_path}",
+                flush=True,
+            )
+            print(self.data)
 
     def set_file_path(self, file_path: str):
         self.file_path = file_path
@@ -209,6 +215,18 @@ class PipelineLogger:
 
     def get_colmap_geometric_data(self) -> dict | None:
         return self.data.get("colmap_geometric_data")
+
+    def set_selected_colmap_reconstruction(self, reconstruction_id: str | int):
+        if "colmap" not in self.data["steps"]:
+            self.data["steps"]["colmap"] = {}
+        self.data["steps"]["colmap"]["selected_reconstruction_id"] = str(
+            reconstruction_id
+        )
+        self.save()
+
+    def get_selected_colmap_reconstruction(self) -> str | None:
+        colmap_step = self.data["steps"].get("colmap", {})
+        return colmap_step.get("selected_reconstruction_id")
 
     def set_interactive_blueprint_params(self, params: dict):
         self.data["interactive_blueprint_params"] = params
