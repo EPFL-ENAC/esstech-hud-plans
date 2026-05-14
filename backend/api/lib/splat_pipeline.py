@@ -275,24 +275,6 @@ class BasePipeline(ABC):
     def _colmap_postprocess(self):
         sparse_dir = os.path.join(self.directories["colmap"], "sparse")
         reconstructions_folder = [f for f in Path(sparse_dir).iterdir() if f.is_dir()]
-        if len(reconstructions_folder) < 2:
-            if len(reconstructions_folder) == 1:
-                folder = reconstructions_folder[0]
-                if folder.name.isdigit():
-                    new_name = f"original_{folder.name}"
-                    new_path = folder.with_name(new_name)
-                    if not new_path.exists():
-                        folder.rename(new_path)
-                        self.logger.add_log(
-                            "colmap",
-                            f"Renamed single reconstruction to {new_name}",
-                        )
-            else:
-                self.logger.add_log(
-                    "colmap",
-                    "No reconstruction found, skipping post-processing.",
-                )
-            return
 
         for folder in reconstructions_folder:
             if folder.name.isdigit():

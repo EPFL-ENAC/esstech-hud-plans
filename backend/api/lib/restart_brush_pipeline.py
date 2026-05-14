@@ -131,7 +131,10 @@ class RestartBrushPipeline(BasePipeline):
         target = os.path.join(sparse_dir, "0")
 
         if os.path.lexists(target):
-            os.remove(target)
+            if os.path.isdir(target) and not os.path.islink(target):
+                shutil.rmtree(target)
+            else:
+                os.remove(target)
 
         os.symlink(relative_source, target, target_is_directory=True)
 
