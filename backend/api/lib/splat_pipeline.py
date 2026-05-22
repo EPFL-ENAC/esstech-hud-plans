@@ -10,13 +10,13 @@ from pathlib import Path
 from typing import Callable, Literal, Union
 
 import numpy as np
-from api import runai
 from api.config import config
 from api.lib.compute.colmap_geometric_data import (
     ColmapGeometricData,
     colmap_compute_geometric_data,
     compute_blueprint_view_matrix,
 )
+from api.lib.compute.runai import Runai
 from api.models.splats import (
     BaseGenerationInputs,
     BlueprintConfig,
@@ -186,7 +186,7 @@ class BasePipeline(ABC):
                 args.extend(["--mapper", "global"])
 
         if config.USE_RUNAI:
-            runai.copy_data_to_scratch(
+            Runai.copy_data_to_scratch(
                 os.path.relpath(self.directories["workspace"]),
                 os.path.relpath(self.directories["workspace"]),
             )
@@ -197,7 +197,7 @@ class BasePipeline(ABC):
                 step_name="colmap",
                 estimate_progress_callback=estimate_colmap_progress,
             )
-            runai.copy_data_from_scratch(
+            Runai.copy_data_from_scratch(
                 os.path.relpath(self.directories["workspace"]),
                 os.path.relpath(self.directories["workspace"]),
             )
@@ -349,7 +349,7 @@ class BasePipeline(ABC):
         ]
 
         if config.USE_RUNAI:
-            runai.copy_data_to_scratch(
+            Runai.copy_data_to_scratch(
                 workspace_dir,
                 workspace_dir,
             )
@@ -363,7 +363,7 @@ class BasePipeline(ABC):
                 step_name="brush",
                 estimate_progress_callback=estimate_training_progress,
             )
-            runai.copy_data_from_scratch(
+            Runai.copy_data_from_scratch(
                 workspace_dir,
                 workspace_dir,
             )
@@ -613,8 +613,8 @@ class BasePipeline(ABC):
         step_name: Literal["ffmpeg", "colmap", "brush"],
         estimate_progress_callback: Callable[[str], float],
     ):
-        job_name = runai.submit_job(tool=step_name, command=cmd)
-        log_file_path = runai.get_log_file_path(job_name)
+        job_name = Runai.submit_job(tool=step_name, command=cmd)
+        log_file_path = Runai.get_log_file_path(job_name)
 
         def log_and_estimate_progress(line: str):
             self.logger.add_log(
@@ -632,12 +632,12 @@ class BasePipeline(ABC):
         runai_check_fails = 0
 
         while runai_check_fails < RUNAI_CHECK_STATUS_MAX_FAILS:
-            if not self.logger.has_started(step_name) and runai.check_job_started(
+            if not self.logger.has_started(step_name) and Runai.check_job_started(
                 job_name
             ):
                 self.logger.start_step(step_name)
 
-            runai.refresh_logs()
+            Runai.refresh_logs()
             try:
                 with open(log_file_path, "rb") as f:
                     f.seek(read_pos)
@@ -661,7 +661,7 @@ class BasePipeline(ABC):
             except Exception as e:
                 pass
 
-            runai_check_terminated = runai.check_job_terminated(job_name)
+            runai_check_terminated = Runai.check_job_terminated(job_name)
 
             if runai_check_terminated:
                 if buffer.strip():
