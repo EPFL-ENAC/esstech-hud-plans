@@ -33,6 +33,7 @@ class RemoteCompute(ABC):
         tool: StepName,
         command: list[str],
         n_gpu: int = 1,
+        workspace_rel_path: str | None = None,
     ) -> str:
         pass
 

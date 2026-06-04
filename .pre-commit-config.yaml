@@ -16,6 +16,8 @@ repos:
     hooks:
       - id: mypy
         files: ^backend/
+        additional_dependencies:
+         - types-paramiko
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.10
     hooks:

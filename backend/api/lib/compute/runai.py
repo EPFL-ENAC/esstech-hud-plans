@@ -96,6 +96,7 @@ class Runai(RemoteCompute):
         tool: StepName,
         command: list[str],
         n_gpu: int = 1,
+        workspace_rel_path: str | None = None,
     ) -> str:
         hex_suffix = secrets.token_hex(4)
         job_name = f"{tool}-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{hex_suffix}"

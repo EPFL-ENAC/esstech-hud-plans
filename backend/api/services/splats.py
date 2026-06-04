@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from api.lib.restart_brush_pipeline import RestartBrushPipeline
 from api.lib.splat_pipeline import SplatPipeline
+from api.logging_config import setup_logging
 from api.models.splats import (
     GenerationInputs,
     RestartBrushInputs,
@@ -282,10 +283,12 @@ class GenerationManager:
 
 
 def _run_generation(inputs: GenerationInputs, job_name: str) -> GenerationRun:
+    setup_logging()
     pipeline = SplatPipeline(job_name=job_name, inputs=inputs)
     return pipeline.run()
 
 
 def _run_restart_brush(inputs: RestartBrushInputs, job_name: str) -> GenerationRun:
+    setup_logging()
     pipeline = RestartBrushPipeline(job_name=job_name, inputs=inputs)
     return pipeline.run()

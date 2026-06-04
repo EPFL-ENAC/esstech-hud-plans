@@ -66,3 +66,12 @@ Then, push the image to the registry:
 docker login registry.rcp.epfl.ch
 docker push registry.rcp.epfl.ch/enac-it-poh/hud-<TOOL>:latest
 ```
+
+
+## Pull images with Apptainer
+
+To pull the images with Apptainer, run:
+```bash
+apptainer remote login --username <username> registry.rcp.epfl.ch
+apptainer pull docker://registry.rcp.epfl.ch/enac-it-poh/hud-<TOOL>:latest
+```

@@ -17,6 +17,7 @@ from api.lib.compute.colmap_geometric_data import (
     compute_blueprint_view_matrix,
 )
 from api.lib.compute.runai import Runai
+from api.lib.compute.scitas import Scitas
 from api.models.splats import (
     BaseGenerationInputs,
     BlueprintConfig,
@@ -33,8 +34,8 @@ from .pipeline_logger import PipelineLogger
 
 logger = logging.getLogger("uvicorn.error")
 
-RUNAI_POLL_INTERVAL = 5  # seconds
-RUNAI_CHECK_STATUS_MAX_FAILS = 5
+REMOTE_POLL_INTERVAL = 5  # seconds
+REMOTE_CHECK_STATUS_MAX_FAILS = 5
 os.environ["PYTHONUNBUFFERED"] = "1"  # Add at top of file
 
 # Check if running inside a Docker container
@@ -185,21 +186,26 @@ class BasePipeline(ABC):
             if cfg.use_global_mapper:
                 args.extend(["--mapper", "global"])
 
-        if config.USE_RUNAI:
-            Runai.copy_data_to_scratch(
-                os.path.relpath(self.directories["workspace"]),
-                os.path.relpath(self.directories["workspace"]),
+        if config.USE_RUNAI or config.USE_SCITAS:
+            remote = Scitas if config.USE_SCITAS else Runai
+            workspace_rel = os.path.relpath(self.directories["workspace"])
+
+            remote.copy_data_to_scratch(
+                workspace_rel,
+                workspace_rel,
             )
             cmd = ["xvfb-run", "-a", "colmap"] + args
             self.logger.submit_step("colmap", settings=cfg.model_dump(), command=cmd)
-            self._run_command_runai(
+            self._run_command_remote(
+                remote,
                 cmd,
                 step_name="colmap",
                 estimate_progress_callback=estimate_colmap_progress,
+                workspace_rel_path=workspace_rel,
             )
-            Runai.copy_data_from_scratch(
-                os.path.relpath(self.directories["workspace"]),
-                os.path.relpath(self.directories["workspace"]),
+            remote.copy_data_from_scratch(
+                workspace_rel,
+                workspace_rel,
             )
 
         elif IS_DOCKER:
@@ -315,7 +321,7 @@ class BasePipeline(ABC):
     def run_brush(self, cfg: BrushTrainingConfig):
         workspace_dir = (
             os.path.relpath(self.directories["workspace"])
-            if config.USE_RUNAI
+            if config.USE_RUNAI or config.USE_SCITAS
             else os.path.abspath(self.directories["workspace"])
         )
 
@@ -348,24 +354,33 @@ class BasePipeline(ABC):
             cfg.alphaMode,
         ]
 
-        if config.USE_RUNAI:
-            Runai.copy_data_to_scratch(
-                workspace_dir,
-                workspace_dir,
+        if config.USE_RUNAI or config.USE_SCITAS:
+            remote = Scitas if config.USE_SCITAS else Runai
+            workspace_rel = os.path.relpath(self.directories["workspace"])
+
+            remote.copy_data_to_scratch(
+                workspace_rel,
+                workspace_rel,
             )
-            args[3] = os.path.join(
-                "/scratch", args[3]
-            )  # workspace path must be absolute
+            # For RunAI the container mounts data at /scratch; for Scitas the
+            # batch script stages data and cds into the workspace, so relative
+            # paths are sufficient.
+            if config.USE_RUNAI:
+                args[3] = os.path.join(
+                    "/scratch", args[3]
+                )  # workspace path must be absolute in container
             cmd = ["brush"] + args[1:]
             self.logger.submit_step("brush", settings=cfg.model_dump(), command=cmd)
-            self._run_command_runai(
+            self._run_command_remote(
+                remote,
                 cmd,
                 step_name="brush",
                 estimate_progress_callback=estimate_training_progress,
+                workspace_rel_path=workspace_rel,
             )
-            Runai.copy_data_from_scratch(
-                workspace_dir,
-                workspace_dir,
+            remote.copy_data_from_scratch(
+                workspace_rel,
+                workspace_rel,
             )
         elif IS_DOCKER:
             command: str = " ".join(args)
@@ -607,14 +622,18 @@ class BasePipeline(ABC):
 
         return return_code
 
-    def _run_command_runai(
+    def _run_command_remote(
         self,
+        remote,
         cmd: list[str],
         step_name: Literal["ffmpeg", "colmap", "brush"],
         estimate_progress_callback: Callable[[str], float],
+        workspace_rel_path: str | None = None,
     ):
-        job_name = Runai.submit_job(tool=step_name, command=cmd)
-        log_file_path = Runai.get_log_file_path(job_name)
+        job_name = remote.submit_job(
+            tool=step_name, command=cmd, workspace_rel_path=workspace_rel_path
+        )
+        log_file_path = remote.get_log_file_path(job_name)
 
         def log_and_estimate_progress(line: str):
             self.logger.add_log(
@@ -629,15 +648,15 @@ class BasePipeline(ABC):
 
         buffer = ""
         read_pos = 0
-        runai_check_fails = 0
+        remote_check_fails = 0
 
-        while runai_check_fails < RUNAI_CHECK_STATUS_MAX_FAILS:
-            if not self.logger.has_started(step_name) and Runai.check_job_started(
+        while remote_check_fails < REMOTE_CHECK_STATUS_MAX_FAILS:
+            if not self.logger.has_started(step_name) and remote.check_job_started(
                 job_name
             ):
                 self.logger.start_step(step_name)
 
-            Runai.refresh_logs()
+            remote.refresh_logs()
             try:
                 with open(log_file_path, "rb") as f:
                     f.seek(read_pos)
@@ -658,25 +677,25 @@ class BasePipeline(ABC):
                                 log_and_estimate_progress(part)
                         buffer = parts[-1]
 
-            except Exception as e:
+            except Exception:
                 pass
 
-            runai_check_terminated = Runai.check_job_terminated(job_name)
+            remote_check_terminated = remote.check_job_terminated(job_name)
 
-            if runai_check_terminated:
+            if remote_check_terminated:
                 if buffer.strip():
                     log_and_estimate_progress(buffer.rstrip("\r"))
                 break
 
-            if runai_check_terminated is None:
-                runai_check_fails += 1
+            if remote_check_terminated is None:
+                remote_check_fails += 1
 
-            time.sleep(RUNAI_POLL_INTERVAL)
+            time.sleep(REMOTE_POLL_INTERVAL)
 
-        if runai_check_fails >= RUNAI_CHECK_STATUS_MAX_FAILS:
+        if remote_check_fails >= REMOTE_CHECK_STATUS_MAX_FAILS:
             self.logger.step_failed(
                 step_name,
-                f"Failed to get status from RunAI after {RUNAI_CHECK_STATUS_MAX_FAILS} attempts.",
+                f"Failed to get status from {remote.__name__} after {REMOTE_CHECK_STATUS_MAX_FAILS} attempts.",
             )
             return
 

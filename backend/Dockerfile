@@ -6,6 +6,7 @@ RUN apt update \
 	&& apt install -y libglew-dev \
 	ffmpeg \
 	rclone \
+	rsync \
 	&& rm -rf /var/lib/apt/lists/*
 
 RUN pip install "uv==$UV_VERSION"
