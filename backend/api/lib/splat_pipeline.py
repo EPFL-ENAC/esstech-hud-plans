@@ -114,7 +114,9 @@ class BasePipeline(ABC):
             input_file,
             "-vf",
             filters,
-            f"{output_directory}/frame_%04d.png",
+            "-q:v",
+            "4",  # Quality level for JPEG (lower is better, 1-31)
+            f"{output_directory}/frame_%05d.jpg",
         ]
 
         self.logger.start_step("ffmpeg", settings=cfg.model_dump(), command=cmd)
