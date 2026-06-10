@@ -222,19 +222,22 @@ class Scitas(RemoteCompute):
             else ""
         )
 
-        if workspace_rel_path:
-            workspace_rel = workspace_rel_path.lstrip("/")
-            batch_script = f"""#!/bin/bash
+        batch_script = f"""#!/bin/bash
 #SBATCH --job-name={job_name}
-{account_line}#SBATCH --partition={"l40s" if tool == "brush" else "mig12gb"}
+{account_line}#SBATCH --partition={"l40s" if tool == "brush" else "mig24gb"}
 #SBATCH --gpus={n_gpu}
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=2
-#SBATCH --mem=11G
+#SBATCH --cpus-per-task=5
+#SBATCH --mem=29G
 #SBATCH --time=12:00:00
 #SBATCH --output={log_file_abs}
 #SBATCH --error={log_file_abs}
+{config.SCITAS_SBATCH_ARGS_BRUSH if tool == "brush" else config.SCITAS_SBATCH_ARGS_COLMAP}
+"""
 
+        if workspace_rel_path:
+            workspace_rel = workspace_rel_path.lstrip("/")
+            batch_script += f"""
 set -e
 EXPORT_ROOT={shlex.quote(export_root)}
 SCRATCH_ROOT={shlex.quote(scratch_root)}
@@ -256,17 +259,7 @@ apptainer exec --nv {shlex.quote(image_name)} {shell_cmd}
 rsync -av --ignore-existing "$SCRATCH_DIR/" "$EXPORT_DIR/"
 """
         else:
-            batch_script = f"""#!/bin/bash
-#SBATCH --job-name={job_name}
-{account_line}#SBATCH --partition={"l40s" if tool == "brush" else "mig12gb"}
-#SBATCH --gpus={n_gpu}
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=16G
-#SBATCH --time=4:00:00
-#SBATCH --output={log_file_abs}
-#SBATCH --error={log_file_abs}
-
+            batch_script += f"""
 cd "$SCRATCH_ROOT" || cd "$HOME"
 apptainer exec --nv {shlex.quote(image_name)} {shell_cmd}
 """

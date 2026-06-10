@@ -23,6 +23,8 @@ class Config(BaseSettings):
     SCITAS_ACCOUNT: str = "enac-it-poh"
     SCITAS_SSH_USERNAME: str = "enac-it-poh"
     SCITAS_SSH_KEY_PATH: str = "~/.ssh/id_ed25519"
+    SCITAS_SBATCH_ARGS_COLMAP: str = ""
+    SCITAS_SBATCH_ARGS_BRUSH: str = ""
 
 
 @lru_cache()
