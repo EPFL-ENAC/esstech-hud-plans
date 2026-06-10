@@ -228,7 +228,7 @@ class Scitas(RemoteCompute):
 #SBATCH --gpus={n_gpu}
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=5
-#SBATCH --mem=29G
+#SBATCH --mem=28G
 #SBATCH --time=12:00:00
 #SBATCH --output={log_file_abs}
 #SBATCH --error={log_file_abs}
