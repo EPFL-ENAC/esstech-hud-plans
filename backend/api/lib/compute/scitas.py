@@ -73,7 +73,7 @@ def _get_ssh_client() -> paramiko.SSHClient:
 
         _ssh_client = paramiko.SSHClient()
         _ssh_client.load_system_host_keys()
-        _ssh_client.set_missing_host_key_policy(paramiko.RejectPolicy())
+        _ssh_client.set_missing_host_key_policy(paramiko.WarningPolicy())
 
         key_path = os.path.expanduser(config.SCITAS_SSH_KEY_PATH)
         connect_kwargs: dict = {
