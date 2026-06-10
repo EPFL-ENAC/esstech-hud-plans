@@ -21,7 +21,7 @@ class Config(BaseSettings):
     SCITAS_REMOTE_IMAGES_PATH: str = "/work/enac-it-poh/apptainer-images"
     SCITAS_HOST: str = "kuma.hpc.epfl.ch"
     SCITAS_ACCOUNT: str = "enac-it-poh"
-    SCITAS_SSH_USERNAME: str = ""
+    SCITAS_SSH_USERNAME: str = "enac-it-poh"
     SCITAS_SSH_KEY_PATH: str = "~/.ssh/id_ed25519"
 
 

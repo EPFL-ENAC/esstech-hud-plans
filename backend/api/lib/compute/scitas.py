@@ -226,7 +226,7 @@ class Scitas(RemoteCompute):
             workspace_rel = workspace_rel_path.lstrip("/")
             batch_script = f"""#!/bin/bash
 #SBATCH --job-name={job_name}
-{account_line}#SBATCH --partition=mig12gb
+{account_line}#SBATCH --partition={"l40s" if tool == "brush" else "mig12gb"}
 #SBATCH --gpus={n_gpu}
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
@@ -258,7 +258,7 @@ rsync -av --ignore-existing "$SCRATCH_DIR/" "$EXPORT_DIR/"
         else:
             batch_script = f"""#!/bin/bash
 #SBATCH --job-name={job_name}
-{account_line}#SBATCH --partition=mig12gb
+{account_line}#SBATCH --partition={"l40s" if tool == "brush" else "mig12gb"}
 #SBATCH --gpus={n_gpu}
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4

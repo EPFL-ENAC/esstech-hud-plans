@@ -1,5 +1,6 @@
 import logging
 import os
+import posixpath
 import pty
 import re
 import select
@@ -329,7 +330,9 @@ class BasePipeline(ABC):
             brush_command,
             workspace_dir,
             "--export-path",
-            workspace_dir,
+            posixpath.join(config.SCITAS_REMOTE_SCRATCH_PATH, workspace_dir)
+            if config.USE_SCITAS
+            else workspace_dir,
             "--export-name",
             "splat.ply",
             "--total-train-iters",

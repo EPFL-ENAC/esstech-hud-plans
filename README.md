@@ -75,3 +75,8 @@ To pull the images with Apptainer, run:
 apptainer remote login --username <username> registry.rcp.epfl.ch
 apptainer pull docker://registry.rcp.epfl.ch/enac-it-poh/hud-<TOOL>:latest
 ```
+
+Alternatively, you can build the SIF image locally:
+```bash
+apptainer build hud-<TOOL>_latest.sif docker://registry.rcp.epfl.ch/enac-it-poh/hud-<TOOL>:latest
+```
