@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-BRUSH_VERSION="a6a1468fa51a71b74d4bb7d5ccb8976148afdbfd"
+BRUSH_VERSION="f043db463d7534c0a312f632447d19e0dcbad9d1"
 
 set -euo pipefail
 
