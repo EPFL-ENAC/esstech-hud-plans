@@ -152,7 +152,7 @@ class Scitas(RemoteCompute):
         subprocess.run(
             [
                 "rsync",
-                "-a",
+                "-aL",
                 "--no-owner",
                 "--no-group",
                 "--ignore-existing",
@@ -180,7 +180,7 @@ class Scitas(RemoteCompute):
         subprocess.run(
             [
                 "rsync",
-                "-a",
+                "-aL",
                 "--no-owner",
                 "--no-group",
                 "--ignore-existing",
@@ -248,7 +248,7 @@ mkdir -p "$SCRATCH_DIR"
 mkdir -p "$(dirname {shlex.quote(log_file_abs)})"
 
 # Stage-in: copy data from export to scratch
-rsync -av --ignore-existing "$EXPORT_DIR/" "$SCRATCH_DIR/"
+rsync -avL --ignore-existing "$EXPORT_DIR/" "$SCRATCH_DIR/"
 
 cd "$SCRATCH_ROOT" || cd "$HOME"
 
@@ -256,7 +256,7 @@ cd "$SCRATCH_ROOT" || cd "$HOME"
 apptainer exec --nv {shlex.quote(image_name)} {shell_cmd}
 
 # Stage-out: copy results back to export
-rsync -av --ignore-existing "$SCRATCH_DIR/" "$EXPORT_DIR/"
+rsync -avL --ignore-existing "$SCRATCH_DIR/" "$EXPORT_DIR/"
 """
         else:
             batch_script += f"""
