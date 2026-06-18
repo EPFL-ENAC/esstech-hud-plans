@@ -9,6 +9,8 @@ export interface BlueprintSplatProcessingParams {
     densityThreshold: number;
     opacityMultiplier: number;
     opacityPower: number;
+    worldRotationMatrix?: THREE.Matrix4;
+    center?: THREE.Vector3;
 }
 
 export async function generateBlueprintMesh(
@@ -19,19 +21,37 @@ export async function generateBlueprintMesh(
     return new Promise((resolve) => {
         const black = new THREE.Color(0x000000);
         const clonedBuffer = splat.slice(0);
+        const hasRotation = params.worldRotationMatrix && params.center;
+        const rotationMatrix = params.worldRotationMatrix;
+        const center = params.center;
+        const p = new THREE.Vector3();
 
         new SplatMesh({
             fileBytes: clonedBuffer,
             onLoad(mesh) {
-                mesh.packedSplats.forEachSplat((index, center, scales, quaternion, opacity) => {
+                mesh.packedSplats.forEachSplat((index, centerRaw, scales, quaternion, opacity) => {
                     const FIXED_OPACITY = 0.3;
                     const volume = scales.x * scales.y * scales.z;
                     const density = opacity / volume;
                     let newOpacity = 0;
+
+                    let sectionZ: number;
+                    if (hasRotation && rotationMatrix && center) {
+                        p.set(
+                            centerRaw.x - center.x,
+                            centerRaw.y - center.y,
+                            centerRaw.z - center.z,
+                        );
+                        p.applyMatrix4(rotationMatrix);
+                        sectionZ = p.z;
+                    } else {
+                        sectionZ = centerRaw.y;
+                    }
+
                     if (
                         density >= params.densityThreshold &&
-                        center.y >= params.sectionZStart &&
-                        center.y <= params.sectionZEnd
+                        -sectionZ >= params.sectionZStart &&
+                        -sectionZ <= params.sectionZEnd
                     ) {
                         newOpacity =
                             ((params.opacityMultiplier * opacity) / FIXED_OPACITY) **
@@ -41,7 +61,7 @@ export async function generateBlueprintMesh(
 
                     mesh.packedSplats.setSplat(
                         index,
-                        center,
+                        centerRaw,
                         scales,
                         quaternion,
                         newOpacity,

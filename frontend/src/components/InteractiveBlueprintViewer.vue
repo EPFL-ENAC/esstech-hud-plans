@@ -300,6 +300,8 @@ function generateBlueprint(onFinishedLoading?: (mesh: SplatMesh) => void): Async
                 averageCameraOffsetUnit.value + sectionZFactorStart.value * geometryData!.radius,
             sectionZEnd:
                 averageCameraOffsetUnit.value + sectionZFactorEnd.value * geometryData!.radius,
+            worldRotationMatrix: geometryData!.worldRotationMatrix,
+            center: geometryData!.center,
         };
 
         mesh = yield* AsyncResult.fromValuePromise(
