@@ -293,6 +293,7 @@ class InteractiveBlueprintParamsResponse(BaseModel):
     cameramanHeightCm: float | None = None
     sectionZFactor: dict | None = None
     densityThreshold: float | None = None
+    splatSizeMultiplier: float | None = None
     opacityMultiplier: float | None = None
     contrast: float | None = None
 

@@ -124,6 +124,9 @@ def flatten_status_data(status_file_path: str) -> dict:
             row["interactive_sectionZFactor_min"] = None
             row["interactive_sectionZFactor_max"] = None
         row["interactive_densityThreshold"] = interactive_params.get("densityThreshold")
+        row["interactive_splatSizeMultiplier"] = interactive_params.get(
+            "splatSizeMultiplier"
+        )
         row["interactive_opacityMultiplier"] = interactive_params.get(
             "opacityMultiplier"
         )
@@ -138,6 +141,7 @@ def flatten_status_data(status_file_path: str) -> dict:
         row["interactive_sectionZFactor_min"] = None
         row["interactive_sectionZFactor_max"] = None
         row["interactive_densityThreshold"] = None
+        row["interactive_splatSizeMultiplier"] = None
         row["interactive_opacityMultiplier"] = None
         row["interactive_contrast"] = None
 

@@ -109,6 +109,7 @@ class InteractiveBlueprintParams(BaseModel):
     cameramanHeightCm: float = 170
     sectionZFactor: SectionZFactor | None = None
     densityThreshold: float = 1.0
+    splatSizeMultiplier: float = 1.0
     opacityMultiplier: float = 0.2
     contrast: float = 2.0
 

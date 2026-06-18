@@ -50,6 +50,7 @@ const sectionZFactor = ref({ min: -1, max: 1 });
 const sectionZFactorStart = computed(() => -sectionZFactor.value.max);
 const sectionZFactorEnd = computed(() => -sectionZFactor.value.min);
 const densityThreshold = ref(1.0);
+const splatSizeMultiplier = ref(1.0);
 const opacityMultiplier = ref(0.2);
 const opacityPower = ref(0.0);
 const contrast = ref(2.0);
@@ -80,6 +81,7 @@ async function saveBlueprintParams(): Promise<void> {
         cameramanHeightCm: cameramanHeightCm.value,
         sectionZFactor: sectionZFactor.value,
         densityThreshold: densityThreshold.value,
+        splatSizeMultiplier: splatSizeMultiplier.value,
         opacityMultiplier: opacityMultiplier.value,
         contrast: contrast.value,
     };
@@ -177,6 +179,7 @@ onMounted(() => {
                 sectionZFactor.value = params.sectionZFactor;
             }
             if (params.densityThreshold) densityThreshold.value = params.densityThreshold;
+            if (params.splatSizeMultiplier) splatSizeMultiplier.value = params.splatSizeMultiplier;
             if (params.opacityMultiplier) opacityMultiplier.value = params.opacityMultiplier;
             if (params.contrast) contrast.value = params.contrast;
 
@@ -276,7 +279,14 @@ watch(viewerSize, (newSize) => {
 });
 
 watch(
-    [densityThreshold, opacityMultiplier, opacityPower, sectionZFactorStart, sectionZFactorEnd],
+    [
+        densityThreshold,
+        splatSizeMultiplier,
+        opacityMultiplier,
+        opacityPower,
+        sectionZFactorStart,
+        sectionZFactorEnd,
+    ],
     () => {
         collection.value.add(`generation-${Date.now()}`, generateBlueprint());
         scheduleParamsSave();
@@ -294,6 +304,7 @@ function generateBlueprint(onFinishedLoading?: (mesh: SplatMesh) => void): Async
     return AsyncResult.run(function* () {
         const params: BlueprintSplatProcessingParams = {
             densityThreshold: densityThreshold.value * geometryData!.radius ** 3,
+            splatSizeMultiplier: splatSizeMultiplier.value,
             opacityMultiplier: opacityMultiplier.value,
             opacityPower: opacityPower.value,
             sectionZStart:
@@ -540,6 +551,25 @@ watch(sceneZRotation, (tilt) => {
                                 />
                             </div>
 
+                            <div class="control-group splat-size-multiplier">
+                                <div class="text-caption text-grey-7">
+                                    Splat Size Multiplier
+                                    <q-icon name="info" size="16px" class="cursor-pointer">
+                                        <q-tooltip max-width="250px">
+                                            Scale the rendered size of splats.
+                                        </q-tooltip>
+                                    </q-icon>
+                                </div>
+                                <q-slider
+                                    v-model="splatSizeMultiplier"
+                                    :min="0.01"
+                                    :max="2.0"
+                                    :step="0.01"
+                                    label
+                                    :label-value="splatSizeMultiplier.toFixed(1)"
+                                />
+                            </div>
+
                             <div class="control-group opacity-multiplier">
                                 <div class="text-caption text-grey-7">
                                     Opacity Multiplier
@@ -614,12 +644,16 @@ watch(sceneZRotation, (tilt) => {
 
     grid-template-areas:
         'section-z-range section-z-range'
-        'opacity-threshold opacity-threshold'
+        'opacity-threshold splat-size-multiplier'
         'opacity-multiplier contrast';
 }
 
 .section-z-range {
     grid-area: section-z-range;
+}
+
+.splat-size-multiplier {
+    grid-area: splat-size-multiplier;
 }
 
 .opacity-multiplier {

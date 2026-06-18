@@ -7,6 +7,7 @@ export interface BlueprintSplatProcessingParams {
     sectionZStart: number;
     sectionZEnd: number;
     densityThreshold: number;
+    splatSizeMultiplier: number;
     opacityMultiplier: number;
     opacityPower: number;
     worldRotationMatrix?: THREE.Matrix4;
@@ -59,10 +60,16 @@ export async function generateBlueprintMesh(
                             FIXED_OPACITY;
                     }
 
+                    const scaledScales = new THREE.Vector3(
+                        scales.x * params.splatSizeMultiplier,
+                        scales.y * params.splatSizeMultiplier,
+                        scales.z * params.splatSizeMultiplier,
+                    );
+
                     mesh.packedSplats.setSplat(
                         index,
                         centerRaw,
-                        scales,
+                        scaledScales,
                         quaternion,
                         newOpacity,
                         black,
