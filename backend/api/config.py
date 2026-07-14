@@ -7,6 +7,12 @@ class Config(BaseSettings):
     PATH_PREFIX: str = ""
     APP_URL: str = "http://localhost:9000"
 
+    DB_HOST: str = "localhost"
+    DB_PORT: int = 5432
+    DB_NAME: str = "postgres"
+    DB_USER: str
+    DB_PASSWORD: str
+
     MIN_COLMAP_IMAGES_KEEP: int = 20
 
     USE_RUNAI: bool = False

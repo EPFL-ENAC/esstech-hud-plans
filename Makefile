@@ -15,5 +15,15 @@ run-frontend:
 	echo "Frontend not set up yet"
 	cd frontend && npm run dev
 
+run-db:
+	docker compose up -d
+
+stop-db:
+	docker compose down
+
+reset-db:
+	docker compose down --volumes
+	docker compose up -d
+
 test:
 	cd backend && make test
