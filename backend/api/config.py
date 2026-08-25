@@ -1,3 +1,4 @@
+import os
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings
@@ -12,6 +13,13 @@ class Config(BaseSettings):
     DB_NAME: str = "postgres"
     DB_USER: str
     DB_PASSWORD: str
+
+    PREFECT_HOST: str = "localhost"
+    PREFECT_PORT: int = 4200
+
+    @property
+    def PREFECT_API_URL(self) -> str:
+        return f"http://{self.PREFECT_HOST}:{self.PREFECT_PORT}/api"
 
     MIN_COLMAP_IMAGES_KEEP: int = 20
 

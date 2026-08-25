@@ -12,6 +12,7 @@ from api.config import config
 from api.logging_config import setup_logging
 from api.views.admin import router as admin_router
 from api.views.splats import router as splats_router
+from api.views.workflows import router as workflows_router
 
 # from api.views.files import router as files_router
 
@@ -67,6 +68,12 @@ app.include_router(
     splats_router,
     prefix="/splats",
     tags=["Splats"],
+)
+
+app.include_router(
+    workflows_router,
+    prefix="/workflows",
+    tags=["Workflows"],
 )
 
 app.include_router(

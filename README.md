@@ -24,7 +24,7 @@ make install
 In one shell, run:
 
 ```bash
-make run-db
+make start-db
 make run-backend
 ```
 
