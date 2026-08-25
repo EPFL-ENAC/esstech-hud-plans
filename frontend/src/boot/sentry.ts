@@ -14,7 +14,7 @@ export default defineBoot(({ app }) => {
     Sentry.init({
         app,
         dsn: 'https://aa1211ccc1774558b5b43b4e0e5ebc10@enac-it-glitchtip.epfl.ch/2',
-        environment: appEnv.SENTRY_ENVIRONMENT ?? 'production',
-        tracesSampleRate: parseFloat(appEnv.SENTRY_RATE ?? '1.00'), // 100% of transactions — adjust to your needs
+        environment: appEnv.SENTRY_ENVIRONMENT ?? 'prod',
+        tracesSampleRate: parseFloat(appEnv.SENTRY_RATE ?? '1.00'),
     });
 });
