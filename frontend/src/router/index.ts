@@ -6,6 +6,7 @@ import {
     createWebHistory,
 } from 'vue-router';
 import routes from './routes';
+import { isAdmin, isAuthenticated } from 'src/lib/auth';
 
 /*
  * If not building with SSR mode, you can
@@ -31,6 +32,44 @@ export default defineRouter(function (/* { store, ssrContext } */) {
         // quasar.conf.js -> build -> vueRouterMode
         // quasar.conf.js -> build -> publicPath
         history: createHistory(process.env.VUE_ROUTER_BASE),
+    });
+
+    // Redirect unauthenticated users to /login (except on auth routes), and
+    // send authenticated users away from the login page.
+    Router.beforeEach((to) => {
+        // Keycloak strips the fragment from the redirect_uri, so the OAuth
+        // response (code, session_state) arrives in window.location.search
+        // while the hash router sits at '/' (never on /callback). Detect the
+        // inbound response and forward it to /callback as a route query so the
+        // exchange runs. This also covers the case where the params end up in
+        // the hash by moving them into the query explicitly.
+        if (!to.query.code && window.location.search.includes('code=')) {
+            const params = new URLSearchParams(window.location.search);
+            // Forward both the authorization code and the CSRF state so the
+            // callback can verify them.
+            const forward = {
+                path: '/callback',
+                query: { code: params.get('code') ?? '', state: params.get('state') ?? '' },
+            };
+            // Drop the one-time auth params from the address bar.
+            window.history.replaceState(null, '', window.location.pathname);
+            return forward;
+        }
+
+        if (to.path === '/admin' && !isAdmin()) {
+            // Admin area: require the client role "admin". Return to home when
+            // authenticated without the role, or to login when logged out.
+            return isAuthenticated() ? '/' : '/login';
+        }
+        if (to.path === '/callback') {
+            return;
+        }
+        if (to.path === '/login') {
+            return isAuthenticated() ? '/' : undefined;
+        }
+        if (!isAuthenticated()) {
+            return '/login';
+        }
     });
 
     return Router;

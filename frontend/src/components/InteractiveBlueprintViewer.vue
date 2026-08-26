@@ -12,6 +12,7 @@ import {
     generateBlueprintMesh,
 } from 'src/lib/maths/blueprintMesh';
 import { baseUrl } from 'boot/api';
+import { authFetch } from 'src/lib/auth';
 import { Notify } from 'quasar';
 
 const CAMERA_DISTANCE_FACTOR = 3.0;
@@ -87,13 +88,16 @@ async function saveBlueprintParams(): Promise<void> {
     };
 
     try {
-        const response = await fetch(`${baseUrl}/splats/blueprint-params/${props.generationId}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
+        const response = await authFetch(
+            `${baseUrl}/splats/blueprint-params/${props.generationId}`,
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(params),
             },
-            body: JSON.stringify(params),
-        });
+        );
         if (!response.ok) {
             console.error('Failed to save blueprint parameters:', response.statusText);
             Notify.create({
@@ -156,7 +160,7 @@ onMounted(() => {
             }
 
             const response = yield* AsyncResult.fromValuePromise(
-                fetch(`${baseUrl}/splats/blueprint-params/${props.generationId}`),
+                authFetch(`${baseUrl}/splats/blueprint-params/${props.generationId}`),
             );
             const params = response.ok ? yield* AsyncResult.fromValuePromise(response.json()) : {};
             if (!response.ok) {

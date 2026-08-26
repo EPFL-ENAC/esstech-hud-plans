@@ -1,9 +1,10 @@
 import pandas as pd
 from api.services.admin import generate_parameters_table
-from fastapi import APIRouter, HTTPException
+from api.services.auth import require_admin
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_admin)])
 
 
 @router.get("/parameters-table")

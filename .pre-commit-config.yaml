@@ -18,6 +18,7 @@ repos:
         files: ^backend/
         additional_dependencies:
          - types-paramiko
+         - types-requests
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.10
     hooks:
