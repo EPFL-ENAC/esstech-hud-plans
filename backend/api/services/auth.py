@@ -34,12 +34,18 @@ def _parse_user(payload: dict[str, Any]) -> User:
 
     realm_access = payload.get("realm_access") or {}
     roles = list(realm_access.get("roles") or [])
+    # Client roles are read from resource_access[<client_id>].roles so that
+    # "admin" means the same thing here as in the frontend gate.
+    resource_access = payload.get("resource_access") or {}
+    client_entry = resource_access.get(config.KEYCLOAK_CLIENT_ID) or {}
+    client_roles = list(client_entry.get("roles") or [])
     return User(
         sub=str(payload.get("sub", "")),
         username=str(payload.get("preferred_username", "")),
         email=str(payload.get("email", "")),
         name=str(payload.get("name", "")),
         roles=roles,
+        client_roles=client_roles,
     )
 
 
@@ -62,18 +68,25 @@ def require_user(
     token = credentials.credentials
     try:
         key = _get_jwks_client().get_signing_key_from_jwt(token)
-        decode_options: dict[str, Any] = {}
-        if config.KEYCLOAK_CLIENT_ID:
-            decode_options["audience"] = config.KEYCLOAK_CLIENT_ID
-        else:
-            decode_options["options"] = {"verify_aud": False}
+        # Verify signature, issuer and expiry via PyJWT; we check the audience
+        # manually below so we accept the token if it is addressed to this
+        # client (aud) or issued on behalf of it (azp).
         payload = jwt.decode(
             token,
             key.key,
-            algorithms=[key.alg],
+            algorithms=[key.algorithm_name],
             issuer=_keycloak_base(),
-            **decode_options,
+            options={"verify_aud": False},
         )
+
+        aud = payload.get("aud")
+        audiences = set(aud) if isinstance(aud, list) else ({aud} if aud else set())
+        azp = payload.get("azp")
+        if (
+            config.KEYCLOAK_CLIENT_ID not in audiences
+            and azp != config.KEYCLOAK_CLIENT_ID
+        ):
+            raise jwt.InvalidAudienceError("Audience doesn't match")
     except (jwt.PyJWTError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

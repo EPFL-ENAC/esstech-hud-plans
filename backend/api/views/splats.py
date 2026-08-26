@@ -4,6 +4,7 @@ import os
 import shutil
 
 from api.lib.compute.video_frame import VideoFrame
+from api.models.auth import User
 from api.models.splats import (
     BlueprintConfig,
     BrushTrainingConfig,
@@ -16,13 +17,14 @@ from api.models.splats import (
     QualityRating,
     RestartBrushInputs,
 )
+from api.services.auth import require_user
 from api.services.splats import GenerationManager
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from fastapi_cache.decorator import cache
 from pydantic import BaseModel, TypeAdapter
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_user)])
 
 manager = GenerationManager()
 

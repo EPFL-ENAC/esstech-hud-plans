@@ -1,5 +1,3 @@
-from typing import Any
-
 import requests
 from api.config import config
 from fastapi import APIRouter, HTTPException
@@ -67,15 +65,29 @@ def exchange_code(req: TokenRequest) -> TokenResponse:
     try:
         response = requests.post(_token_url(), data=data, timeout=15)
         response.raise_for_status()
+        payload = response.json()
     except requests.RequestException as exc:
         raise HTTPException(
             status_code=400,
             detail="Token exchange with Keycloak failed",
         ) from exc
+    except ValueError as exc:
+        # response.raise_for_status() or response.json() raised on a non-JSON
+        # or unsuccessful body.
+        raise HTTPException(
+            status_code=400,
+            detail="Unexpected response from Keycloak during token exchange",
+        ) from exc
 
-    payload: dict[str, Any] = response.json()
+    access_token = payload.get("access_token")
+    if not access_token:
+        raise HTTPException(
+            status_code=400,
+            detail="Keycloak did not return an access token",
+        )
+
     return TokenResponse(
-        access_token=payload["access_token"],
+        access_token=access_token,
         token_type=payload.get("token_type", "bearer"),
         expires_in=int(payload.get("expires_in", 0)),
     )

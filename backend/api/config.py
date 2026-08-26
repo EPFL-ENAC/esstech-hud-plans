@@ -19,7 +19,7 @@ class Config(BaseSettings):
 
     KEYCLOAK_ENDPOINT: str = "https://enac-it-sso2.epfl.ch"
     KEYCLOAK_REALM: str = "external"
-    KEYCLOAK_CLIENT_ID: str = "poh"
+    KEYCLOAK_CLIENT_ID: str = "esstech-poh"
     KEYCLOAK_CLIENT_SECRET: str = ""
 
     @property

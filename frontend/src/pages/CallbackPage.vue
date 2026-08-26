@@ -23,15 +23,27 @@ const router = useRouter();
 const status = ref('exchanging');
 
 onMounted(async () => {
-    // With hash-based routing, Keycloak appends the auth parameters to the URL
-    // query string (window.location.search) rather than to the hash the router
-    // reads. Read the code from both places so the exchange works either way.
-    const code =
-        (route.query.code as string | undefined) ??
-        new URLSearchParams(window.location.search).get('code') ??
+    // The auth response parameters arrive either in the fragment the router
+    // exposes as query (route.query) or in window.location.search when Keycloak
+    // puts them before the hash. Read both so the exchange works either way.
+    const read = (name: string) =>
+        (route.query[name] as string | undefined) ??
+        new URLSearchParams(window.location.search).get(name) ??
         undefined;
+
+    const code = read('code');
     if (!code) {
         status.value = 'Missing authorization code';
+        return;
+    }
+
+    // Login CSRF protection: the state returned by Keycloak must match the one
+    // we generated when starting the login (stored in sessionStorage).
+    const expectedState = sessionStorage.getItem('oauth_state');
+    sessionStorage.removeItem('oauth_state');
+    const returnedState = read('state');
+    if (!returnedState || !expectedState || returnedState !== expectedState) {
+        status.value = 'Invalid OAuth state. Please try signing in again.';
         return;
     }
 
@@ -54,8 +66,9 @@ onMounted(async () => {
         window.history.replaceState(null, '', window.location.pathname);
         await router.replace('/');
     } catch (error) {
+        // Show the error on the page (instead of silently returning to /login)
+        // so an exchange failure is visible and diagnosable.
         status.value = 'Error: ' + (error as Error).message;
-        await router.replace('/login');
     }
 });
 </script>

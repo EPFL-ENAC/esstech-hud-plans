@@ -6,7 +6,7 @@ import {
     createWebHistory,
 } from 'vue-router';
 import routes from './routes';
-import { isAuthenticated } from 'src/lib/auth';
+import { isAdmin, isAuthenticated } from 'src/lib/auth';
 
 /*
  * If not building with SSR mode, you can
@@ -44,12 +44,23 @@ export default defineRouter(function (/* { store, ssrContext } */) {
         // exchange runs. This also covers the case where the params end up in
         // the hash by moving them into the query explicitly.
         if (!to.query.code && window.location.search.includes('code=')) {
-            const code = new URLSearchParams(window.location.search).get('code') ?? '';
-            // Drop the one-time auth code from the address bar.
+            const params = new URLSearchParams(window.location.search);
+            // Forward both the authorization code and the CSRF state so the
+            // callback can verify them.
+            const forward = {
+                path: '/callback',
+                query: { code: params.get('code') ?? '', state: params.get('state') ?? '' },
+            };
+            // Drop the one-time auth params from the address bar.
             window.history.replaceState(null, '', window.location.pathname);
-            return { path: '/callback', query: { code } };
+            return forward;
         }
 
+        if (to.path === '/admin' && !isAdmin()) {
+            // Admin area: require the client role "admin". Return to home when
+            // authenticated without the role, or to login when logged out.
+            return isAuthenticated() ? '/' : '/login';
+        }
         if (to.path === '/callback') {
             return;
         }
