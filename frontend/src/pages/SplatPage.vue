@@ -12,6 +12,7 @@ import {
     useSplatStore,
 } from 'src/stores/splats';
 import { baseUrl } from 'boot/api';
+import { authFetch } from 'src/lib/auth';
 
 const route = useRoute();
 const generationId = computed(() => route.params.id as string);
@@ -38,7 +39,7 @@ const isSplatViewerExpanded = ref(false);
 // Fetch settings to determine if blueprint was enabled
 async function fetchSettings(): Promise<void> {
     try {
-        const response = await fetch(`${baseUrl}/splats/settings/${generationId.value}`);
+        const response = await authFetch(`${baseUrl}/splats/settings/${generationId.value}`);
         if (!response.ok) {
             throw new Error(`Failed to fetch settings: ${response.statusText}`);
         }

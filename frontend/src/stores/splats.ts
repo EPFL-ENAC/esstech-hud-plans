@@ -6,6 +6,7 @@ import type { FFMPEGExtractionConfig } from 'src/lib/splats/ffmpeg';
 import type { FrameExtractionConfig } from 'src/lib/splats/frameExtraction';
 import { AsyncResult, delay, type ErrorBase } from 'unwrapped/core';
 import { baseUrl } from 'boot/api';
+import { authFetch } from 'src/lib/auth';
 import type { ColmapSparseEvaluation } from 'src/lib/splats/evaluations';
 
 export interface SplatPipelineSettings {
@@ -73,7 +74,7 @@ export const useSplatStore = defineStore('splat', () => {
                 while (true) {
                     try {
                         const fetched = yield* AsyncResult.fromValuePromise(
-                            fetch(`${baseUrl}/splats/status/${generationId}`),
+                            authFetch(`${baseUrl}/splats/status/${generationId}`),
                         );
                         if (fetched.ok) {
                             const statusData: SplatPipelineStatus =
@@ -109,7 +110,7 @@ export const useSplatStore = defineStore('splat', () => {
             }
 
             const fetched = yield* AsyncResult.fromValuePromise(
-                fetch(`${baseUrl}/splats/get/${generationId}`),
+                authFetch(`${baseUrl}/splats/get/${generationId}`),
             );
 
             if (!fetched.ok) {

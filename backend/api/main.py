@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from api.config import config
 from api.logging_config import setup_logging
 from api.views.admin import router as admin_router
+from api.views.auth import router as auth_router
 from api.views.splats import router as splats_router
 from api.views.workflows import router as workflows_router
 
@@ -63,6 +64,12 @@ async def get_health() -> HealthCheck:
 
     return HealthCheck(status="OK")
 
+
+app.include_router(
+    auth_router,
+    prefix="/auth",
+    tags=["Auth"],
+)
 
 app.include_router(
     splats_router,

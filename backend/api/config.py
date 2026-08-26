@@ -17,6 +17,11 @@ class Config(BaseSettings):
     PREFECT_HOST: str = "localhost"
     PREFECT_PORT: int = 4200
 
+    KEYCLOAK_ENDPOINT: str = "https://enac-it-sso2.epfl.ch"
+    KEYCLOAK_REALM: str = "external"
+    KEYCLOAK_CLIENT_ID: str = "poh"
+    KEYCLOAK_CLIENT_SECRET: str = ""
+
     @property
     def PREFECT_API_URL(self) -> str:
         return f"http://{self.PREFECT_HOST}:{self.PREFECT_PORT}/api"

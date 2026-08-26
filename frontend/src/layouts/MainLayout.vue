@@ -6,7 +6,14 @@
 
                 <q-toolbar-title> Quasar App </q-toolbar-title>
 
-                <div>Quasar v{{ $q.version }}</div>
+                <q-btn
+                    flat
+                    dense
+                    icon="logout"
+                    label="Logout"
+                    aria-label="Log out"
+                    @click="handleLogout"
+                />
             </q-toolbar>
         </q-header>
 
@@ -29,10 +36,20 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
+import { useRouter } from 'vue-router';
+import { logout } from 'src/lib/auth';
 
 const leftDrawerOpen = ref(false);
+const router = useRouter();
 
 function toggleLeftDrawer() {
     leftDrawerOpen.value = !leftDrawerOpen.value;
+}
+
+function handleLogout() {
+    logout();
+    // Navigate via the router so the hash-mode URL stays clean (#/login)
+    // instead of appending a real /login path segment.
+    void router.push('/login');
 }
 </script>

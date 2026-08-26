@@ -2,6 +2,7 @@
 import { Notify } from 'quasar';
 import { onMounted, ref, watch } from 'vue';
 import { baseUrl } from 'boot/api';
+import { authFetch } from 'src/lib/auth';
 
 interface QualityRating {
     category: 'colmap' | 'splats' | 'blueprint';
@@ -35,7 +36,7 @@ async function saveFeedback(): Promise<void> {
     };
 
     try {
-        const response = await fetch(`${baseUrl}/splats/feedback/${props.generationId}`, {
+        const response = await authFetch(`${baseUrl}/splats/feedback/${props.generationId}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -77,7 +78,7 @@ function scheduleFeedbackSave(): void {
 
 async function loadFeedback(): Promise<void> {
     try {
-        const response = await fetch(`${baseUrl}/splats/feedback/${props.generationId}`);
+        const response = await authFetch(`${baseUrl}/splats/feedback/${props.generationId}`);
         if (!response.ok) {
             throw new Error(`Failed to load feedback: ${response.statusText}`);
         }

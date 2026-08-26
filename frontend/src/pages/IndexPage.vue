@@ -56,6 +56,7 @@ import { type BrushTrainingConfig, makeDefaultBrushConfig } from 'src/lib/splats
 // import BlueprintSettings from 'src/components/BlueprintSettings.vue';
 import { type BlueprintConfig, makeDefaultBlueprintConfig } from 'src/lib/splats/blueprint';
 import { baseUrl } from 'boot/api';
+import { authFetch } from 'src/lib/auth';
 
 const router = useRouter();
 const route = useRoute();
@@ -157,7 +158,7 @@ async function uploadVideo() {
         uploadStatus.value = 'Starting pipeline...';
         statusClass.value = 'info';
 
-        const response = await fetch(`${baseUrl}/splats/generate`, {
+        const response = await authFetch(`${baseUrl}/splats/generate`, {
             method: 'POST',
             body: formData,
         });
@@ -202,7 +203,7 @@ async function restartBrush() {
         uploadStatus.value = 'Starting brush restart...';
         statusClass.value = 'info';
 
-        const response = await fetch(`${baseUrl}/splats/restart-brush`, {
+        const response = await authFetch(`${baseUrl}/splats/restart-brush`, {
             method: 'POST',
             body: formData,
         });
