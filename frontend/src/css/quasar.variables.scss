@@ -12,14 +12,22 @@
 // to match your app's branding.
 // Tip: Use the "Theme Builder" on Quasar's documentation website.
 
-$primary: #1976d2;
-$secondary: #26a69a;
-$accent: #9c27b0;
+// Brand palette derived from the mobile UI screenshots.
+$primary: #00a9a5;
+$secondary: #e6f6f6;
+$accent: #ff3b30;
 
-$dark: #1d1d1d;
+$dark: #1c1c1e;
 $dark-page: #121212;
 
-$positive: #21ba45;
-$negative: #c10015;
-$info: #31ccec;
-$warning: #f2c037;
+$positive: #34c759;
+$negative: #ff3b30;
+$info: #5ac8fa;
+$warning: #ff9500;
+
+// Custom semantic tokens used in app.scss.
+$od-muted: #8e8e93;
+$od-border: #e5e5ea;
+$od-surface: #f2f2f7;
+$od-background: #ffffff;
+$od-text: #1c1c1e;

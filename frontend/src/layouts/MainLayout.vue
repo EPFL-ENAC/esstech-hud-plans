@@ -1,55 +1,29 @@
 <template>
-    <q-layout view="lHh Lpr lFf">
-        <q-header elevated>
-            <q-toolbar>
-                <q-btn flat dense round icon="menu" aria-label="Menu" @click="toggleLeftDrawer" />
-
-                <q-toolbar-title> Quasar App </q-toolbar-title>
-
-                <q-btn
-                    flat
-                    dense
-                    icon="logout"
-                    label="Logout"
-                    aria-label="Log out"
-                    @click="handleLogout"
-                />
-            </q-toolbar>
-        </q-header>
-
+    <q-layout view="hhh Lpr lFf">
         <q-page-container>
             <router-view />
         </q-page-container>
 
-        <q-drawer
-            v-model="leftDrawerOpen"
-            show-if-above
-            side="left"
-            bordered
-            width-hint="450"
-            :width="450"
-        >
+        <q-footer bordered class="od-bottom-tabs">
+            <q-tabs no-caps indicator-color="transparent" active-color="primary" align="justify">
+                <q-route-tab to="/home" icon="home" label="Home" />
+                <q-route-tab to="/capture" icon="photo_camera" label="Capture" />
+                <q-route-tab to="/library" icon="list" label="Library" />
+                <q-route-tab to="/more" icon="more_horiz" label="More" />
+            </q-tabs>
+        </q-footer>
+
+        <q-drawer v-model="drawerOpen" side="left" bordered width-hint="450" :width="450">
             <router-view name="drawer" />
         </q-drawer>
     </q-layout>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import { useRouter } from 'vue-router';
-import { logout } from 'src/lib/auth';
+import { computed } from 'vue';
+import { useRoute } from 'vue-router';
 
-const leftDrawerOpen = ref(false);
-const router = useRouter();
+const route = useRoute();
 
-function toggleLeftDrawer() {
-    leftDrawerOpen.value = !leftDrawerOpen.value;
-}
-
-function handleLogout() {
-    logout();
-    // Navigate via the router so the hash-mode URL stays clean (#/login)
-    // instead of appending a real /login path segment.
-    void router.push('/login');
-}
+const drawerOpen = computed(() => route.path.startsWith('/splat'));
 </script>

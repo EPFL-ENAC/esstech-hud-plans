@@ -3,7 +3,7 @@ import { type FramePickerConfig, makeDefaultFramePickerConfig } from 'src/lib/sp
 
 const config = defineModel<FramePickerConfig>({
     required: true,
-    default: makeDefaultFramePickerConfig(),
+    default: () => makeDefaultFramePickerConfig(),
 });
 
 const resetToDefaults = () => {

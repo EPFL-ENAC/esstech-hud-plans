@@ -4,7 +4,7 @@ import { type InputConfig, makeDefaultInputConfig } from '../lib/splats/input';
 
 const config = defineModel<InputConfig>({
     required: true,
-    default: makeDefaultInputConfig(),
+    default: () => makeDefaultInputConfig(),
 });
 const activeTab = defineModel<'video' | 'colmap'>('tab', {
     default: 'video',

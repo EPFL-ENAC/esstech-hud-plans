@@ -7,7 +7,51 @@ const routes: RouteRecordRaw[] = [
         children: [
             {
                 path: '',
-                component: () => import('pages/IndexPage.vue'),
+                redirect: '/home',
+            },
+            {
+                path: 'home',
+                component: () => import('pages/HomePage.vue'),
+            },
+            {
+                path: 'capture',
+                component: () => import('pages/CapturePage.vue'),
+            },
+            {
+                path: 'capture/video',
+                component: () => import('pages/CaptureVideoPage.vue'),
+            },
+            {
+                path: 'capture/new',
+                component: () => import('pages/NewCapturePage.vue'),
+            },
+            {
+                path: 'capture/processing/:id',
+                component: () => import('pages/ProcessingPage.vue'),
+            },
+            {
+                path: 'library',
+                component: () => import('pages/LibraryPage.vue'),
+            },
+            {
+                path: 'library/building/:id',
+                component: () => import('pages/BuildingPage.vue'),
+            },
+            {
+                path: 'library/building/:id/plan/2d',
+                component: () => import('pages/Plan2DPage.vue'),
+            },
+            {
+                path: 'library/building/:id/plan/3d',
+                component: () => import('pages/Plan3DPage.vue'),
+            },
+            {
+                path: 'library/building/:id/data',
+                component: () => import('pages/BuildingDataPage.vue'),
+            },
+            {
+                path: 'more',
+                component: () => import('pages/MorePage.vue'),
             },
             {
                 path: '/splat/:id',
@@ -19,6 +63,18 @@ const routes: RouteRecordRaw[] = [
             {
                 path: '/admin',
                 component: () => import('pages/AdminPage.vue'),
+            },
+        ],
+    },
+
+    // Advanced pipeline page, using its own duplicate layout (no tab bar)
+    {
+        path: '/advanced',
+        component: () => import('layouts/AdvancedLayout.vue'),
+        children: [
+            {
+                path: '',
+                component: () => import('pages/AdvancedPage.vue'),
             },
         ],
     },
