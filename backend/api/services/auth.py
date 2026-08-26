@@ -101,7 +101,7 @@ def require_admin(
 ) -> User:
     """Resolve the authenticated user and require the admin role.
 
-    Raises 403 when the user does not hold the \"admin\" realm role.
+    Raises 403 when the user does not hold the \"admin\" client role.
     """
 
     if not current_user.is_admin:
