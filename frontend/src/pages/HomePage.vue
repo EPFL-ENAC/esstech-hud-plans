@@ -1,38 +1,46 @@
 <template>
-    <q-page class="od-page od-page--scroll">
-        <section class="od-section">
-            <h2 class="od-section-title">Quick Actions</h2>
-            <div class="od-card-grid">
-                <div class="od-card" tabindex="0" @click="$router.push('/capture')">
-                    <div class="od-card__icon">
-                        <q-icon name="photo_camera" />
-                    </div>
-                    <div class="od-card__title">New Capture</div>
+    <q-page class="od-page od-page--scroll bg-white text-dark">
+        <section class="q-mb-lg">
+            <h2 class="od-h-section q-mb-md">Quick Actions</h2>
+            <div class="row q-col-gutter-md">
+                <div class="col-6">
+                    <q-card flat bordered class="cursor-pointer" @click="$router.push('/capture')">
+                        <q-card-section class="q-pa-md column">
+                            <div class="od-icon-box">
+                                <q-icon name="photo_camera" />
+                            </div>
+                            <div class="od-title q-mt-sm">New Capture</div>
+                        </q-card-section>
+                    </q-card>
                 </div>
-                <div class="od-card" tabindex="0" @click="$router.push('/library')">
-                    <div class="od-card__icon">
-                        <q-icon name="list" />
-                    </div>
-                    <div class="od-card__title">Library</div>
+                <div class="col-6">
+                    <q-card flat bordered class="cursor-pointer" @click="$router.push('/library')">
+                        <q-card-section class="q-pa-md column">
+                            <div class="od-icon-box">
+                                <q-icon name="list" />
+                            </div>
+                            <div class="od-title q-mt-sm">Library</div>
+                        </q-card-section>
+                    </q-card>
                 </div>
             </div>
         </section>
 
-        <section v-if="buildingsStore.inProgressBuildings.length" class="od-section">
-            <h2 class="od-section-title">In Progress</h2>
-            <div class="od-list od-list--flush">
+        <section v-if="buildingsStore.inProgressBuildings.length" class="q-mb-lg">
+            <h2 class="od-h-section q-mb-md">In Progress</h2>
+            <q-list class="od-list-flush">
                 <building-list-item
                     v-for="building in buildingsStore.inProgressBuildings"
                     :key="building.id"
                     :building="building"
                     @click="openBuilding(building.id)"
                 />
-            </div>
+            </q-list>
         </section>
 
-        <section class="od-section">
-            <h2 class="od-section-title">Recent</h2>
-            <div class="od-list od-list--flush">
+        <section>
+            <h2 class="od-h-section q-mb-md">Recent</h2>
+            <q-list class="od-list-flush">
                 <building-list-item
                     v-for="building in buildingsStore.readyBuildings"
                     :key="building.id"
@@ -40,7 +48,7 @@
                     show-chevron
                     @click="openBuilding(building.id)"
                 />
-            </div>
+            </q-list>
         </section>
     </q-page>
 </template>

@@ -1,9 +1,10 @@
 <template>
-    <q-page class="od-page od-page--scroll">
+    <q-page class="od-page od-page--scroll bg-white text-dark">
         <div class="od-topbar">
             <q-btn
                 flat
                 dense
+                color="primary"
                 icon="arrow_back"
                 label="Back"
                 no-caps
@@ -13,59 +14,75 @@
             <div class="od-topbar__title">{{ building?.name ?? 'Building' }}</div>
         </div>
 
-        <div class="od-placeholder od-placeholder--video">Source Video</div>
+        <div class="od-placeholder">Source Video</div>
 
-        <div class="od-detail-meta">
-            <span class="od-chip od-chip--primary">{{ building?.address }}</span>
-            <span class="od-chip od-chip--primary">{{ building?.size }}</span>
-            <span class="od-chip od-chip--primary">{{ building?.duration }}</span>
+        <div class="row wrap items-center q-gutter-sm q-mb-md">
+            <q-chip dense outline color="primary" class="bg-primary-soft">{{
+                building?.address
+            }}</q-chip>
+            <q-chip dense outline color="primary" class="bg-primary-soft">{{
+                building?.size
+            }}</q-chip>
+            <q-chip dense outline color="primary" class="bg-primary-soft">{{
+                building?.duration
+            }}</q-chip>
         </div>
 
-        <p class="od-detail-description">{{ building?.description }}</p>
+        <p class="text-muted q-mb-lg">{{ building?.description }}</p>
 
-        <section class="od-section">
-            <h2 class="od-section-title">Associated Plan</h2>
-            <div class="od-list">
-                <div
-                    class="od-list-row"
+        <section class="q-mb-lg">
+            <h2 class="od-h-section q-mb-lg">Associated Plan</h2>
+            <q-list class="q-gutter-y-md">
+                <q-item
+                    class="od-card-row"
+                    clickable
                     tabindex="0"
                     @click="$router.push(`/library/building/${buildingId}/plan/2d`)"
                 >
-                    <div class="od-plan-card__icon">
-                        <q-icon name="square" />
-                    </div>
-                    <div class="od-list-row__content">
-                        <div class="od-plan-card__title">2D Plan</div>
-                        <div class="od-plan-card__subtitle">
+                    <q-item-section avatar>
+                        <div class="od-icon-box">
+                            <floor-plan-thumb />
+                        </div>
+                    </q-item-section>
+                    <q-item-section class="q-gutter-y-xs">
+                        <div class="od-title">2D Plan</div>
+                        <div class="od-subtitle">
                             Top-down floor plan with measurements and annotations
                         </div>
-                    </div>
-                    <q-icon name="chevron_right" class="od-list-row__chevron" />
-                </div>
+                    </q-item-section>
+                    <q-item-section side>
+                        <q-icon name="chevron_right" size="20px" color="dark" />
+                    </q-item-section>
+                </q-item>
 
-                <div
-                    class="od-list-row"
+                <q-item
+                    class="od-card-row"
+                    clickable
                     tabindex="0"
                     @click="$router.push(`/library/building/${buildingId}/plan/3d`)"
                 >
-                    <div class="od-plan-card__icon">
-                        <q-icon name="view_in_ar" />
-                    </div>
-                    <div class="od-list-row__content">
-                        <div class="od-plan-card__title">3D Plan</div>
-                        <div class="od-plan-card__subtitle">
+                    <q-item-section avatar>
+                        <div class="od-icon-box">
+                            <q-icon name="view_in_ar" size="31px" />
+                        </div>
+                    </q-item-section>
+                    <q-item-section class="q-gutter-y-xs">
+                        <div class="od-title">3D Plan</div>
+                        <div class="od-subtitle">
                             Interactive 3D model with orbit and export controls
                         </div>
-                    </div>
-                    <q-icon name="chevron_right" class="od-list-row__chevron" />
-                </div>
-            </div>
+                    </q-item-section>
+                    <q-item-section side>
+                        <q-icon name="chevron_right" size="20px" color="dark" />
+                    </q-item-section>
+                </q-item>
+            </q-list>
         </section>
 
         <q-btn
             label="Create Building Data and Report"
             color="primary"
-            class="od-btn od-btn--primary full-width q-mb-md"
+            class="od-btn full-width q-mb-md"
             unelevated
             no-caps
             @click="$router.push(`/library/building/${buildingId}/data`)"
@@ -74,7 +91,8 @@
         <q-btn
             label="Delete Capture"
             outline
-            class="od-btn od-btn--outline-negative full-width"
+            color="negative"
+            class="od-btn full-width"
             unelevated
             no-caps
             @click="confirmDelete"
@@ -87,6 +105,7 @@ import { computed, watchEffect } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import { useBuildingsStore } from 'src/stores/buildings';
+import FloorPlanThumb from 'src/components/FloorPlanThumb.vue';
 
 const route = useRoute();
 const router = useRouter();

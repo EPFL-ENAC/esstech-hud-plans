@@ -1,10 +1,11 @@
 <template>
-    <q-page class="od-page od-page--scroll">
+    <q-page class="od-page od-page--scroll bg-white text-dark">
         <div class="od-topbar">
             <div class="od-topbar__title">Library</div>
             <q-btn
                 flat
                 no-caps
+                color="primary"
                 label="New Capture"
                 class="od-topbar__action"
                 @click="$router.push('/capture')"
@@ -22,13 +23,13 @@
             <q-tab name="map" label="Map" />
         </q-tabs>
 
-        <q-input v-model="search" outlined placeholder="Search" class="od-search">
+        <q-input v-model="search" outlined placeholder="Search" class="od-search q-my-md">
             <template #prepend>
                 <q-icon name="search" />
             </template>
         </q-input>
 
-        <div v-if="tab === 'list'" class="od-list od-list--flush">
+        <q-list v-if="tab === 'list'" class="od-list-flush">
             <building-list-item
                 v-for="building in filteredBuildings"
                 :key="building.id"
@@ -36,7 +37,7 @@
                 :show-chevron="building.status === 'ready'"
                 @click="openBuilding(building.id)"
             />
-        </div>
+        </q-list>
 
         <div v-else class="od-map" style="aspect-ratio: 3/4">
             <svg viewBox="0 0 320 420" class="fit" preserveAspectRatio="xMidYMid slice">

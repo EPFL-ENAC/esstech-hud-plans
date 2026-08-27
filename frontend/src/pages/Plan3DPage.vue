@@ -1,9 +1,10 @@
 <template>
-    <q-page class="od-page" style="display: flex; flex-direction: column">
+    <q-page class="od-page bg-white text-dark" style="display: flex; flex-direction: column">
         <div class="od-topbar">
             <q-btn
                 flat
                 dense
+                color="primary"
                 icon="arrow_back"
                 label="Back"
                 no-caps
@@ -22,10 +23,10 @@
             </svg>
 
             <div class="od-viewer-controls">
-                <button type="button" class="od-btn od-btn--icon od-btn--outline">
+                <button type="button" class="od-ctrl-btn">
                     <q-icon name="square" />
                 </button>
-                <button type="button" class="od-btn od-btn--icon od-btn--outline">
+                <button type="button" class="od-ctrl-btn">
                     <q-icon name="view_in_ar" />
                 </button>
             </div>
@@ -40,7 +41,7 @@
         <q-btn
             label="Export to interactive 2D plan view"
             color="primary"
-            class="od-btn od-btn--primary full-width q-mt-md"
+            class="od-btn full-width q-mt-md"
             unelevated
             no-caps
         />

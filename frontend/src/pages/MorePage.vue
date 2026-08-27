@@ -1,33 +1,44 @@
 <template>
-    <q-page class="od-page od-page--scroll">
-        <h1 class="od-page-title">More</h1>
+    <q-page class="od-page od-page--scroll bg-white text-dark">
+        <h1 class="od-h-page q-mb-lg">More</h1>
 
-        <div class="od-list">
-            <div class="od-list-row" tabindex="0">
-                <div class="od-list-row__content">
-                    <div class="od-list-row__title">Account</div>
-                </div>
-                <q-icon name="chevron_right" class="od-list-row__chevron" />
-            </div>
-            <div class="od-list-row" tabindex="0">
-                <div class="od-list-row__content">
-                    <div class="od-list-row__title">Settings</div>
-                </div>
-                <q-icon name="chevron_right" class="od-list-row__chevron" />
-            </div>
-            <div class="od-list-row" tabindex="0">
-                <div class="od-list-row__content">
-                    <div class="od-list-row__title">Help & Support</div>
-                </div>
-                <q-icon name="chevron_right" class="od-list-row__chevron" />
-            </div>
-            <div class="od-list-row" tabindex="0" @click="handleLogout">
-                <div class="od-list-row__content">
-                    <div class="od-list-row__title od-text-negative">Log out</div>
-                </div>
-                <q-icon name="logout" class="od-list-row__chevron od-text-negative" />
-            </div>
-        </div>
+        <q-list class="q-gutter-y-md">
+            <q-item class="od-card-row" tabindex="0">
+                <q-item-section>
+                    <div class="od-title">Account</div>
+                </q-item-section>
+                <q-item-section side>
+                    <q-icon name="chevron_right" size="20px" color="dark" />
+                </q-item-section>
+            </q-item>
+
+            <q-item class="od-card-row" tabindex="0">
+                <q-item-section>
+                    <div class="od-title">Settings</div>
+                </q-item-section>
+                <q-item-section side>
+                    <q-icon name="chevron_right" size="20px" color="dark" />
+                </q-item-section>
+            </q-item>
+
+            <q-item class="od-card-row" tabindex="0">
+                <q-item-section>
+                    <div class="od-title">Help &amp; Support</div>
+                </q-item-section>
+                <q-item-section side>
+                    <q-icon name="chevron_right" size="20px" color="dark" />
+                </q-item-section>
+            </q-item>
+
+            <q-item class="od-card-row text-negative" clickable tabindex="0" @click="handleLogout">
+                <q-item-section>
+                    <div class="od-title">Log out</div>
+                </q-item-section>
+                <q-item-section side>
+                    <q-icon name="logout" size="20px" />
+                </q-item-section>
+            </q-item>
+        </q-list>
     </q-page>
 </template>
 

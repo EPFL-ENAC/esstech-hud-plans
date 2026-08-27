@@ -1,147 +1,113 @@
 @use 'quasar.variables.scss' as *;
 
 // ---------------------------------------------------------------------------
-// Mixins
-// ===========================================================================
-// Shared, reusable property groups. Each mixin emits the same CSS it replaces,
-// but from one definition so pages reuse it instead of restating the rules.
-
-// Teal-outline square that hosts an icon or thumbnail.
-@mixin od-icon-box($size: 48px) {
-    width: $size;
-    height: $size;
-    flex-shrink: 0;
-    border: 1px solid var(--od-primary);
-    border-radius: var(--od-radius-sm);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--od-primary);
-}
-
-// White card chrome shared by cards and list rows: 1px border, rounded
-// corners, and the teal-on-hover surface lift.
-@mixin od-surfaced {
-    background-color: var(--od-bg);
-    border: 1px solid var(--od-border);
-    cursor: pointer;
-    transition:
-        background-color 0.15s ease,
-        border-color 0.15s ease;
-
-    &:hover,
-    &:focus-visible {
-        background-color: var(--od-surface);
-        border-color: var(--od-primary);
-    }
+// Global text scale
+// ---------------------------------------------------------------------------
+// The design's type sits ~15% below Quasar's 16px base. Scaling the root
+// font-size shrinks every rem-based size (Quasar typography and the od-
+// helpers below) while leaving px-based spacing and control heights intact.
+html {
+    font-size: 90%;
 }
 
 // ---------------------------------------------------------------------------
-// Global tokens
+// Custom color helpers
 // ---------------------------------------------------------------------------
-:root {
-    --od-bg: #ffffff;
-    --od-surface: #f2f2f7;
-    --od-fg: #1c1c1e;
-    --od-muted: #8e8e93;
-    --od-border: #e5e5ea;
-    --od-primary: #00a9a5;
-    --od-primary-light: #e6f6f6;
-    --od-negative: #ff3b30;
-    --od-radius-sm: 3px;
-    --od-radius-md: 4px;
-    --od-radius-lg: 5px;
-    --od-radius-pill: 9999px;
-    --od-space-xs: 4px;
-    --od-space-sm: 8px;
-    --od-space-md: 16px;
-    --od-space-lg: 24px;
-    --od-space-xl: 32px;
+// Quasar only generates .text-*/.bg-* classes for its brand and material
+// palettes. These three app tokens have no exact palette match, so we add them
+// using Quasar's documented !important helper pattern (see "Adding your own
+// colors" in the Quasar docs).
+.text-muted {
+    color: $od-muted !important;
 }
 
-// Respect the mobile notch / home indicator.
-.od-page {
-    background-color: var(--od-bg);
-    color: var(--od-fg);
-    padding: var(--od-space-md);
-    padding-top: calc(var(--od-space-md) + env(safe-area-inset-top));
-    padding-bottom: calc(var(--od-space-md) + env(safe-area-inset-bottom));
+.bg-surface {
+    background-color: $od-surface !important;
 }
 
-.od-page--scroll {
-    padding-bottom: calc(80px + env(safe-area-inset-bottom));
+.bg-negative-soft {
+    background-color: rgba(255, 59, 48, 0.08) !important;
 }
 
-.od-section {
-    margin-bottom: var(--od-space-lg);
+.bg-primary-soft {
+    background-color: rgba(0, 169, 165, 0.08) !important;
 }
 
-.od-section-title {
-    font-size: 22px;
-    font-weight: 700;
-    line-height: 1.2;
-    margin: 0 0 var(--od-space-md);
+// ---------------------------------------------------------------------------
+// Typography
+// ---------------------------------------------------------------------------
+// The design uses iOS type sizes that do not exist in Quasar's type scale, so
+// a few small heading/body helpers are kept. Sizes are relative (rem) so they
+// follow the global text scale set on the root element above.
+.od-title {
+    font-size: 1.0625rem;
+    font-weight: 600;
+    line-height: 1.3;
 }
 
-.od-page-title {
-    font-size: 24px;
+.od-subtitle {
+    font-size: 0.875rem;
+    color: $od-muted;
+    line-height: 1.4;
+}
+
+.od-h-page {
+    font-size: 1.5rem;
     font-weight: 700;
     line-height: 1.25;
-    margin: 0 0 var(--od-space-lg);
+}
+
+.od-h-section {
+    font-size: 1.375rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.od-h-form {
+    font-size: 1.125rem;
+    font-weight: 700;
+    line-height: 1.3;
+}
+
+// ---------------------------------------------------------------------------
+// Page shell
+// ---------------------------------------------------------------------------
+// Safe-area aware padding for the notch / home indicator. Background and text
+// color come from Quasar utilities (bg-white, text-dark).
+.od-page {
+    padding: $od-space-md;
+    padding-top: calc(#{$od-space-md} + env(safe-area-inset-top));
+    padding-bottom: calc(#{$od-space-md} + env(safe-area-inset-bottom));
+
+    &--scroll {
+        padding-bottom: calc(80px + env(safe-area-inset-bottom));
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Top navigation (back button + screen title)
 // ---------------------------------------------------------------------------
+// Sits flush to the viewport edges: the negative horizontal/top margins break
+// out of the .od-page padding, leaving only the safe-area inset above it.
 .od-topbar {
     position: sticky;
     top: 0;
     z-index: 20;
     display: flex;
     align-items: center;
-    gap: var(--od-space-sm);
+    gap: $od-space-sm;
     min-height: 52px;
-    padding: var(--od-space-sm) var(--od-space-md);
-    background-color: var(--od-bg);
-    border-bottom: 1px solid var(--od-border);
-    margin-bottom: var(--od-space-md);
-    /* Break out of the od-page padding so the header sits flush to the
-       viewport edges (left, right, and top). The -16px negates the page's
-       16px padding, leaving only the safe-area inset above the header. */
-    margin-left: calc(var(--od-space-md) * -1);
-    margin-right: calc(var(--od-space-md) * -1);
-    margin-top: calc(var(--od-space-md) * -1);
-}
-
-// Both flat header buttons (Back on the left, New Capture on the right).
-.od-topbar__back,
-.od-topbar__action {
-    color: var(--od-primary);
-    padding: 8px 12px;
-    min-height: 44px;
-
-    .block {
-        font-size: 16px;
-        font-weight: 500;
-        letter-spacing: 0;
-    }
-}
-
-.od-topbar__back {
-    margin-right: var(--od-space-sm);
-    margin-left: calc(var(--od-space-sm) * -1);
-
-    .q-btn__content {
-        gap: 4px;
-    }
-
-    .q-icon {
-        font-size: 18px;
-    }
+    padding: $od-space-sm $od-space-md;
+    background-color: $od-background;
+    border-bottom: 1px solid $od-border;
+    margin-top: calc(#{$od-space-md} * -1);
+    margin-left: calc(#{$od-space-md} * -1);
+    margin-right: calc(#{$od-space-md} * -1);
+    margin-bottom: $od-space-md;
 }
 
 .od-topbar__title {
-    font-size: 18px;
+    font-size: 1.125rem;
     font-weight: 600;
     line-height: 1.3;
     white-space: nowrap;
@@ -149,277 +115,184 @@
     text-overflow: ellipsis;
 }
 
+.od-topbar__back,
+.od-topbar__action {
+    min-height: 44px;
+    padding: 8px 12px;
+    font-size: 1.05rem;
+}
+
+.od-topbar__back {
+    margin-right: $od-space-sm;
+    margin-left: calc(#{$od-space-sm} * -1);
+
+    .q-btn__content {
+        gap: 4px;
+    }
+
+    .q-icon {
+        font-size: 1.125rem;
+    }
+}
+
 .od-topbar__action {
     margin-left: auto;
-    margin-right: calc(var(--od-space-sm) * -1);
-}
-
-// ---------------------------------------------------------------------------
-// Bottom tab bar
-// ---------------------------------------------------------------------------
-.od-bottom-tabs {
-    background-color: var(--od-bg);
-    border-top: 1px solid var(--od-border);
-
-    .q-tabs {
-        height: 64px;
-        padding-bottom: env(safe-area-inset-bottom);
-    }
-
-    .q-tab {
-        min-height: 64px;
-        color: var(--od-muted);
-
-        &__icon {
-            font-size: 24px;
-            margin-bottom: 2px;
-        }
-
-        &__label {
-            font-size: 12px;
-            font-weight: 500;
-            line-height: 1.2;
-        }
-
-        &.q-tab--active {
-            color: var(--od-primary);
-        }
-    }
-
-    .q-tab__indicator {
-        display: none;
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Cards
-// ---------------------------------------------------------------------------
-.od-card-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: var(--od-space-md);
-}
-
-.od-card {
-    @include od-surfaced;
-    border-radius: var(--od-radius-md);
-    padding: var(--od-space-md);
-    display: flex;
-    flex-direction: column;
-    gap: var(--od-space-sm);
-}
-
-.od-card__icon,
-.od-plan-card__icon {
-    @include od-icon-box(48px);
-    font-size: 24px;
-}
-
-.od-card__title,
-.od-plan-card__title {
-    font-size: 16px;
-    font-weight: 600;
-    line-height: 1.3;
-}
-
-// ---------------------------------------------------------------------------
-// List rows
-// ---------------------------------------------------------------------------
-.od-list {
-    display: flex;
-    flex-direction: column;
-    gap: var(--od-space-md);
-}
-
-// Building lists (Home Recent / In Progress, Library): full-width rows flush to
-// the screen edges with no vertical gap, separated only by a hairline.
-.od-list--flush {
-    gap: 0;
-    margin-left: calc(var(--od-space-md) * -1);
-    margin-right: calc(var(--od-space-md) * -1);
-}
-
-.od-list-row {
-    @include od-surfaced;
-    border-radius: var(--od-radius-md);
-    display: flex;
-    align-items: center;
-    gap: var(--od-space-md);
-    padding: var(--od-space-md);
-}
-
-// Building list rows: strip card chrome (border box, rounded corners) so rows
-// sit edge-to-edge. Each row gets a top hairline; the shared line between two
-// rows is the lower row's top border, so no edge is ever doubled to 2px. The
-// last row also closes with a bottom hairline.
-.od-list-row--building {
-    border: none;
-    border-radius: 0;
-    border-top: 1px solid var(--od-border);
-}
-
-// Hover / focus: color this row's own top border, the separator below it (the
-// next row's top border), and the last row's closing bottom border, so the
-// hovered row shows a colored rule on both sides without any doubled line.
-.od-list-row--building:hover,
-.od-list-row--building:focus-visible {
-    border-top-color: var(--od-primary);
-}
-
-.od-list-row--building:hover + .od-list-row--building {
-    border-top-color: var(--od-primary);
-}
-
-.od-list-row--building:last-child {
-    border-bottom: 1px solid var(--od-border);
-
-    &:hover,
-    &:focus-visible {
-        border-bottom-color: var(--od-primary);
-    }
-}
-
-.od-list-row__thumb {
-    @include od-icon-box(64px);
-}
-
-.od-list-row__content {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--od-space-xs);
-}
-
-.od-list-row__title {
-    font-size: 17px;
-    font-weight: 600;
-    line-height: 1.3;
-}
-
-.od-list-row__meta {
-    font-size: 14px;
-    color: var(--od-muted);
-    line-height: 1.4;
-}
-
-.od-list-row__chevron {
-    color: var(--od-fg);
-    font-size: 20px;
-}
-
-// ---------------------------------------------------------------------------
-// Chips
-// ---------------------------------------------------------------------------
-.od-chip {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 4px 12px;
-    border-radius: var(--od-radius-pill);
-    font-size: 13px;
-    font-weight: 500;
-    line-height: 1.3;
-    border: 1px solid currentColor;
-    background-color: transparent;
-}
-
-// Ready and neutral "primary" chips share the same teal treatment.
-.od-chip--ready,
-.od-chip--primary {
-    color: var(--od-primary);
-    border-color: var(--od-primary);
-    background-color: var(--od-primary-light);
-}
-
-.od-chip--processing {
-    color: var(--od-negative);
-    border-color: var(--od-negative);
-    background-color: rgba(255, 59, 48, 0.08);
+    margin-right: calc(#{$od-space-sm} * -1);
 }
 
 // ---------------------------------------------------------------------------
 // Buttons
 // ---------------------------------------------------------------------------
+// Quasar q-btn props (color, outline, unelevated, no-caps) handle the look;
+// this only sets the iOS control height and label weight.
 .od-btn {
-    border-radius: var(--od-radius-sm);
     min-height: 48px;
-    font-size: 16px;
+    font-size: 1rem;
     font-weight: 500;
-    text-transform: none;
-    letter-spacing: 0;
-}
-
-.od-btn--primary {
-    background-color: var(--od-primary);
-    color: #ffffff;
-
-    &:hover,
-    &:focus-visible {
-        background-color: #008f8b;
-    }
-}
-
-.od-btn--outline {
-    border: 1px solid var(--od-border);
-    color: var(--od-fg);
-    background-color: transparent;
-
-    &:hover,
-    &:focus-visible {
-        background-color: var(--od-surface);
-    }
-}
-
-.od-btn--outline-negative {
-    border: 1px solid var(--od-negative);
-    color: var(--od-negative);
-    background-color: transparent;
-
-    &:hover,
-    &:focus-visible {
-        background-color: rgba(255, 59, 48, 0.08);
-    }
-}
-
-.od-btn--icon {
-    width: 40px;
-    height: 40px;
-    min-height: 40px;
-    padding: 0;
-    border-radius: var(--od-radius-pill);
+    border-radius: $od-radius-sm;
 }
 
 // ---------------------------------------------------------------------------
-// Form fields (input, select, textarea share the same control skin)
+// Icon box (teal-outlined square that hosts an icon or thumbnail)
 // ---------------------------------------------------------------------------
-.od-input,
-.od-select,
-.od-textarea {
+.od-icon-box {
+    width: 48px;
+    height: 48px;
+    flex-shrink: 0;
+    border: 1px solid var(--q-primary);
+    border-radius: $od-radius-sm;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--q-primary);
+    font-size: 1.5rem;
+
+    &--lg {
+        width: 64px;
+        height: 64px;
+        font-size: 1.75rem;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// List rows
+// ---------------------------------------------------------------------------
+// Card rows: bordered, rounded tiles that lift on hover (q-item structure).
+.od-card-row {
+    background-color: $od-background;
+    border: 1px solid $od-border;
+    border-radius: $od-radius-md;
+    padding: $od-space-md;
+    align-items: center;
+    cursor: pointer;
+    transition:
+        background-color 0.15s ease,
+        border-color 0.15s ease;
+
+    &:hover,
+    &:focus-visible {
+        background-color: $od-hover;
+        border-color: var(--q-primary);
+    }
+}
+
+// Building rows: edge-to-edge rows separated by a single hairline. Each row
+// draws its own top border; the last row closes with a bottom border.
+// Building lists break out of the page padding so the hairlines reach the
+// screen edges.
+.od-list-flush {
+    margin-left: calc(#{$od-space-md} * -1);
+    margin-right: calc(#{$od-space-md} * -1);
+}
+
+.od-row-building {
+    padding: $od-space-md;
+    align-items: center;
+    cursor: pointer;
+    background-color: $od-background;
+    border-top: 1px solid $od-border;
+    transition:
+        background-color 0.15s ease,
+        border-color 0.15s ease;
+
+    &:hover,
+    &:focus-visible {
+        background-color: $od-hover;
+        border-top-color: var(--q-primary);
+    }
+
+    &:hover + & {
+        border-top-color: var(--q-primary);
+    }
+
+    &:last-child {
+        border-bottom: 1px solid $od-border;
+
+        &:hover,
+        &:focus-visible {
+            border-bottom-color: var(--q-primary);
+        }
+    }
+}
+
+// Quasar renders a q-focus-helper tint on hover (currentColor at 15%). On our
+// neutral rows and cards currentColor is the dark text color, so that tint
+// reads as a dark gray sitting on top of the light hover set above. Suppress
+// the hover tint for interactive rows and cards only. The keyboard focus ring
+// (.q-focusable:focus) and the button/tab tints are left untouched.
+body.desktop {
+    .od-card-row:hover > .q-focus-helper,
+    .od-row-building:hover > .q-focus-helper {
+        opacity: 0;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Placeholder
+// ---------------------------------------------------------------------------
+.od-placeholder {
+    width: 100%;
+    aspect-ratio: 16 / 10;
+    background-color: $od-surface;
+    border: 1px solid $od-border;
+    border-radius: $od-radius-md;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: $od-muted;
+    font-size: 1rem;
+    font-weight: 500;
+    margin-bottom: $od-space-md;
+}
+
+// ---------------------------------------------------------------------------
+// Form fields (input, select, textarea share the same compact skin)
+// ---------------------------------------------------------------------------
+.od-field {
     .q-field__control {
-        border-radius: var(--od-radius-sm);
-        border: 1px solid var(--od-border);
-        background-color: var(--od-bg);
+        border-radius: $od-radius-sm;
+        border: 1px solid $od-border;
+        background-color: $od-background;
         min-height: 48px;
     }
 
     .q-field__native,
     .q-field__input {
-        color: var(--od-fg);
-        font-size: 16px;
+        color: $od-text;
+        font-size: 1rem;
     }
 
     .q-field__label {
-        color: var(--od-muted);
-        font-size: 16px;
+        color: $od-muted;
+        font-size: 1rem;
     }
 
     &.q-field--focused .q-field__control {
-        border-color: var(--od-primary);
+        border-color: var(--q-primary);
     }
 }
 
-.od-textarea {
+.od-field--textarea {
     .q-field__control {
         min-height: 96px;
         align-items: flex-start;
@@ -431,25 +304,58 @@
 }
 
 // ---------------------------------------------------------------------------
-// Placeholders
+// Library search
 // ---------------------------------------------------------------------------
-.od-placeholder {
-    width: 100%;
-    aspect-ratio: 16 / 10;
-    background-color: var(--od-surface);
-    border: 1px solid var(--od-border);
-    border-radius: var(--od-radius-md);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--od-muted);
-    font-size: 16px;
-    font-weight: 500;
-    margin-bottom: var(--od-space-md);
+.od-search {
+    .q-field__control {
+        border-radius: $od-radius-pill;
+        border: 1px solid $od-border;
+        background-color: $od-background;
+        min-height: 44px;
+    }
+
+    .q-field__native,
+    .q-field__input {
+        color: $od-text;
+        font-size: 1rem;
+    }
+
+    .q-field__prepend {
+        color: $od-muted;
+    }
 }
 
-.od-placeholder--map {
-    aspect-ratio: 3 / 4;
+// ---------------------------------------------------------------------------
+// Bottom tab bar
+// ---------------------------------------------------------------------------
+.od-bottom-tabs {
+    .q-tabs {
+        height: 64px;
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+
+    .q-tab {
+        min-height: 64px;
+
+        &__icon {
+            font-size: 1.5rem;
+            margin-bottom: 2px;
+        }
+
+        &__label {
+            font-size: 0.75rem;
+            font-weight: 500;
+            line-height: 1.2;
+        }
+
+        &:not(.q-tab--active) {
+            color: $od-muted;
+        }
+    }
+
+    .q-tab__indicator {
+        display: none;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -457,61 +363,36 @@
 // ---------------------------------------------------------------------------
 .od-library-tabs {
     .q-tabs {
-        border-bottom: 1px solid var(--od-border);
+        border-bottom: 1px solid $od-border;
     }
 
     .q-tab {
         min-height: 44px;
-        color: var(--od-muted);
-        padding: 0 var(--od-space-lg);
+        color: $od-muted;
+        padding: 0 $od-space-lg;
 
         &__label {
-            font-size: 16px;
+            font-size: 1rem;
             font-weight: 500;
-        }
-
-        &.q-tab--active {
-            color: var(--od-fg);
         }
     }
 
     .q-tab__indicator {
         height: 2px;
-        background-color: var(--od-primary);
-    }
-}
-
-.od-search {
-    margin: var(--od-space-md) 0;
-
-    .q-field__control {
-        border-radius: var(--od-radius-pill);
-        border: 1px solid var(--od-border);
-        background-color: var(--od-bg);
-        min-height: 44px;
-    }
-
-    .q-field__native,
-    .q-field__input {
-        color: var(--od-fg);
-        font-size: 16px;
-    }
-
-    .q-field__prepend {
-        color: var(--od-muted);
+        background-color: var(--q-primary);
     }
 }
 
 // ---------------------------------------------------------------------------
-// Map marker
+// Map
 // ---------------------------------------------------------------------------
 .od-map {
     position: relative;
     width: 100%;
-    border-radius: var(--od-radius-md);
+    border-radius: $od-radius-md;
     overflow: hidden;
-    background-color: var(--od-surface);
-    border: 1px solid var(--od-border);
+    background-color: $od-surface;
+    border: 1px solid $od-border;
 }
 
 .od-map__marker {
@@ -523,12 +404,12 @@
 }
 
 .od-map__label {
-    background-color: var(--od-primary);
+    background-color: var(--q-primary);
     color: #ffffff;
-    font-size: 13px;
+    font-size: 0.8125rem;
     font-weight: 600;
     padding: 6px 12px;
-    border-radius: var(--od-radius-sm);
+    border-radius: $od-radius-sm;
     white-space: nowrap;
 }
 
@@ -537,7 +418,7 @@
     height: 0;
     border-left: 8px solid transparent;
     border-right: 8px solid transparent;
-    border-top: 10px solid var(--od-primary);
+    border-top: 10px solid var(--q-primary);
     margin-top: -2px;
 }
 
@@ -547,9 +428,9 @@
     left: 50%;
     transform: translateX(-50%);
     background-color: #ffffff;
-    border: 1px solid var(--od-border);
-    border-radius: var(--od-radius-sm);
-    padding: var(--od-space-sm) var(--od-space-md);
+    border: 1px solid $od-border;
+    border-radius: $od-radius-sm;
+    padding: $od-space-sm $od-space-md;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
     text-align: center;
     white-space: nowrap;
@@ -557,37 +438,14 @@
 }
 
 .od-map__callout-title {
-    font-size: 15px;
+    font-size: 0.9375rem;
     font-weight: 600;
 }
 
 .od-map__callout-status {
-    font-size: 12px;
-    color: var(--od-negative);
+    font-size: 0.75rem;
+    color: var(--q-negative);
     margin-top: 2px;
-}
-
-// ---------------------------------------------------------------------------
-// Detail page
-// ---------------------------------------------------------------------------
-.od-detail-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--od-space-sm);
-    margin-bottom: var(--od-space-md);
-}
-
-.od-detail-description {
-    font-size: 15px;
-    line-height: 1.5;
-    color: var(--od-muted);
-    margin-bottom: var(--od-space-lg);
-}
-
-.od-plan-card__subtitle {
-    font-size: 14px;
-    color: var(--od-muted);
-    line-height: 1.4;
 }
 
 // ---------------------------------------------------------------------------
@@ -599,7 +457,7 @@
     flex: 1;
     min-height: 320px;
     background-color: #c7c7cc;
-    border-radius: var(--od-radius-md);
+    border-radius: $od-radius-md;
     overflow: hidden;
     display: flex;
     align-items: center;
@@ -609,10 +467,10 @@
 .od-plan-toolbar {
     display: flex;
     justify-content: center;
-    gap: var(--od-space-xl);
-    padding: var(--od-space-sm) 0;
-    border-bottom: 1px solid var(--od-border);
-    margin-bottom: var(--od-space-md);
+    gap: $od-space-xl;
+    padding: $od-space-sm 0;
+    border-bottom: 1px solid $od-border;
+    margin-bottom: $od-space-md;
 }
 
 .od-tool-btn {
@@ -620,12 +478,12 @@
     flex-direction: column;
     align-items: center;
     gap: 2px;
-    padding: var(--od-space-sm);
-    color: var(--od-muted);
+    padding: $od-space-sm;
+    color: $od-muted;
     background: transparent;
     border: none;
     cursor: pointer;
-    border-radius: var(--od-radius-sm);
+    border-radius: $od-radius-sm;
     transition:
         color 0.15s ease,
         background-color 0.15s ease;
@@ -633,33 +491,49 @@
     &.is-active,
     &:hover,
     &:focus-visible {
-        color: var(--od-primary);
-        background-color: var(--od-primary-light);
+        color: var(--q-primary);
+        background-color: var(--q-secondary);
     }
 }
 
 .od-tool-btn__icon {
-    font-size: 22px;
+    font-size: 1.375rem;
 }
 
 .od-tool-btn__label {
-    font-size: 12px;
+    font-size: 0.75rem;
     font-weight: 500;
 }
 
 .od-viewer-controls {
     position: absolute;
-    top: var(--od-space-md);
-    right: var(--od-space-md);
+    top: $od-space-md;
+    right: $od-space-md;
     display: flex;
-    gap: var(--od-space-sm);
+    gap: $od-space-sm;
     z-index: 1;
+}
+
+.od-ctrl-btn {
+    width: 40px;
+    height: 40px;
+    min-height: 40px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid $od-border;
+    background-color: transparent;
+    color: $od-text;
+
+    &:hover,
+    &:focus-visible {
+        background-color: $od-hover;
+    }
 }
 
 .od-axis {
     position: absolute;
-    top: var(--od-space-md);
-    left: var(--od-space-md);
+    top: $od-space-md;
+    left: $od-space-md;
     width: 40px;
     height: 40px;
     z-index: 1;
@@ -669,30 +543,20 @@
     width: 60%;
     max-width: 280px;
     fill: rgba(0, 169, 165, 0.45);
-    stroke: var(--od-primary);
+    stroke: var(--q-primary);
     stroke-width: 1;
 }
 
 // ---------------------------------------------------------------------------
-// Building data form
+// Building data form (material chips)
 // ---------------------------------------------------------------------------
-.od-form-section {
-    margin-bottom: var(--od-space-lg);
-
-    &__title {
-        font-size: 18px;
-        font-weight: 700;
-        margin: 0 0 var(--od-space-md);
-    }
-}
-
 .od-material-chips {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--od-space-sm);
-    padding: var(--od-space-sm);
-    border: 1px solid var(--od-border);
-    border-radius: var(--od-radius-sm);
+    gap: $od-space-sm;
+    padding: $od-space-sm;
+    border: 1px solid $od-border;
+    border-radius: $od-radius-sm;
     min-height: 48px;
     align-items: center;
 }
@@ -700,12 +564,12 @@
 .od-material-chip {
     display: inline-flex;
     align-items: center;
-    gap: var(--od-space-sm);
+    gap: $od-space-sm;
     padding: 4px 10px;
-    border: 1px solid var(--od-border);
-    border-radius: var(--od-radius-sm);
-    background-color: var(--od-bg);
-    font-size: 14px;
+    border: 1px solid $od-border;
+    border-radius: $od-radius-sm;
+    background-color: $od-background;
+    font-size: 0.875rem;
     font-weight: 500;
 }
 
@@ -713,16 +577,16 @@
     width: 20px;
     height: 20px;
     border-radius: 4px;
-    border: 1px solid var(--od-border);
+    border: 1px solid $od-border;
 }
 
 .od-material-chip__remove {
-    color: var(--od-muted);
+    color: $od-muted;
     cursor: pointer;
-    font-size: 16px;
+    font-size: 1rem;
 
     &:hover {
-        color: var(--od-fg);
+        color: $od-text;
     }
 }
 
@@ -735,73 +599,33 @@
     align-items: center;
     text-align: center;
 
-    // The page container is a centered column flex, which would otherwise
-    // shrink the sticky topbar to its content width. Stretch it so the
-    // header spans the full viewport width like on every other screen.
+    // The page is a centered column flex; stretch the sticky topbar so it
+    // spans the full width like on every other screen.
     > .od-topbar {
         align-self: stretch;
     }
 }
 
-.od-processing-page__progress {
-    margin: var(--od-space-lg) 0 var(--od-space-xl);
-}
-
-.od-processing-page__percent {
-    font-size: 28px;
+.od-processing-percent {
+    font-size: 1.75rem;
     font-weight: 600;
-    color: var(--od-primary);
+    color: var(--q-primary);
     line-height: 1;
 }
 
-.od-processing-page__title {
-    font-size: 22px;
-    font-weight: 700;
-    line-height: 1.25;
-    margin: 0 0 var(--od-space-sm);
-}
-
-.od-processing-page__size {
-    font-size: 16px;
-    color: var(--od-muted);
+.od-processing-size {
+    font-size: 1rem;
+    color: $od-muted;
     line-height: 1.4;
-    margin: 0 0 var(--od-space-xl);
 }
 
 .od-processing-info {
     width: 100%;
-    background-color: var(--od-primary-light);
-    color: var(--od-primary);
-    border-radius: var(--od-radius-sm);
-    padding: var(--od-space-md);
-    font-size: 15px;
+    background-color: var(--q-secondary);
+    color: var(--q-primary);
+    border-radius: $od-radius-sm;
+    padding: $od-space-md;
+    font-size: 0.9375rem;
     line-height: 1.5;
     text-align: left;
-}
-
-// ---------------------------------------------------------------------------
-// Utility
-// ---------------------------------------------------------------------------
-.od-text-primary {
-    color: var(--od-primary);
-}
-
-.od-text-negative {
-    color: var(--od-negative);
-}
-
-.od-text-muted {
-    color: var(--od-muted);
-}
-
-.od-flex-1 {
-    flex: 1;
-}
-
-.od-gap-sm {
-    gap: var(--od-space-sm);
-}
-
-.od-gap-md {
-    gap: var(--od-space-md);
 }

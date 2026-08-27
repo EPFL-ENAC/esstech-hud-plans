@@ -1,9 +1,10 @@
 <template>
-    <q-page class="od-page" style="display: flex; flex-direction: column">
+    <q-page class="od-page bg-white text-dark" style="display: flex; flex-direction: column">
         <div class="od-topbar">
             <q-btn
                 flat
                 dense
+                color="primary"
                 icon="arrow_back"
                 label="Back"
                 no-caps
@@ -29,7 +30,7 @@
 
         <div class="od-plan-viewer">
             <svg viewBox="0 0 320 320" class="od-2d-plan">
-                <g fill="none" stroke="var(--od-primary)" stroke-width="4" stroke-linecap="square">
+                <g fill="none" stroke="var(--q-primary)" stroke-width="4" stroke-linecap="square">
                     <path
                         d="M40 40 h240 v40 h-80 v40 h-40 v-40 h-120 v120 h120 v-60 h40 v60 h120 v-160 h-80"
                     />

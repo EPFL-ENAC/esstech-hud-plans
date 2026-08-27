@@ -4,7 +4,7 @@
             <router-view />
         </q-page-container>
 
-        <q-footer bordered class="od-bottom-tabs">
+        <q-footer bordered class="od-bottom-tabs bg-white">
             <q-tabs no-caps indicator-color="transparent" active-color="primary" align="justify">
                 <q-route-tab to="/home" icon="home" label="Home" />
                 <q-route-tab to="/capture" icon="photo_camera" label="Capture" />

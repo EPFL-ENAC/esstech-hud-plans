@@ -4,22 +4,31 @@
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
         class="floor-plan-thumb"
+        aria-hidden="true"
     >
-        <rect x="8" y="8" width="48" height="48" rx="2" stroke="currentColor" stroke-width="2" />
-        <path
-            d="M8 24h20v-8M28 24v20h12V32h16"
+        <!-- Outer footprint -->
+        <rect
+            x="13"
+            y="13"
+            width="38"
+            height="38"
+            rx="2"
             stroke="currentColor"
-            stroke-width="2"
-            fill="none"
+            stroke-width="3"
+            stroke-linejoin="round"
         />
-        <path d="M20 24v20M36 32v12" stroke="currentColor" stroke-width="2" />
+        <!-- Vertical divider wall (right room vs left rooms), door gap near the bottom -->
+        <line x1="32" y1="13" x2="32" y2="40" stroke="currentColor" stroke-width="3" />
+        <line x1="32" y1="46" x2="32" y2="51" stroke="currentColor" stroke-width="3" />
+        <!-- Horizontal wall splitting the left rooms, door gap on the left side -->
+        <line x1="20" y1="33" x2="32" y2="33" stroke="currentColor" stroke-width="3" />
     </svg>
 </template>
 
 <style scoped>
 .floor-plan-thumb {
-    width: 40px;
-    height: 40px;
+    width: 44px;
+    height: 44px;
     color: currentColor;
 }
 </style>

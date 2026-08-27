@@ -1,20 +1,32 @@
 <template>
-    <div class="od-list-row od-list-row--building" tabindex="0" @click="emit('click')">
-        <div class="od-list-row__thumb">
-            <floor-plan-thumb />
-        </div>
-        <div class="od-list-row__content">
-            <div class="od-list-row__title">{{ building.name }}</div>
-            <div class="od-list-row__meta">recorded {{ building.recordedDate }}</div>
-            <div>
-                <span v-if="building.status === 'processing'" class="od-chip od-chip--processing">
-                    Processing {{ building.progress }}%
-                </span>
-                <span v-else class="od-chip od-chip--ready">ready</span>
+    <q-item class="od-row-building" clickable tabindex="0" @click="emit('click')">
+        <q-item-section avatar>
+            <div class="od-icon-box od-icon-box--lg">
+                <floor-plan-thumb />
             </div>
-        </div>
-        <q-icon v-if="showChevron" name="chevron_right" class="od-list-row__chevron" />
-    </div>
+        </q-item-section>
+
+        <q-item-section class="q-gutter-y-xs">
+            <div class="od-title">{{ building.name }}</div>
+            <div class="od-subtitle">recorded {{ building.recordedDate }}</div>
+            <div>
+                <q-chip
+                    v-if="building.status === 'processing'"
+                    dense
+                    outline
+                    color="negative"
+                    class="bg-negative-soft"
+                >
+                    Processing {{ building.progress }}%
+                </q-chip>
+                <q-chip v-else dense outline color="primary" class="bg-secondary">ready</q-chip>
+            </div>
+        </q-item-section>
+
+        <q-item-section v-if="showChevron" side>
+            <q-icon name="chevron_right" size="20px" color="dark" />
+        </q-item-section>
+    </q-item>
 </template>
 
 <script setup lang="ts">

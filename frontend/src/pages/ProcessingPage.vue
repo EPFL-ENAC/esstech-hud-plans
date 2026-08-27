@@ -1,9 +1,10 @@
 <template>
-    <q-page class="od-page od-page--scroll od-processing-page">
+    <q-page class="od-page od-page--scroll od-processing-page bg-white text-dark">
         <div class="od-topbar">
             <q-btn
                 flat
                 dense
+                color="primary"
                 icon="arrow_back"
                 label="Back"
                 no-caps
@@ -13,7 +14,7 @@
             <div class="od-topbar__title">Processing</div>
         </div>
 
-        <div class="od-processing-page__progress">
+        <div class="q-mt-lg" style="margin-bottom: 32px">
             <q-circular-progress
                 show-value
                 :value="building?.progress ?? 0"
@@ -21,19 +22,21 @@
                 :thickness="0.08"
                 color="primary"
                 track-color="grey-3"
-                class="od-processing-page__circular"
             >
-                <span class="od-processing-page__percent"> {{ building?.progress ?? 0 }}% </span>
+                <span class="od-processing-percent">{{ building?.progress ?? 0 }}%</span>
             </q-circular-progress>
         </div>
 
-        <h1 class="od-processing-page__title">Processing - {{ building?.name ?? 'Building' }}</h1>
-        <p class="od-processing-page__size">{{ uploadedSize }} / {{ totalSize }}</p>
+        <h1 class="od-h-section q-mb-sm">Processing - {{ building?.name ?? 'Building' }}</h1>
+        <p class="od-processing-size" style="margin-bottom: 32px">
+            {{ uploadedSize }} / {{ totalSize }}
+        </p>
 
         <q-btn
             label="Cancel Processing"
             outline
-            class="od-btn od-btn--outline-negative full-width q-mb-md"
+            color="negative"
+            class="od-btn full-width q-mb-md"
             unelevated
             no-caps
             @click="confirmCancel"

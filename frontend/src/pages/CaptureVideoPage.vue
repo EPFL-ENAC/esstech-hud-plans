@@ -1,9 +1,10 @@
 <template>
-    <q-page class="od-page od-page--scroll">
+    <q-page class="od-page od-page--scroll bg-white text-dark">
         <div class="od-topbar">
             <q-btn
                 flat
                 dense
+                color="primary"
                 icon="arrow_back"
                 label="Back"
                 no-caps
@@ -13,57 +14,29 @@
             <div class="od-topbar__title">Capture video</div>
         </div>
 
-        <div class="od-placeholder od-placeholder--camera">View of Camera</div>
+        <div class="od-placeholder">View of Camera</div>
 
-        <section class="od-section">
-            <h2 class="od-section-title">Tips for best results</h2>
-            <div class="od-list">
-                <div class="od-list-row">
-                    <div class="od-plan-card__icon">
-                        <q-icon name="photo_camera" />
-                    </div>
-                    <div class="od-list-row__content">
-                        <div class="od-list-row__title">Use wide-angle lens</div>
-                        <div class="od-list-row__meta">Set to 0.5x or widest available</div>
-                    </div>
-                </div>
-
-                <div class="od-list-row">
-                    <div class="od-plan-card__icon">
-                        <q-icon name="timer" />
-                    </div>
-                    <div class="od-list-row__content">
-                        <div class="od-list-row__title">Use wide-angle lens</div>
-                        <div class="od-list-row__meta">Set to 0.5x or widest available</div>
-                    </div>
-                </div>
-
-                <div class="od-list-row">
-                    <div class="od-plan-card__icon">
-                        <q-icon name="swap_vert" />
-                    </div>
-                    <div class="od-list-row__content">
-                        <div class="od-list-row__title">Use wide-angle lens</div>
-                        <div class="od-list-row__meta">Set to 0.5x or widest available</div>
-                    </div>
-                </div>
-
-                <div class="od-list-row">
-                    <div class="od-plan-card__icon">
-                        <q-icon name="fullscreen" />
-                    </div>
-                    <div class="od-list-row__content">
-                        <div class="od-list-row__title">Use wide-angle lens</div>
-                        <div class="od-list-row__meta">Set to 0.5x or widest available</div>
-                    </div>
-                </div>
-            </div>
+        <section class="q-mb-lg">
+            <h2 class="od-h-section q-mb-lg">Tips for best results</h2>
+            <q-list class="q-gutter-y-md">
+                <q-item v-for="tip in tips" :key="tip.icon" class="od-card-row">
+                    <q-item-section avatar>
+                        <div class="od-icon-box">
+                            <q-icon :name="tip.icon" />
+                        </div>
+                    </q-item-section>
+                    <q-item-section class="q-gutter-y-xs">
+                        <div class="od-title">{{ tip.title }}</div>
+                        <div class="od-subtitle">{{ tip.meta }}</div>
+                    </q-item-section>
+                </q-item>
+            </q-list>
         </section>
 
         <q-btn
             label="Start Recording"
             color="primary"
-            class="od-btn od-btn--primary full-width"
+            class="od-btn full-width"
             unelevated
             no-caps
         />
@@ -71,5 +44,12 @@
 </template>
 
 <script setup lang="ts">
-//
+import { ref } from 'vue';
+
+const tips = ref([
+    { icon: 'photo_camera', title: 'Use wide-angle lens', meta: 'Set to 0.5x or widest available' },
+    { icon: 'timer', title: 'Use wide-angle lens', meta: 'Set to 0.5x or widest available' },
+    { icon: 'swap_vert', title: 'Use wide-angle lens', meta: 'Set to 0.5x or widest available' },
+    { icon: 'fullscreen', title: 'Use wide-angle lens', meta: 'Set to 0.5x or widest available' },
+]);
 </script>

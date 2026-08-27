@@ -1,9 +1,10 @@
 <template>
-    <q-page class="od-page od-page--scroll">
+    <q-page class="od-page od-page--scroll bg-white text-dark">
         <div class="od-topbar">
             <q-btn
                 flat
                 dense
+                color="primary"
                 icon="arrow_back"
                 label="Back"
                 no-caps
@@ -13,24 +14,24 @@
             <div class="od-topbar__title">My Building - Building Data</div>
         </div>
 
-        <section class="od-form-section">
-            <h2 class="od-form-section__title">Localization</h2>
-            <q-input v-model="address" outlined label="Address" class="od-input q-mb-md" />
-            <q-input v-model="coordinates" outlined label="GPS Coordinates" class="od-input">
+        <section class="q-mb-lg">
+            <h2 class="od-h-form q-mb-md">Localization</h2>
+            <q-input v-model="address" outlined label="Address" class="od-field q-mb-md" />
+            <q-input v-model="coordinates" outlined label="GPS Coordinates" class="od-field">
                 <template #append>
-                    <q-btn flat dense icon="location_on" color="primary" class="od-btn--icon" />
+                    <q-btn flat dense icon="location_on" color="primary" />
                 </template>
             </q-input>
         </section>
 
-        <section class="od-form-section">
-            <h2 class="od-form-section__title">Classification</h2>
+        <section class="q-mb-lg">
+            <h2 class="od-h-form q-mb-md">Classification</h2>
             <q-select
                 v-model="buildingType"
                 outlined
                 :options="buildingTypeOptions"
                 label="Building Type"
-                class="od-select q-mb-md"
+                class="od-field q-mb-md"
             />
 
             <div class="od-material-chips q-mb-md">
@@ -56,14 +57,14 @@
                 outlined
                 :options="intendedUseOptions"
                 label="Intended Use"
-                class="od-select q-mb-md"
+                class="od-field q-mb-md"
             />
         </section>
 
         <q-btn
             label="Generate building recommendations"
             color="primary"
-            class="od-btn od-btn--primary full-width"
+            class="od-btn full-width"
             unelevated
             no-caps
             @click="generate"

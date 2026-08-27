@@ -1,9 +1,10 @@
 <template>
-    <q-page class="od-page od-page--scroll">
+    <q-page class="od-page od-page--scroll bg-white text-dark">
         <div class="od-topbar">
             <q-btn
                 flat
                 dense
+                color="primary"
                 icon="arrow_back"
                 label="Back"
                 no-caps
@@ -13,18 +14,17 @@
             <div class="od-topbar__title">New Capture</div>
         </div>
 
-        <div class="od-placeholder od-placeholder--video">Video Preview</div>
-        <div class="od-text-primary q-mb-md">2:34 &nbsp; 253mb</div>
+        <div class="od-placeholder">Video Preview</div>
+        <div class="text-primary q-mb-md">2:34 &nbsp; 253mb</div>
 
-        <q-input v-model="name" outlined label="Building 1" class="od-input q-mb-md" />
+        <q-input v-model="name" outlined label="Building 1" class="od-field q-mb-md" />
 
         <q-input
             v-model="description"
             type="textarea"
             outlined
             label="Description"
-            class="od-textarea q-mb-md"
-            input-style="min-height: 80px;"
+            class="od-field od-field--textarea q-mb-md"
         />
 
         <q-select
@@ -32,13 +32,13 @@
             outlined
             :options="environmentOptions"
             label="Environment"
-            class="od-select q-mb-xl"
+            class="od-field q-mb-xl"
         />
 
         <q-btn
             label="Start Processing (10-60min)"
             color="primary"
-            class="od-btn od-btn--primary full-width"
+            class="od-btn full-width"
             unelevated
             no-caps
             @click="startProcessing"
