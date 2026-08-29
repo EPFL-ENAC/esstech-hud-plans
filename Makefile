@@ -11,6 +11,9 @@ lint:
 run-backend:
 	cd backend && make run
 
+run-workflows:
+	cd backend && make run-workflows
+
 run-frontend:
 	echo "Frontend not set up yet"
 	cd frontend && npm run dev

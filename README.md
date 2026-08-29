@@ -19,14 +19,24 @@ make install
 > By default, dependencies to generate blueprints in the backend are not installed. To install them, run `cd backend && uv pip install -e .[blueprint]`.
 
 
-### Backend
+### Backend and workflows
 
 In one shell, run:
 
 ```bash
-make start-db
+make run-db
 make run-backend
 ```
+
+The Prefect server is included in `make run-db`. In another shell, start the
+local workflow deployment process:
+
+```bash
+make run-workflows
+```
+
+The API and workflow process must share the `backend/data/workflows` directory.
+Submitted videos and extracted frames are retained there until removed manually.
 
 The interactive API documentation will be available at [http://localhost:8000/docs](http://localhost:8000/docs).
 
