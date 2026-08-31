@@ -75,12 +75,18 @@ def extract_frames_task(
     fit_in_width: int,
     fit_in_height: int,
 ) -> str:
+    run_logger = get_run_logger()
+
+    def log_ffmpeg(record: str) -> None:
+        run_logger.info("ffmpeg: %s", record)
+
     output_directory = run_frame_extraction(
         Path(video_path),
         Path(frames_directory),
         fps=fps,
         fit_in_width=fit_in_width,
         fit_in_height=fit_in_height,
+        on_log=log_ffmpeg,
     )
     return str(output_directory)
 

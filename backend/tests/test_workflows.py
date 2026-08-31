@@ -52,7 +52,7 @@ def test_frame_extraction_artifact_owns_its_paths_and_lifecycle(
 ) -> None:
     artifact = workflows.FrameExtractionArtifact.create(workflow_data_directory)
 
-    assert artifact.video_path.name == "input"
+    assert artifact.video_path.name == "input.mp4"
     assert artifact.root_directory.parent == workflow_data_directory
     assert artifact.video_path.parent == artifact.root_directory / "video"
     assert artifact.frames_directory == artifact.root_directory / "frames"
@@ -108,6 +108,38 @@ def test_schedule_frame_extraction_returns_prefect_run_id(
     }
 
 
+def test_extract_frames_task_sends_ffmpeg_output_to_prefect_run_logger(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    records: list[tuple[str, str]] = []
+
+    class FakeRunLogger:
+        def info(self, message: str, record: str) -> None:
+            records.append((message, record))
+
+    def fake_run_frame_extraction(*args, on_log, **kwargs):
+        on_log("frame=1")
+        on_log("frame=2")
+        return tmp_path / "frames"
+
+    monkeypatch.setattr(workflows, "get_run_logger", lambda: FakeRunLogger())
+    monkeypatch.setattr(workflows, "run_frame_extraction", fake_run_frame_extraction)
+
+    result = workflows.extract_frames_task.fn(
+        "input",
+        str(tmp_path / "frames"),
+        2,
+        100,
+        100,
+    )
+
+    assert result == str(tmp_path / "frames")
+    assert records == [
+        ("ffmpeg: %s", "frame=1"),
+        ("ffmpeg: %s", "frame=2"),
+    ]
+
+
 def test_submit_frame_extraction_stores_upload_and_returns_202(
     monkeypatch: pytest.MonkeyPatch,
     workflow_data_directory: Path,
@@ -117,7 +149,7 @@ def test_submit_frame_extraction_stores_upload_and_returns_202(
 
     async def fake_schedule(*, artifact, settings, owner_id):
         assert artifact.video_path.read_bytes() == b"video bytes"
-        assert artifact.video_path.name == "input"
+        assert artifact.video_path.name == "input.mp4"
         assert settings == FrameExtractionSettings()
         assert owner_id == "owner-1"
         return workflow_id
