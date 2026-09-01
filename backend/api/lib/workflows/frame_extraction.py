@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 
 from api.lib.compute.colmap import run_colmap_reconstruction
 from api.lib.compute.ffmpeg import run_frame_extraction
+from api.lib.utils.commands import LocalCommandExecutionEnvironment
 from api.models.workflows import ColmapSettings, FrameExtractionWorkflowSettings
 from fastapi import UploadFile
 from prefect import flow, get_run_logger, task
@@ -14,6 +15,7 @@ from prefect.deployments import arun_deployment
 from starlette.concurrency import run_in_threadpool
 
 FRAME_EXTRACTION_DEPLOYMENT = "frame-extraction/default"
+LOCAL_EXECUTION_ENVIRONMENT = LocalCommandExecutionEnvironment()
 
 
 @dataclass(frozen=True)
@@ -98,6 +100,7 @@ class FrameExtractionArtifact:
 
 @task(name="extract-video-frames")
 def extract_frames_task(
+    workspace_directory: str,
     video_path: str,
     frames_directory: str,
     fps: float,
@@ -112,6 +115,8 @@ def extract_frames_task(
     output_directory = run_frame_extraction(
         Path(video_path),
         Path(frames_directory),
+        workspace_directory=Path(workspace_directory),
+        execution_environment=LOCAL_EXECUTION_ENVIRONMENT,
         fps=fps,
         fit_in_width=fit_in_width,
         fit_in_height=fit_in_height,
@@ -122,6 +127,7 @@ def extract_frames_task(
 
 @task(name="reconstruct-with-colmap")
 def reconstruct_with_colmap_task(
+    workspace_directory: str,
     frames_directory: str,
     colmap_directory: str,
     settings: ColmapSettings,
@@ -135,6 +141,8 @@ def reconstruct_with_colmap_task(
         Path(frames_directory),
         Path(colmap_directory),
         settings,
+        workspace_directory=Path(workspace_directory),
+        execution_environment=LOCAL_EXECUTION_ENVIRONMENT,
         on_log=log_colmap,
     )
     return str(output_directory)
@@ -143,6 +151,7 @@ def reconstruct_with_colmap_task(
 @flow(name="frame-extraction")
 def frame_extraction_flow(
     artifact_id: UUID,
+    workspace_directory: str,
     video_path: str,
     frames_directory: str,
     colmap_directory: str,
@@ -155,6 +164,7 @@ def frame_extraction_flow(
     run_logger = get_run_logger()
     run_logger.info("Starting frame extraction for artifact %s", artifact_id)
     extracted_frames_directory = extract_frames_task(
+        workspace_directory=workspace_directory,
         video_path=video_path,
         frames_directory=frames_directory,
         fps=settings.ffmpeg.fps,
@@ -162,6 +172,7 @@ def frame_extraction_flow(
         fit_in_height=settings.ffmpeg.fit_in_height,
     )
     return reconstruct_with_colmap_task(
+        workspace_directory=workspace_directory,
         frames_directory=extracted_frames_directory,
         colmap_directory=colmap_directory,
         settings=settings.colmap,
@@ -177,6 +188,7 @@ async def schedule_frame_extraction(
         name=FRAME_EXTRACTION_DEPLOYMENT,
         parameters={
             "artifact_id": str(artifact.artifact_id),
+            "workspace_directory": str(artifact.root_directory.resolve()),
             "video_path": str(artifact.video_path.resolve()),
             "frames_directory": str(artifact.frames_directory.resolve()),
             "colmap_directory": str(artifact.colmap_directory.resolve()),

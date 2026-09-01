@@ -137,6 +137,7 @@ def test_schedule_frame_extraction_returns_prefect_run_id(
     assert captured["as_subflow"] is False
     assert captured["parameters"] == {
         "artifact_id": str(artifact.artifact_id),
+        "workspace_directory": str(artifact.root_directory.resolve()),
         "video_path": str(artifact.video_path.resolve()),
         "frames_directory": str(artifact.frames_directory.resolve()),
         "colmap_directory": str(artifact.colmap_directory.resolve()),
@@ -227,6 +228,11 @@ def test_extract_frames_task_sends_ffmpeg_output_to_prefect_run_logger(
             records.append((message, record))
 
     def fake_run_frame_extraction(*args, on_log, **kwargs):
+        assert kwargs["workspace_directory"] == tmp_path
+        assert (
+            kwargs["execution_environment"]
+            is frame_workflow.LOCAL_EXECUTION_ENVIRONMENT
+        )
         on_log("frame=1")
         on_log("frame=2")
         return tmp_path / "frames"
@@ -237,6 +243,7 @@ def test_extract_frames_task_sends_ffmpeg_output_to_prefect_run_logger(
     )
 
     result = frame_workflow.extract_frames_task.fn(
+        str(tmp_path),
         "input",
         str(tmp_path / "frames"),
         2,
@@ -262,6 +269,11 @@ def test_reconstruct_with_colmap_task_sends_output_to_prefect_run_logger(
             records.append((message, record))
 
     def fake_run_colmap_reconstruction(*args, on_log, **kwargs):
+        assert kwargs["workspace_directory"] == tmp_path
+        assert (
+            kwargs["execution_environment"]
+            is frame_workflow.LOCAL_EXECUTION_ENVIRONMENT
+        )
         on_log("feature extraction")
         on_log("mapping")
         return tmp_path / "colmap"
@@ -274,6 +286,7 @@ def test_reconstruct_with_colmap_task_sends_output_to_prefect_run_logger(
     )
 
     result = frame_workflow.reconstruct_with_colmap_task.fn(
+        str(tmp_path),
         str(tmp_path / "frames"),
         str(tmp_path / "colmap"),
         settings,
@@ -314,6 +327,7 @@ def test_frame_extraction_flow_runs_ffmpeg_before_colmap(
 
     result = frame_workflow.frame_extraction_flow.fn(
         artifact_id=uuid4(),
+        workspace_directory=str(tmp_path),
         video_path="input.mov",
         frames_directory=str(tmp_path / "frames"),
         colmap_directory=str(tmp_path / "colmap"),
@@ -326,6 +340,7 @@ def test_frame_extraction_flow_runs_ffmpeg_before_colmap(
         (
             "ffmpeg",
             {
+                "workspace_directory": str(tmp_path),
                 "video_path": "input.mov",
                 "frames_directory": str(tmp_path / "frames"),
                 "fps": 2.0,
@@ -336,6 +351,7 @@ def test_frame_extraction_flow_runs_ffmpeg_before_colmap(
         (
             "colmap",
             {
+                "workspace_directory": str(tmp_path),
                 "frames_directory": str(tmp_path / "frames"),
                 "colmap_directory": str(tmp_path / "colmap"),
                 "settings": settings.colmap,

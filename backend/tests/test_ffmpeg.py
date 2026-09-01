@@ -5,59 +5,94 @@ from pathlib import Path
 import cv2
 import pytest
 from api.lib.compute import ffmpeg
+from api.lib.utils.commands import (
+    LOCAL_EXECUTABLES_DIRECTORY,
+    Command,
+    CommandExecutionEnvironment,
+    CommandResult,
+    LocalCommandExecutionEnvironment,
+    LogCallback,
+)
 
 
-def test_build_frame_extraction_command_handles_paths_with_spaces(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_build_frame_extraction_command_uses_workspace_relative_paths(
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(ffmpeg, "_resolve_ffmpeg_command", lambda: "/ffmpeg bin")
     video_path = tmp_path / "source videos" / "input video.mp4"
     frames_directory = tmp_path / "output frames"
 
     command = ffmpeg.build_frame_extraction_command(
         video_path,
         frames_directory,
+        workspace_directory=tmp_path,
         fps=2.5,
         fit_in_width=1920,
         fit_in_height=1080,
     )
 
-    assert command == [
-        "/ffmpeg bin",
-        "-nostdin",
-        "-y",
-        "-i",
-        str(video_path),
-        "-vf",
-        "scale=1920:1080:force_original_aspect_ratio=decrease,fps=2.5",
-        "-q:v",
-        "4",
-        str(frames_directory / "frame_%05d.jpg"),
-    ]
+    assert command == Command(
+        tool="ffmpeg",
+        arguments=(
+            "-nostdin",
+            "-y",
+            "-i",
+            "source videos/input video.mp4",
+            "-vf",
+            "scale=1920:1080:force_original_aspect_ratio=decrease,fps=2.5",
+            "-q:v",
+            "4",
+            "output frames/frame_%05d.jpg",
+        ),
+        capture="stderr",
+    )
+
+
+def test_build_frame_extraction_command_rejects_paths_outside_workspace(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="must be inside workspace"):
+        ffmpeg.build_frame_extraction_command(
+            tmp_path.parent / "input.mp4",
+            tmp_path / "frames",
+            workspace_directory=tmp_path,
+            fps=2,
+            fit_in_width=100,
+            fit_in_height=100,
+        )
 
 
 def test_run_frame_extraction_uses_logged_stderr_and_returns_frames(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     video_path = tmp_path / "input.mp4"
     video_path.write_bytes(b"not a real video")
     frames_directory = tmp_path / "frames"
-    monkeypatch.setattr(ffmpeg, "_resolve_ffmpeg_command", lambda: "ffmpeg")
     records: list[str] = []
     on_log = records.append
     captured: dict = {}
 
-    def fake_run_logged_command(command, **kwargs) -> None:
-        captured["command"] = command
-        captured.update(kwargs)
-        kwargs["on_log"]("frame=1")
-        kwargs["on_log"]("frame=2")
-        (frames_directory / "frame_00001.jpg").touch()
+    class FakeEnvironment(CommandExecutionEnvironment):
+        def execute(
+            self,
+            command: Command,
+            *,
+            workspace: Path,
+            on_log: LogCallback | None = None,
+        ) -> CommandResult:
+            captured["command"] = command
+            captured["workspace"] = workspace
+            captured["on_log"] = on_log
+            assert on_log is not None
+            on_log("frame=1")
+            on_log("frame=2")
+            (frames_directory / "frame_00001.jpg").touch()
+            return CommandResult(return_code=0)
 
-    monkeypatch.setattr(ffmpeg, "run_logged_command", fake_run_logged_command)
     result = ffmpeg.run_frame_extraction(
         video_path,
         frames_directory,
+        workspace_directory=tmp_path,
+        execution_environment=FakeEnvironment(),
         fps=2,
         fit_in_width=100,
         fit_in_height=100,
@@ -66,24 +101,33 @@ def test_run_frame_extraction_uses_logged_stderr_and_returns_frames(
 
     assert result == frames_directory.resolve()
     assert records == ["frame=1", "frame=2"]
-    assert captured["capture"] == "stderr"
-    assert captured["log_prefix"] == "ffmpeg"
-    assert captured["fallback_logger"] is ffmpeg.logger
+    assert captured["command"].capture == "stderr"
+    assert captured["workspace"] == tmp_path.resolve()
     assert captured["on_log"] is on_log
 
 
 def test_run_frame_extraction_requires_at_least_one_frame(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     video_path = tmp_path / "input.mp4"
     video_path.write_bytes(b"not a real video")
-    monkeypatch.setattr(ffmpeg, "_resolve_ffmpeg_command", lambda: "ffmpeg")
-    monkeypatch.setattr(ffmpeg, "run_logged_command", lambda *args, **kwargs: None)
+
+    class FakeEnvironment(CommandExecutionEnvironment):
+        def execute(
+            self,
+            command: Command,
+            *,
+            workspace: Path,
+            on_log: LogCallback | None = None,
+        ) -> CommandResult:
+            return CommandResult(return_code=0)
 
     with pytest.raises(RuntimeError, match="without producing any frames"):
         ffmpeg.run_frame_extraction(
             video_path,
             tmp_path / "frames",
+            workspace_directory=tmp_path,
+            execution_environment=FakeEnvironment(),
             fps=2,
             fit_in_width=100,
             fit_in_height=100,
@@ -91,7 +135,9 @@ def test_run_frame_extraction_requires_at_least_one_frame(
 
 
 def _ffmpeg_is_available() -> bool:
-    return ffmpeg.FFMPEG_COMMAND.is_file() or shutil.which("ffmpeg") is not None
+    return (LOCAL_EXECUTABLES_DIRECTORY / "ffmpeg").is_file() or shutil.which(
+        "ffmpeg"
+    ) is not None
 
 
 @pytest.mark.skipif(not _ffmpeg_is_available(), reason="ffmpeg is not installed")
@@ -100,7 +146,8 @@ def test_run_frame_extraction_with_real_ffmpeg(tmp_path: Path) -> None:
     working_directory.mkdir()
     video_path = working_directory / "input video.mp4"
     frames_directory = working_directory / "output frames"
-    ffmpeg_command = ffmpeg._resolve_ffmpeg_command()
+    environment = LocalCommandExecutionEnvironment()
+    ffmpeg_command = environment._resolve_tool("ffmpeg")
 
     subprocess.run(
         [
@@ -124,6 +171,8 @@ def test_run_frame_extraction_with_real_ffmpeg(tmp_path: Path) -> None:
     result = ffmpeg.run_frame_extraction(
         video_path,
         frames_directory,
+        workspace_directory=working_directory,
+        execution_environment=environment,
         fps=2,
         fit_in_width=32,
         fit_in_height=32,

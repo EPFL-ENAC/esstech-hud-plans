@@ -1,58 +1,55 @@
-import logging
-import shutil
 from pathlib import Path
 
-from api.lib.utils.commands import LogCallback, run_logged_command
-
-logger = logging.getLogger(__name__)
-
-BACKEND_ROOT = Path(__file__).resolve().parents[3]
-FFMPEG_COMMAND = BACKEND_ROOT / "external" / "bin" / "ffmpeg"
-
-
-def _resolve_ffmpeg_command() -> str:
-    if FFMPEG_COMMAND.is_file():
-        return str(FFMPEG_COMMAND)
-
-    system_ffmpeg = shutil.which("ffmpeg")
-    if system_ffmpeg is not None:
-        return system_ffmpeg
-
-    raise FileNotFoundError("ffmpeg executable was not found")
+from api.lib.utils.commands import (
+    Command,
+    CommandExecutionEnvironment,
+    LogCallback,
+    workspace_relative_path,
+)
 
 
 def build_frame_extraction_command(
     video_path: Path,
     frames_directory: Path,
     *,
+    workspace_directory: Path,
     fps: float,
     fit_in_width: int,
     fit_in_height: int,
-) -> list[str]:
+) -> Command:
     filters = (
         f"scale={fit_in_width}:{fit_in_height}:"
         f"force_original_aspect_ratio=decrease,fps={fps}"
     )
-    output_pattern = frames_directory / "frame_%05d.jpg"
+    relative_video_path = workspace_relative_path(video_path, workspace_directory)
+    relative_frames_directory = workspace_relative_path(
+        frames_directory, workspace_directory
+    )
+    output_pattern = relative_frames_directory / "frame_%05d.jpg"
 
-    return [
-        _resolve_ffmpeg_command(),
-        "-nostdin",
-        "-y",
-        "-i",
-        str(video_path),
-        "-vf",
-        filters,
-        "-q:v",
-        "4",
-        str(output_pattern),
-    ]
+    return Command(
+        tool="ffmpeg",
+        arguments=(
+            "-nostdin",
+            "-y",
+            "-i",
+            relative_video_path.as_posix(),
+            "-vf",
+            filters,
+            "-q:v",
+            "4",
+            output_pattern.as_posix(),
+        ),
+        capture="stderr",
+    )
 
 
 def run_frame_extraction(
     video_path: Path,
     frames_directory: Path,
     *,
+    workspace_directory: Path,
+    execution_environment: CommandExecutionEnvironment,
     fps: float,
     fit_in_width: int,
     fit_in_height: int,
@@ -60,26 +57,26 @@ def run_frame_extraction(
 ) -> Path:
     """Extract JPEG frames from a video and return their directory."""
 
+    workspace_directory = workspace_directory.resolve()
     video_path = video_path.resolve()
     frames_directory = frames_directory.resolve()
 
-    if not video_path.is_file():
-        raise FileNotFoundError(f"Input video does not exist: {video_path}")
-
-    frames_directory.mkdir(parents=True, exist_ok=True)
     command = build_frame_extraction_command(
         video_path,
         frames_directory,
+        workspace_directory=workspace_directory,
         fps=fps,
         fit_in_width=fit_in_width,
         fit_in_height=fit_in_height,
     )
 
-    run_logged_command(
+    if not video_path.is_file():
+        raise FileNotFoundError(f"Input video does not exist: {video_path}")
+
+    frames_directory.mkdir(parents=True, exist_ok=True)
+    execution_environment.execute(
         command,
-        capture="stderr",
-        log_prefix="ffmpeg",
-        fallback_logger=logger,
+        workspace=workspace_directory,
         on_log=on_log,
     )
 
