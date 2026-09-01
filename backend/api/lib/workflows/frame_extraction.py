@@ -6,7 +6,10 @@ from uuid import UUID, uuid4
 
 from api.lib.compute.colmap import run_colmap_reconstruction
 from api.lib.compute.ffmpeg import run_frame_extraction
-from api.lib.utils.commands import LocalCommandExecutionEnvironment
+from api.lib.utils.commands import (
+    CommandExecutionEnvironment,
+    LocalCommandExecutionEnvironment,
+)
 from api.models.workflows import ColmapSettings, FrameExtractionWorkflowSettings
 from fastapi import UploadFile
 from prefect import flow, get_run_logger, task
@@ -106,6 +109,7 @@ def extract_frames_task(
     fps: float,
     fit_in_width: int,
     fit_in_height: int,
+    execution_environment: CommandExecutionEnvironment = LOCAL_EXECUTION_ENVIRONMENT,
 ) -> str:
     run_logger = get_run_logger()
 
@@ -116,7 +120,7 @@ def extract_frames_task(
         Path(video_path),
         Path(frames_directory),
         workspace_directory=Path(workspace_directory),
-        execution_environment=LOCAL_EXECUTION_ENVIRONMENT,
+        execution_environment=execution_environment,
         fps=fps,
         fit_in_width=fit_in_width,
         fit_in_height=fit_in_height,
@@ -131,6 +135,7 @@ def reconstruct_with_colmap_task(
     frames_directory: str,
     colmap_directory: str,
     settings: ColmapSettings,
+    execution_environment: CommandExecutionEnvironment = LOCAL_EXECUTION_ENVIRONMENT,
 ) -> str:
     run_logger = get_run_logger()
 
@@ -142,7 +147,7 @@ def reconstruct_with_colmap_task(
         Path(colmap_directory),
         settings,
         workspace_directory=Path(workspace_directory),
-        execution_environment=LOCAL_EXECUTION_ENVIRONMENT,
+        execution_environment=execution_environment,
         on_log=log_colmap,
     )
     return str(output_directory)
@@ -163,6 +168,9 @@ def frame_extraction_flow(
 
     run_logger = get_run_logger()
     run_logger.info("Starting frame extraction for artifact %s", artifact_id)
+
+    execution_environment = LOCAL_EXECUTION_ENVIRONMENT  # if scitas then set to a new class that inherits from CommandExecutionEnvironment and implements the execute method
+
     extracted_frames_directory = extract_frames_task(
         workspace_directory=workspace_directory,
         video_path=video_path,
@@ -170,12 +178,14 @@ def frame_extraction_flow(
         fps=settings.ffmpeg.fps,
         fit_in_width=settings.ffmpeg.fit_in_width,
         fit_in_height=settings.ffmpeg.fit_in_height,
+        execution_environment=execution_environment,
     )
     return reconstruct_with_colmap_task(
         workspace_directory=workspace_directory,
         frames_directory=extracted_frames_directory,
         colmap_directory=colmap_directory,
         settings=settings.colmap,
+        execution_environment=execution_environment,
     )
 
 
