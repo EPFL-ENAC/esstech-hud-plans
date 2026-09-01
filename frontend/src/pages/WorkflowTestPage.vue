@@ -501,7 +501,14 @@ function parseServerSentEvent(
     }
 
     if (dataLines.length === 0) return;
-    onEvent(event, JSON.parse(dataLines.join('\n')) as unknown);
+    let data: unknown;
+    try {
+        data = JSON.parse(dataLines.join('\n')) as unknown;
+    } catch (error) {
+        console.warn('Invalid workflow SSE payload', event, dataLines, error);
+        return;
+    }
+    onEvent(event, data);
 }
 
 function handleWorkflowLogEvent(event: string, data: unknown): void {
