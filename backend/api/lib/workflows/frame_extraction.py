@@ -4,20 +4,16 @@ from pathlib import Path
 from typing import Self
 from uuid import UUID, uuid4
 
+from api.lib.compute.colmap import run_colmap_reconstruction
 from api.lib.compute.ffmpeg import run_frame_extraction
-from api.models.workflows import FrameExtractionSettings
-from prefect import flow, get_client, get_run_logger, task
+from api.models.workflows import ColmapSettings, FrameExtractionWorkflowSettings
+from fastapi import UploadFile
+from prefect import flow, get_run_logger, task
 from prefect.client.schemas.objects import FlowRun
 from prefect.deployments import arun_deployment
-from prefect.exceptions import ObjectNotFound
+from starlette.concurrency import run_in_threadpool
 
 FRAME_EXTRACTION_DEPLOYMENT = "frame-extraction/default"
-BACKEND_ROOT = Path(__file__).resolve().parents[2]
-WORKFLOW_DATA_DIRECTORY = BACKEND_ROOT / "data" / "workflows"
-
-
-class WorkflowNotFoundError(Exception):
-    pass
 
 
 @dataclass(frozen=True)
@@ -40,10 +36,43 @@ class FrameExtractionArtifact:
     def frames_directory(self) -> Path:
         return self.root_directory / "frames"
 
+    @property
+    def colmap_directory(self) -> Path:
+        return self.root_directory / "colmap"
+
+    @property
+    def colmap_sparse_directory(self) -> Path:
+        return self.colmap_directory / "sparse" / "0"
+
     @classmethod
     def create(cls, storage_root: Path, video_format: str = "mp4") -> Self:
         artifact = cls(uuid4(), storage_root, video_format)
         artifact.video_path.parent.mkdir(parents=True)
+        return artifact
+
+    @classmethod
+    async def from_uploaded_file(
+        cls, uploaded_file: UploadFile, storage_root: Path
+    ) -> Self:
+        if not uploaded_file.filename:
+            raise ValueError("Uploaded file must have a filename")
+
+        file_extension = (
+            Path(uploaded_file.filename).suffix.removeprefix(".").lower() or "mp4"
+        )
+        artifact = cls.create(storage_root, video_format=file_extension)
+
+        try:
+            with artifact.video_path.open("wb") as destination:
+                await run_in_threadpool(
+                    shutil.copyfileobj, uploaded_file.file, destination
+                )
+        except Exception:
+            artifact.remove()
+            raise
+        finally:
+            await uploaded_file.close()
+
         return artifact
 
     @classmethod
@@ -91,14 +120,33 @@ def extract_frames_task(
     return str(output_directory)
 
 
+@task(name="reconstruct-with-colmap")
+def reconstruct_with_colmap_task(
+    frames_directory: str,
+    colmap_directory: str,
+    settings: ColmapSettings,
+) -> str:
+    run_logger = get_run_logger()
+
+    def log_colmap(record: str) -> None:
+        run_logger.info("colmap: %s", record)
+
+    output_directory = run_colmap_reconstruction(
+        Path(frames_directory),
+        Path(colmap_directory),
+        settings,
+        on_log=log_colmap,
+    )
+    return str(output_directory)
+
+
 @flow(name="frame-extraction")
 def frame_extraction_flow(
     artifact_id: UUID,
     video_path: str,
     frames_directory: str,
-    fps: float,
-    fit_in_width: int,
-    fit_in_height: int,
+    colmap_directory: str,
+    settings: FrameExtractionWorkflowSettings,
     owner_id: str,
 ) -> str:
     if not owner_id:
@@ -106,18 +154,23 @@ def frame_extraction_flow(
 
     run_logger = get_run_logger()
     run_logger.info("Starting frame extraction for artifact %s", artifact_id)
-    return extract_frames_task(
+    extracted_frames_directory = extract_frames_task(
         video_path=video_path,
         frames_directory=frames_directory,
-        fps=fps,
-        fit_in_width=fit_in_width,
-        fit_in_height=fit_in_height,
+        fps=settings.ffmpeg.fps,
+        fit_in_width=settings.ffmpeg.fit_in_width,
+        fit_in_height=settings.ffmpeg.fit_in_height,
+    )
+    return reconstruct_with_colmap_task(
+        frames_directory=extracted_frames_directory,
+        colmap_directory=colmap_directory,
+        settings=settings.colmap,
     )
 
 
 async def schedule_frame_extraction(
     artifact: FrameExtractionArtifact,
-    settings: FrameExtractionSettings,
+    settings: FrameExtractionWorkflowSettings,
     owner_id: str,
 ) -> UUID:
     flow_run = await arun_deployment(
@@ -126,33 +179,11 @@ async def schedule_frame_extraction(
             "artifact_id": str(artifact.artifact_id),
             "video_path": str(artifact.video_path.resolve()),
             "frames_directory": str(artifact.frames_directory.resolve()),
-            "fps": settings.fps,
-            "fit_in_width": settings.fit_in_width,
-            "fit_in_height": settings.fit_in_height,
+            "colmap_directory": str(artifact.colmap_directory.resolve()),
+            "settings": settings.model_dump(mode="json"),
             "owner_id": owner_id,
         },
         timeout=0,
         as_subflow=False,
     )
     return flow_run.id
-
-
-async def get_owned_workflow_run(workflow_id: UUID, owner_id: str) -> FlowRun:
-    try:
-        async with get_client() as client:
-            flow_run = await client.read_flow_run(workflow_id)
-    except ObjectNotFound as exc:
-        raise WorkflowNotFoundError from exc
-
-    if flow_run.parameters.get("owner_id") != owner_id:
-        raise WorkflowNotFoundError
-
-    return flow_run
-
-
-def serve_workflows() -> None:
-    frame_extraction_flow.serve(name="default", limit=1)
-
-
-if __name__ == "__main__":
-    serve_workflows()

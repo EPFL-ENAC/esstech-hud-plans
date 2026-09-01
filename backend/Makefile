@@ -21,7 +21,7 @@ run:
 	uv run dotenv -f "$(env_path)" run uvicorn api.main:app --reload
 
 run-workflows:
-	uv run dotenv -f "$(env_path)" run python -m api.services.workflows
+	uv run dotenv -f "$(env_path)" run python -m api.lib.workflows
 
 test:
 	uv run dotenv -f "$(env_path)" run pytest

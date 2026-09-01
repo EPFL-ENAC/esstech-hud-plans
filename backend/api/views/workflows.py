@@ -1,31 +1,77 @@
 import logging
-import shutil
+from collections.abc import AsyncIterator
 from typing import Annotated, cast
 from uuid import UUID
 
+from api.lib.workflows import common as workflow_common
+from api.lib.workflows.common import (
+    WorkflowNotFoundError,
+    get_owned_workflow_run,
+    stream_workflow_logs,
+)
+from api.lib.workflows.counter import schedule_counter
+from api.lib.workflows.frame_extraction import (
+    FrameExtractionArtifact,
+    schedule_frame_extraction,
+)
 from api.models.auth import User
 from api.models.workflows import (
     FrameExtractionResultResponse,
-    FrameExtractionSettings,
+    FrameExtractionWorkflowSettings,
     WorkflowStatus,
     WorkflowStatusResponse,
     WorkflowSubmissionResponse,
 )
-from api.services import workflows as workflow_service
 from api.services.auth import require_user
-from api.services.workflows import (
-    FrameExtractionArtifact,
-    WorkflowNotFoundError,
-    get_owned_workflow_run,
-    schedule_frame_extraction,
-)
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
-from prefect.client.schemas.objects import StateType
-from starlette.concurrency import run_in_threadpool
+from fastapi.responses import StreamingResponse
+from prefect.client.schemas.objects import FlowRun, StateType
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+async def get_current_workflow(
+    workflow_id: UUID,
+    current_user: User = Depends(require_user),
+) -> FlowRun:
+    try:
+        return await get_owned_workflow_run(
+            workflow_id=workflow_id,
+            owner_id=current_user.sub,
+        )
+    except WorkflowNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workflow not found",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Workflow service is unavailable",
+        ) from exc
+
+
+@router.post(
+    "/counter",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=WorkflowSubmissionResponse,
+)
+async def submit_counter(
+    current_user: User = Depends(require_user),
+) -> WorkflowSubmissionResponse:
+    try:
+        workflow_id = await schedule_counter(current_user.sub)
+    except Exception as exc:
+        logger.exception("Failed to schedule counter workflow")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Counter workflow service is unavailable",
+        ) from exc
+
+    return WorkflowSubmissionResponse(workflow_id=workflow_id)
 
 
 @router.post(
@@ -35,9 +81,15 @@ router = APIRouter()
 )
 async def submit_frame_extraction(
     file: Annotated[UploadFile, File()],
-    fps: Annotated[float, Form(gt=0)] = 2.0,
-    fit_in_width: Annotated[int, Form(gt=0)] = 1920,
-    fit_in_height: Annotated[int, Form(gt=0)] = 1920,
+    settings: Annotated[
+        str,
+        Form(
+            description=(
+                "JSON-encoded FrameExtractionWorkflowSettings with separate "
+                '"ffmpeg" and "colmap" objects.'
+            )
+        ),
+    ],
     current_user: User = Depends(require_user),
 ) -> WorkflowSubmissionResponse:
     if not file.filename:
@@ -45,28 +97,24 @@ async def submit_frame_extraction(
     if file.content_type is None or not file.content_type.startswith("video/"):
         raise HTTPException(status_code=400, detail="Uploaded file must be a video")
 
-    file_extension = file.filename.split(".")[-1].lower()
-    artifact = FrameExtractionArtifact.create(
-        workflow_service.WORKFLOW_DATA_DIRECTORY, video_format=file_extension
-    )
     try:
-        with artifact.video_path.open("wb") as destination:
-            await run_in_threadpool(shutil.copyfileobj, file.file, destination)
-    except Exception:
-        artifact.remove()
-        raise
-    finally:
-        await file.close()
+        workflow_settings = FrameExtractionWorkflowSettings.model_validate_json(
+            settings
+        )
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=exc.errors(include_url=False),
+        ) from exc
 
-    settings = FrameExtractionSettings(
-        fps=fps,
-        fit_in_width=fit_in_width,
-        fit_in_height=fit_in_height,
+    artifact = await FrameExtractionArtifact.from_uploaded_file(
+        file, workflow_common.WORKFLOW_DATA_DIRECTORY
     )
+
     try:
         workflow_id = await schedule_frame_extraction(
             artifact=artifact,
-            settings=settings,
+            settings=workflow_settings,
             owner_id=current_user.sub,
         )
     except Exception as exc:
@@ -94,55 +142,70 @@ def list_workflows(
     pass
 
 
-@router.get("/status/{workflow_id}", response_model=WorkflowStatusResponse)
-async def get_workflow_status(
-    workflow_id: UUID,
-    current_user: User = Depends(require_user),
-) -> WorkflowStatusResponse:
+@router.get("/listen/{workflow_id}", response_class=StreamingResponse)
+async def listen_to_workflow(
+    current_workflow: Annotated[FlowRun, Depends(get_current_workflow)],
+) -> StreamingResponse:
+    workflow_stream = stream_workflow_logs(current_workflow)
     try:
-        flow_run = await get_owned_workflow_run(workflow_id, current_user.sub)
-    except WorkflowNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="Workflow not found") from exc
+        first_item = await anext(workflow_stream)
     except Exception as exc:
+        await workflow_stream.aclose()
+        logger.exception("Failed to start workflow log stream")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Workflow service is unavailable",
+            detail="Workflow log stream is unavailable",
         ) from exc
 
+    async def event_stream() -> AsyncIterator[str]:
+        try:
+            yield first_item.to_sse_event()
+            async for item in workflow_stream:
+                yield item.to_sse_event()
+        finally:
+            await workflow_stream.aclose()
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/status/{workflow_id}", response_model=WorkflowStatusResponse)
+async def get_workflow_status(
+    current_workflow: Annotated[FlowRun, Depends(get_current_workflow)],
+) -> WorkflowStatusResponse:
     workflow_status = cast(
         WorkflowStatus,
         (
-            flow_run.state_type.value.lower()
-            if flow_run.state_type is not None
+            current_workflow.state_type.value.lower()
+            if current_workflow.state_type is not None
             else StateType.PENDING.value.lower()
         ),
     )
     return WorkflowStatusResponse(
-        workflow_id=workflow_id,
+        workflow_id=current_workflow.id,
         status=workflow_status,
-        message=flow_run.state.message if flow_run.state is not None else None,
+        message=(
+            current_workflow.state.message
+            if current_workflow.state is not None
+            else None
+        ),
     )
 
 
 @router.get("/result/{workflow_id}", response_model=FrameExtractionResultResponse)
 async def get_workflow_result(
-    workflow_id: UUID,
-    current_user: User = Depends(require_user),
+    current_workflow: Annotated[FlowRun, Depends(get_current_workflow)],
 ) -> FrameExtractionResultResponse:
-    try:
-        flow_run = await get_owned_workflow_run(workflow_id, current_user.sub)
-    except WorkflowNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="Workflow not found") from exc
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Workflow service is unavailable",
-        ) from exc
-
-    if flow_run.state_type != StateType.COMPLETED:
+    if current_workflow.state_type != StateType.COMPLETED:
         state_name = (
-            flow_run.state_type.value.lower()
-            if flow_run.state_type is not None
+            current_workflow.state_type.value.lower()
+            if current_workflow.state_type is not None
             else "pending"
         )
         raise HTTPException(
@@ -152,7 +215,7 @@ async def get_workflow_result(
 
     try:
         artifact = FrameExtractionArtifact.from_flow_run(
-            flow_run, workflow_service.WORKFLOW_DATA_DIRECTORY
+            current_workflow, workflow_common.WORKFLOW_DATA_DIRECTORY
         )
     except ValueError as exc:
         raise HTTPException(
@@ -166,6 +229,13 @@ async def get_workflow_result(
             detail="Workflow completed but its frames directory is missing",
         )
 
+    if not artifact.colmap_sparse_directory.is_dir():
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Workflow completed but its COLMAP sparse reconstruction is missing",
+        )
+
     return FrameExtractionResultResponse(
-        frames_directory=str(artifact.frames_directory.resolve())
+        frames_directory=str(artifact.frames_directory.resolve()),
+        colmap_directory=str(artifact.colmap_directory.resolve()),
     )

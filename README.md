@@ -15,6 +15,15 @@ Setup your environment by running:
 make install
 ```
 
+Install the external ffmpeg and COLMAP executables used by the local workflow
+runner:
+
+```bash
+cd backend
+make install-external-softwares-macos
+# On Linux, use: make install-external-softwares-linux
+```
+
 > [!NOTE]
 > By default, dependencies to generate blueprints in the backend are not installed. To install them, run `cd backend && uv pip install -e .[blueprint]`.
 
@@ -35,8 +44,13 @@ local workflow deployment process:
 make run-workflows
 ```
 
+The Prefect container enables live log publishing and websocket streaming for
+workflow log subscribers. Recreate or restart the Prefect container after
+changing these settings.
+
 The API and workflow process must share the `backend/data/workflows` directory.
-Submitted videos and extracted frames are retained there until removed manually.
+Submitted videos, extracted frames, and sparse COLMAP reconstructions are retained
+there until removed manually.
 
 The interactive API documentation will be available at [http://localhost:8000/docs](http://localhost:8000/docs).
 

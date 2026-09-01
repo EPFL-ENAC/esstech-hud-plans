@@ -28,6 +28,8 @@ services:
       - PREFECT_SERVER_API_HOST=0.0.0.0
       - PREFECT_SERVER_UI_API_URL=http://localhost:4200/api
       - PREFECT_API_URL=http://localhost:4200/api
+      - PREFECT_SERVER_LOGS_STREAM_OUT_ENABLED=true
+      - PREFECT_SERVER_LOGS_STREAM_PUBLISHING_ENABLED=true
     command: prefect server start
     ports:
       - '4200:4200'

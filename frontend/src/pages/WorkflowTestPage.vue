@@ -34,9 +34,10 @@
                         </template>
                     </q-file>
 
+                    <div class="text-subtitle1 text-weight-medium">ffmpeg settings</div>
                     <div class="row q-col-gutter-md">
                         <q-input
-                            v-model.number="settings.fps"
+                            v-model.number="settings.ffmpeg.fps"
                             class="col-12 col-sm-4"
                             outlined
                             type="number"
@@ -45,7 +46,7 @@
                             label="FPS"
                         />
                         <q-input
-                            v-model.number="settings.fitInWidth"
+                            v-model.number="settings.ffmpeg.fitInWidth"
                             class="col-12 col-sm-4"
                             outlined
                             type="number"
@@ -54,13 +55,59 @@
                             label="Fit-in width"
                         />
                         <q-input
-                            v-model.number="settings.fitInHeight"
+                            v-model.number="settings.ffmpeg.fitInHeight"
                             class="col-12 col-sm-4"
                             outlined
                             type="number"
                             min="1"
                             step="1"
                             label="Fit-in height"
+                        />
+                    </div>
+
+                    <q-separator />
+
+                    <div class="text-subtitle1 text-weight-medium">COLMAP settings</div>
+                    <div class="row q-col-gutter-md">
+                        <q-select
+                            v-model="settings.colmap.dataType"
+                            class="col-12 col-sm-4"
+                            outlined
+                            emit-value
+                            map-options
+                            :options="colmapDataTypeOptions"
+                            label="Data type"
+                        />
+                        <q-select
+                            v-model="settings.colmap.quality"
+                            class="col-12 col-sm-4"
+                            outlined
+                            :options="colmapQualityOptions"
+                            label="Quality"
+                        />
+                        <q-select
+                            v-model="settings.colmap.cameraModel"
+                            class="col-12 col-sm-4"
+                            outlined
+                            :options="colmapCameraModelOptions"
+                            label="Camera model"
+                        />
+                    </div>
+                    <div class="row q-col-gutter-md">
+                        <q-toggle
+                            v-model="settings.colmap.singleCamera"
+                            class="col-12 col-sm-4"
+                            label="Use shared camera intrinsics"
+                        />
+                        <q-toggle
+                            v-model="settings.colmap.useGpu"
+                            class="col-12 col-sm-4"
+                            label="Use GPU"
+                        />
+                        <q-toggle
+                            v-model="settings.colmap.useGlobalMapper"
+                            class="col-12 col-sm-4"
+                            label="Use global mapper"
                         />
                     </div>
 
@@ -131,6 +178,49 @@
             </q-card>
 
             <q-card flat bordered>
+                <q-card-section class="row items-center justify-between q-gutter-sm">
+                    <div>
+                        <div class="text-h6">Live workflow logs</div>
+                        <div class="text-caption text-grey-7">GET /workflows/listen/:id</div>
+                    </div>
+                    <div class="row items-center q-gutter-sm">
+                        <q-chip
+                            v-if="logStreamState !== 'idle'"
+                            dense
+                            :color="logStreamStateColor"
+                            text-color="white"
+                        >
+                            {{ logStreamState }}
+                        </q-chip>
+                        <q-btn
+                            v-if="logStreamState === 'connecting' || logStreamState === 'listening'"
+                            flat
+                            dense
+                            color="negative"
+                            icon="stop"
+                            label="Stop"
+                            @click="stopLogStream"
+                        />
+                    </div>
+                </q-card-section>
+
+                <q-separator />
+
+                <q-banner v-if="logStreamError" class="bg-red-1 text-negative">
+                    {{ logStreamError }}
+                </q-banner>
+
+                <div ref="logsContainer" class="workflow-logs bg-black text-white q-pa-sm">
+                    <div v-for="log in workflowLogs" :key="log.id" class="workflow-log-line">
+                        {{ log.message }}
+                    </div>
+                    <div v-if="workflowLogs.length === 0" class="text-grey-6 text-italic">
+                        Logs will appear here after submitting a workflow.
+                    </div>
+                </div>
+            </q-card>
+
+            <q-card flat bordered>
                 <q-card-section class="row items-center justify-between">
                     <div>
                         <div class="text-h6">Latest response</div>
@@ -159,7 +249,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, reactive, ref } from 'vue';
 import { baseUrl } from 'boot/api';
 import { authFetch } from 'src/lib/auth';
 
@@ -177,14 +267,48 @@ interface CapturedResponse {
     body: unknown;
 }
 
+interface WorkflowLog {
+    id: string;
+    timestamp: string;
+    level: number;
+    name: string;
+    message: string;
+    flow_run_id: string | null;
+    task_run_id: string | null;
+}
+
+type LogStreamState = 'idle' | 'connecting' | 'listening' | 'finished' | 'stopped' | 'error';
+
 const videoFile = ref<File | null>(null);
 const settings = reactive({
-    fps: 2,
-    fitInWidth: 1920,
-    fitInHeight: 1920,
+    ffmpeg: {
+        fps: 2,
+        fitInWidth: 1920,
+        fitInHeight: 1920,
+    },
+    colmap: {
+        dataType: 'video',
+        quality: 'low',
+        cameraModel: 'OPENCV',
+        singleCamera: true,
+        useGpu: false,
+        useGlobalMapper: false,
+    },
 });
+const colmapDataTypeOptions = [
+    { label: 'Individual images', value: 'individual' },
+    { label: 'Video frames', value: 'video' },
+    { label: 'Internet images', value: 'internet' },
+];
+const colmapQualityOptions = ['low', 'medium', 'high', 'extreme'];
+const colmapCameraModelOptions = ['PINHOLE', 'OPENCV', 'OPENCV_FISHEYE', 'RADIAL'];
 const workflowId = ref('');
 const workflowStatus = ref<WorkflowStatusResponse | null>(null);
+const workflowLogs = ref<WorkflowLog[]>([]);
+const logStreamState = ref<LogStreamState>('idle');
+const logStreamError = ref('');
+const logsContainer = ref<HTMLElement | null>(null);
+let logStreamController: AbortController | null = null;
 
 const activeRequest = ref<RequestName | null>(null);
 const responseLabel = ref('');
@@ -195,14 +319,26 @@ const isBusy = computed(() => activeRequest.value !== null);
 const canSubmit = computed(
     () =>
         videoFile.value !== null &&
-        settings.fps > 0 &&
-        settings.fitInWidth > 0 &&
-        settings.fitInHeight > 0,
+        settings.ffmpeg.fps > 0 &&
+        settings.ffmpeg.fitInWidth > 0 &&
+        settings.ffmpeg.fitInHeight > 0,
 );
 const formattedResponse = computed(() => {
     if (!responseLabel.value) return 'Responses will appear here.';
     if (typeof responseBody.value === 'string') return responseBody.value;
     return JSON.stringify(responseBody.value, null, 2);
+});
+const logStreamStateColor = computed(() => {
+    switch (logStreamState.value) {
+        case 'listening':
+            return 'primary';
+        case 'finished':
+            return 'positive';
+        case 'error':
+            return 'negative';
+        default:
+            return 'grey-7';
+    }
 });
 
 async function captureRequest(
@@ -246,9 +382,24 @@ async function submitFrameExtraction(): Promise<void> {
 
     const formData = new FormData();
     formData.append('file', videoFile.value);
-    formData.append('fps', String(settings.fps));
-    formData.append('fit_in_width', String(settings.fitInWidth));
-    formData.append('fit_in_height', String(settings.fitInHeight));
+    formData.append(
+        'settings',
+        JSON.stringify({
+            ffmpeg: {
+                fps: settings.ffmpeg.fps,
+                fit_in_width: settings.ffmpeg.fitInWidth,
+                fit_in_height: settings.ffmpeg.fitInHeight,
+            },
+            colmap: {
+                data_type: settings.colmap.dataType,
+                quality: settings.colmap.quality,
+                camera_model: settings.colmap.cameraModel,
+                single_camera: settings.colmap.singleCamera,
+                use_gpu: settings.colmap.useGpu,
+                use_global_mapper: settings.colmap.useGlobalMapper,
+            },
+        }),
+    );
 
     const response = await captureRequest('submit', 'POST /workflows/frame-extraction', () =>
         authFetch(`${baseUrl}/workflows/frame-extraction`, {
@@ -260,7 +411,137 @@ async function submitFrameExtraction(): Promise<void> {
     if (response?.ok && isRecord(response.body) && typeof response.body.workflow_id === 'string') {
         workflowId.value = response.body.workflow_id;
         workflowStatus.value = null;
+        void listenToWorkflow(response.body.workflow_id);
     }
+}
+
+async function listenToWorkflow(runId: string): Promise<void> {
+    stopLogStream();
+    workflowLogs.value = [];
+    logStreamError.value = '';
+    logStreamState.value = 'connecting';
+
+    const controller = new AbortController();
+    logStreamController = controller;
+
+    try {
+        const response = await authFetch(
+            `${baseUrl}/workflows/listen/${encodeURIComponent(runId)}`,
+            {
+                headers: { Accept: 'text/event-stream' },
+                signal: controller.signal,
+            },
+        );
+        if (!response.ok) {
+            throw new Error(`Workflow log stream returned HTTP ${response.status}`);
+        }
+        if (!response.body) {
+            throw new Error('Workflow log stream did not provide a response body');
+        }
+
+        logStreamState.value = 'listening';
+        await readServerSentEvents(response.body, handleWorkflowLogEvent);
+        if (logStreamController === controller) {
+            logStreamState.value = 'finished';
+        }
+    } catch (error) {
+        if (controller.signal.aborted) return;
+        logStreamError.value = error instanceof Error ? error.message : String(error);
+        logStreamState.value = 'error';
+    } finally {
+        if (logStreamController === controller) {
+            logStreamController = null;
+        }
+    }
+}
+
+async function readServerSentEvents(
+    stream: ReadableStream<Uint8Array>,
+    onEvent: (event: string, data: unknown) => void,
+): Promise<void> {
+    const reader = stream.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            buffer += decoder.decode(value, { stream: !done });
+
+            let eventBoundary = buffer.indexOf('\n\n');
+            while (eventBoundary !== -1) {
+                parseServerSentEvent(buffer.slice(0, eventBoundary), onEvent);
+                buffer = buffer.slice(eventBoundary + 2);
+                eventBoundary = buffer.indexOf('\n\n');
+            }
+
+            if (done) {
+                if (buffer.trim()) parseServerSentEvent(buffer, onEvent);
+                return;
+            }
+        }
+    } finally {
+        reader.releaseLock();
+    }
+}
+
+function parseServerSentEvent(
+    rawEvent: string,
+    onEvent: (event: string, data: unknown) => void,
+): void {
+    let event = 'message';
+    const dataLines: string[] = [];
+
+    for (const line of rawEvent.split(/\r?\n/)) {
+        if (line.startsWith('event:')) {
+            event = line.slice('event:'.length).trimStart();
+        } else if (line.startsWith('data:')) {
+            dataLines.push(line.slice('data:'.length).trimStart());
+        }
+    }
+
+    if (dataLines.length === 0) return;
+    onEvent(event, JSON.parse(dataLines.join('\n')) as unknown);
+}
+
+function handleWorkflowLogEvent(event: string, data: unknown): void {
+    if (event === 'snapshot' && isRecord(data) && Array.isArray(data.logs)) {
+        workflowLogs.value = data.logs.filter(isWorkflowLog);
+        void scrollLogsToBottom();
+        return;
+    }
+
+    if (event === 'log' && isWorkflowLog(data)) {
+        workflowLogs.value.push(data);
+        void scrollLogsToBottom();
+    }
+}
+
+function isWorkflowLog(value: unknown): value is WorkflowLog {
+    return (
+        isRecord(value) &&
+        typeof value.id === 'string' &&
+        typeof value.timestamp === 'string' &&
+        typeof value.level === 'number' &&
+        typeof value.name === 'string' &&
+        typeof value.message === 'string' &&
+        (typeof value.flow_run_id === 'string' || value.flow_run_id === null) &&
+        (typeof value.task_run_id === 'string' || value.task_run_id === null)
+    );
+}
+
+async function scrollLogsToBottom(): Promise<void> {
+    await nextTick();
+    if (logsContainer.value) {
+        logsContainer.value.scrollTop = logsContainer.value.scrollHeight;
+    }
+}
+
+function stopLogStream(): void {
+    if (!logStreamController) return;
+    logStreamController.abort();
+    logStreamController = null;
+    logStreamState.value = 'stopped';
 }
 
 async function checkStatus(): Promise<void> {
@@ -295,6 +576,8 @@ async function getResult(): Promise<void> {
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null;
 }
+
+onBeforeUnmount(stopLogStream);
 </script>
 
 <style scoped>
@@ -308,5 +591,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     margin: 0;
     overflow-wrap: anywhere;
     white-space: pre-wrap;
+}
+
+.workflow-logs {
+    min-height: 8rem;
+    max-height: 24rem;
+    overflow: auto;
+    font-family: monospace;
+    font-size: 0.8rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.workflow-log-line {
+    padding: 0.1rem 0;
 }
 </style>
