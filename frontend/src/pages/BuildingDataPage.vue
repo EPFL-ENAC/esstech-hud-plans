@@ -1,23 +1,11 @@
 <template>
-    <q-page class="od-page od-page--scroll bg-white text-dark">
-        <div class="od-topbar">
-            <q-btn
-                flat
-                dense
-                color="primary"
-                icon="arrow_back"
-                label="Back"
-                no-caps
-                class="od-topbar__back"
-                @click="$router.back()"
-            />
-            <div class="od-topbar__title">My Building - Building Data</div>
-        </div>
+    <q-page class="bg-white text-dark q-px-md q-pb-xl" style="padding-top: 64px">
+        <page-header title="My Building - Building Data" />
 
         <section class="q-mb-lg">
-            <h2 class="od-h-form q-mb-md">Localization</h2>
-            <q-input v-model="address" outlined label="Address" class="od-field q-mb-md" />
-            <q-input v-model="coordinates" outlined label="GPS Coordinates" class="od-field">
+            <h2 class="text-subtitle1 text-weight-bold q-mb-md">Localization</h2>
+            <q-input v-model="address" outlined label="Address" class="q-mb-md" />
+            <q-input v-model="coordinates" outlined label="GPS Coordinates">
                 <template #append>
                     <q-btn flat dense icon="location_on" color="primary" />
                 </template>
@@ -25,31 +13,39 @@
         </section>
 
         <section class="q-mb-lg">
-            <h2 class="od-h-form q-mb-md">Classification</h2>
+            <h2 class="text-subtitle1 text-weight-bold q-mb-md">Classification</h2>
             <q-select
                 v-model="buildingType"
                 outlined
                 :options="buildingTypeOptions"
                 label="Building Type"
-                class="od-field q-mb-md"
+                class="q-mb-md"
             />
 
-            <div class="od-material-chips q-mb-md">
-                <div v-for="material in materials" :key="material" class="od-material-chip">
-                    <div
-                        class="od-material-chip__swatch"
+            <div class="row wrap q-gutter-sm q-mb-md">
+                <q-chip
+                    v-for="material in materials"
+                    :key="material"
+                    square
+                    outline
+                    color="primary"
+                    class="bg-secondary"
+                    removable
+                    @remove="removeMaterial(material)"
+                >
+                    <q-avatar
+                        size="20px"
+                        style="
+                            border-radius: 4px;
+                            border: 1px solid #e5e5ea;
+                            background-size: cover;
+                        "
                         :style="{
                             backgroundImage: `url(${swatchUrl(material)})`,
-                            backgroundSize: 'cover',
                         }"
                     />
-                    <span>{{ material }}</span>
-                    <q-icon
-                        name="close"
-                        class="od-material-chip__remove"
-                        @click="removeMaterial(material)"
-                    />
-                </div>
+                    {{ material }}
+                </q-chip>
             </div>
 
             <q-select
@@ -57,14 +53,14 @@
                 outlined
                 :options="intendedUseOptions"
                 label="Intended Use"
-                class="od-field q-mb-md"
+                class="q-mb-md"
             />
         </section>
 
         <q-btn
             label="Generate building recommendations"
             color="primary"
-            class="od-btn full-width"
+            class="full-width"
             unelevated
             no-caps
             @click="generate"
@@ -75,6 +71,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useQuasar } from 'quasar';
+import PageHeader from 'src/components/PageHeader.vue';
 
 const $q = useQuasar();
 

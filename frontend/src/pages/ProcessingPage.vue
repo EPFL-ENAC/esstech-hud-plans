@@ -1,20 +1,11 @@
 <template>
-    <q-page class="od-page od-page--scroll od-processing-page bg-white text-dark">
-        <div class="od-topbar">
-            <q-btn
-                flat
-                dense
-                color="primary"
-                icon="arrow_back"
-                label="Back"
-                no-caps
-                class="od-topbar__back"
-                @click="$router.back()"
-            />
-            <div class="od-topbar__title">Processing</div>
-        </div>
+    <q-page
+        class="bg-white text-dark q-px-md"
+        style="padding-top: 64px; display: flex; flex-direction: column; align-items: center"
+    >
+        <page-header title="Processing" />
 
-        <div class="q-mt-lg" style="margin-bottom: 32px">
+        <div class="column items-center text-center q-mt-lg">
             <q-circular-progress
                 show-value
                 :value="building?.progress ?? 0"
@@ -23,28 +14,30 @@
                 color="primary"
                 track-color="grey-3"
             >
-                <span class="od-processing-percent">{{ building?.progress ?? 0 }}%</span>
+                <span class="text-h4 text-primary text-weight-medium">
+                    {{ building?.progress ?? 0 }}%
+                </span>
             </q-circular-progress>
-        </div>
 
-        <h1 class="od-h-section q-mb-sm">Processing - {{ building?.name ?? 'Building' }}</h1>
-        <p class="od-processing-size" style="margin-bottom: 32px">
-            {{ uploadedSize }} / {{ totalSize }}
-        </p>
+            <h1 class="text-h6 text-weight-bold q-mb-sm q-mt-lg">
+                Processing - {{ building?.name ?? 'Building' }}
+            </h1>
+            <p class="text-body2 text-grey-6 q-mb-xl">{{ uploadedSize }} / {{ totalSize }}</p>
 
-        <q-btn
-            label="Cancel Processing"
-            outline
-            color="negative"
-            class="od-btn full-width q-mb-md"
-            unelevated
-            no-caps
-            @click="confirmCancel"
-        />
+            <q-btn
+                label="Cancel Processing"
+                outline
+                color="negative"
+                class="full-width q-mb-md"
+                unelevated
+                no-caps
+                @click="confirmCancel"
+            />
 
-        <div class="od-processing-info">
-            Processing takes 10–60 min after upload. You'll receive a push notification when your
-            plan is ready.
+            <q-banner rounded class="bg-secondary text-primary text-left q-pa-md">
+                Processing takes 10-60 min after upload. You'll receive a push notification when
+                your plan is ready.
+            </q-banner>
         </div>
     </q-page>
 </template>
@@ -54,6 +47,7 @@ import { computed, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import { useBuildingsStore } from 'src/stores/buildings';
+import PageHeader from 'src/components/PageHeader.vue';
 
 const route = useRoute();
 const router = useRouter();

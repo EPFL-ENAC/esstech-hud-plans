@@ -1,30 +1,23 @@
 <template>
-    <q-page class="od-page od-page--scroll bg-white text-dark">
-        <div class="od-topbar">
-            <q-btn
-                flat
-                dense
-                color="primary"
-                icon="arrow_back"
-                label="Back"
-                no-caps
-                class="od-topbar__back"
-                @click="$router.back()"
-            />
-            <div class="od-topbar__title">New Capture</div>
-        </div>
+    <q-page class="bg-white text-dark q-px-md q-pb-xl" style="padding-top: 64px">
+        <page-header title="New Capture" />
 
-        <div class="od-placeholder">Video Preview</div>
+        <q-card flat bordered square class="bg-grey-3 flex flex-center text-grey-7 q-mb-md">
+            <div class="column items-center q-py-xl q-gutter-sm">
+                <q-icon name="movie" size="48px" />
+                <span>Video Preview</span>
+            </div>
+        </q-card>
         <div class="text-primary q-mb-md">2:34 &nbsp; 253mb</div>
 
-        <q-input v-model="name" outlined label="Building 1" class="od-field q-mb-md" />
+        <q-input v-model="name" outlined label="Building 1" class="q-mb-md" />
 
         <q-input
             v-model="description"
             type="textarea"
             outlined
             label="Description"
-            class="od-field od-field--textarea q-mb-md"
+            class="q-mb-md"
         />
 
         <q-select
@@ -32,13 +25,13 @@
             outlined
             :options="environmentOptions"
             label="Environment"
-            class="od-field q-mb-xl"
+            class="q-mb-xl"
         />
 
         <q-btn
             label="Start Processing (10-60min)"
             color="primary"
-            class="od-btn full-width"
+            class="full-width"
             unelevated
             no-caps
             @click="startProcessing"
@@ -51,6 +44,7 @@ import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import { useBuildingsStore } from 'src/stores/buildings';
+import PageHeader from 'src/components/PageHeader.vue';
 
 const router = useRouter();
 const $q = useQuasar();

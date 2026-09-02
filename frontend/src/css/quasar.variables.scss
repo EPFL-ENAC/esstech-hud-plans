@@ -9,8 +9,8 @@
 // ---------------------------------------------------------------------------
 // Brand palette
 // ---------------------------------------------------------------------------
-$primary: #00a9a5;
-$secondary: #e6f6f6;
+$primary: #00a79f;
+$secondary: #e6e6e6;
 $accent: #ff3b30;
 
 $dark: #1c1c1e;
@@ -20,43 +20,3 @@ $positive: #34c759;
 $negative: #ff3b30;
 $info: #5ac8fa;
 $warning: #ff9500;
-
-// ---------------------------------------------------------------------------
-// App-specific design tokens
-// Used in app.scss and by the small set of custom color helpers there.
-// Quasar has no built-in token for these exact iOS shades, so they live here.
-// ---------------------------------------------------------------------------
-$od-background: #ffffff;
-$od-surface: #f2f2f7;
-$od-text: #1c1c1e;
-$od-muted: #8e8e93;
-$od-border: #e5e5ea;
-$od-hover: mix($od-background, $od-surface, 50%);
-
-// Radius scale
-$od-radius-sm: 3px;
-$od-radius-md: 4px;
-$od-radius-lg: 5px;
-$od-radius-pill: 9999px;
-
-// Spacing scale (xs..lg match Quasar; xl kept at 32px to match the design)
-$od-space-xs: 4px;
-$od-space-sm: 8px;
-$od-space-md: 16px;
-$od-space-lg: 24px;
-$od-space-xl: 32px;
-
-// ---------------------------------------------------------------------------
-// Quasar controls
-// ---------------------------------------------------------------------------
-// Base corner radius for cards, buttons, fields, etc.
-$generic-border-radius: $od-radius-md;
-
-// Hairline / separator color used by q-separator, q-table and q-layout borders.
-$separator-color: $od-border;
-$separator-dark-color: $od-border;
-
-// Quasar ships a few type sizes in px. Convert them to rem so they follow
-// the global text scale (set on <html> in app.scss) like everything else.
-$button-font-size: 0.875rem; // was 14px
-$chip-font-size: 0.875rem; // was 14px

@@ -1,35 +1,34 @@
 <template>
-    <q-page class="od-page od-page--scroll bg-white text-dark">
-        <div class="od-topbar">
-            <div class="od-topbar__title">Library</div>
+    <q-page class="bg-white text-dark q-px-md q-pb-xl" style="padding-top: 64px">
+        <page-header :back="false" title="Library">
             <q-btn
                 flat
                 no-caps
                 color="primary"
                 label="New Capture"
-                class="od-topbar__action"
                 @click="$router.push('/capture')"
             />
-        </div>
+        </page-header>
 
         <q-tabs
             v-model="tab"
             no-caps
             indicator-color="primary"
             align="left"
-            class="od-library-tabs"
+            bordered
+            class="q-mb-md"
         >
             <q-tab name="list" label="List" />
             <q-tab name="map" label="Map" />
         </q-tabs>
 
-        <q-input v-model="search" outlined placeholder="Search" class="od-search q-my-md">
+        <q-input v-model="search" outlined rounded placeholder="Search" class="q-mb-md">
             <template #prepend>
                 <q-icon name="search" />
             </template>
         </q-input>
 
-        <q-list v-if="tab === 'list'" class="od-list-flush">
+        <building-list v-if="tab === 'list'">
             <building-list-item
                 v-for="building in filteredBuildings"
                 :key="building.id"
@@ -37,10 +36,17 @@
                 :show-chevron="building.status === 'ready'"
                 @click="openBuilding(building.id)"
             />
-        </q-list>
+        </building-list>
 
-        <div v-else class="od-map" style="aspect-ratio: 3/4">
-            <svg viewBox="0 0 320 420" class="fit" preserveAspectRatio="xMidYMid slice">
+        <q-card
+            v-else
+            flat
+            bordered
+            square
+            class="bg-grey-3 relative-position"
+            style="aspect-ratio: 3 / 4; overflow: hidden"
+        >
+            <svg viewBox="0 0 320 420" class="absolute-full" preserveAspectRatio="xMidYMid slice">
                 <rect width="320" height="420" fill="#f2f2f7" />
                 <g stroke="#c7c7cc" stroke-width="6" fill="none" stroke-linecap="round">
                     <path d="M-10 80 Q80 60 120 120 T240 100 T340 160" />
@@ -62,21 +68,28 @@
             <div
                 v-for="building in buildingsStore.buildings"
                 :key="building.id"
-                class="od-map__marker"
+                class="absolute column items-center"
                 :style="{
                     left: `${(building.x / 320) * 100}%`,
                     top: `${(building.y / 420) * 100}%`,
+                    transform: 'translate(-50%, -50%)',
+                    cursor: 'pointer',
                 }"
                 @click="openBuilding(building.id)"
             >
-                <div class="od-map__label">{{ building.name }}</div>
-                <div class="od-map__pin" />
-                <div v-if="building.status === 'processing'" class="od-map__callout">
-                    <div class="od-map__callout-title">{{ building.name }}</div>
-                    <div class="od-map__callout-status">Processing {{ building.progress }}%</div>
-                </div>
+                <q-badge rounded color="primary" class="q-mb-xs">{{ building.name }}</q-badge>
+                <q-icon name="place" color="primary" size="28px" />
+                <q-badge
+                    v-if="building.status === 'processing'"
+                    rounded
+                    outline
+                    color="negative"
+                    class="bg-red-1 q-mt-xs"
+                >
+                    Processing {{ building.progress }}%
+                </q-badge>
             </div>
-        </div>
+        </q-card>
     </q-page>
 </template>
 
@@ -85,6 +98,8 @@ import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useBuildingsStore } from 'src/stores/buildings';
 import BuildingListItem from 'src/components/BuildingListItem.vue';
+import PageHeader from 'src/components/PageHeader.vue';
+import BuildingList from 'src/components/BuildingList.vue';
 
 const router = useRouter();
 const buildingsStore = useBuildingsStore();
@@ -107,11 +122,3 @@ function openBuilding(id: string) {
     }
 }
 </script>
-
-<style scoped>
-.fit {
-    width: 100%;
-    height: 100%;
-    display: block;
-}
-</style>

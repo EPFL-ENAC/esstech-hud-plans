@@ -1,25 +1,39 @@
 <template>
-    <q-page class="od-page od-page--scroll bg-white text-dark">
+    <q-page class="bg-white text-dark q-pa-md q-pb-xl">
         <section class="q-mb-lg">
-            <h2 class="od-h-section q-mb-md">Quick Actions</h2>
+            <h2 class="text-h6 text-weight-bold q-mb-md">Quick Actions</h2>
             <div class="row q-col-gutter-md">
                 <div class="col-6">
-                    <q-card flat bordered class="cursor-pointer" @click="$router.push('/capture')">
-                        <q-card-section class="q-pa-md column">
-                            <div class="od-icon-box">
+                    <q-card flat bordered clickable @click="$router.push('/capture')">
+                        <q-card-section class="column">
+                            <q-avatar
+                                square
+                                size="48px"
+                                font-size="24px"
+                                color="white"
+                                text-color="primary"
+                                class="avatar-icon"
+                            >
                                 <q-icon name="photo_camera" />
-                            </div>
-                            <div class="od-title q-mt-sm">New Capture</div>
+                            </q-avatar>
+                            <div class="text-subtitle1 text-weight-medium q-mt-sm">New Capture</div>
                         </q-card-section>
                     </q-card>
                 </div>
                 <div class="col-6">
-                    <q-card flat bordered class="cursor-pointer" @click="$router.push('/library')">
-                        <q-card-section class="q-pa-md column">
-                            <div class="od-icon-box">
+                    <q-card flat bordered clickable @click="$router.push('/library')">
+                        <q-card-section class="column">
+                            <q-avatar
+                                square
+                                size="48px"
+                                font-size="24px"
+                                color="white"
+                                text-color="primary"
+                                class="avatar-icon"
+                            >
                                 <q-icon name="list" />
-                            </div>
-                            <div class="od-title q-mt-sm">Library</div>
+                            </q-avatar>
+                            <div class="text-subtitle1 text-weight-medium q-mt-sm">Library</div>
                         </q-card-section>
                     </q-card>
                 </div>
@@ -27,20 +41,20 @@
         </section>
 
         <section v-if="buildingsStore.inProgressBuildings.length" class="q-mb-lg">
-            <h2 class="od-h-section q-mb-md">In Progress</h2>
-            <q-list class="od-list-flush">
+            <h2 class="text-h6 text-weight-bold q-mb-md">In Progress</h2>
+            <building-list>
                 <building-list-item
                     v-for="building in buildingsStore.inProgressBuildings"
                     :key="building.id"
                     :building="building"
                     @click="openBuilding(building.id)"
                 />
-            </q-list>
+            </building-list>
         </section>
 
         <section>
-            <h2 class="od-h-section q-mb-md">Recent</h2>
-            <q-list class="od-list-flush">
+            <h2 class="text-h6 text-weight-bold q-mb-md">Recent</h2>
+            <building-list>
                 <building-list-item
                     v-for="building in buildingsStore.readyBuildings"
                     :key="building.id"
@@ -48,7 +62,7 @@
                     show-chevron
                     @click="openBuilding(building.id)"
                 />
-            </q-list>
+            </building-list>
         </section>
     </q-page>
 </template>
@@ -57,6 +71,7 @@
 import { useRouter } from 'vue-router';
 import { useBuildingsStore } from 'src/stores/buildings';
 import BuildingListItem from 'src/components/BuildingListItem.vue';
+import BuildingList from 'src/components/BuildingList.vue';
 
 const router = useRouter();
 const buildingsStore = useBuildingsStore();

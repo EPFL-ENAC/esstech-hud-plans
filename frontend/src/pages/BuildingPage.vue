@@ -1,88 +1,98 @@
 <template>
-    <q-page class="od-page od-page--scroll bg-white text-dark">
-        <div class="od-topbar">
-            <q-btn
-                flat
-                dense
-                color="primary"
-                icon="arrow_back"
-                label="Back"
-                no-caps
-                class="od-topbar__back"
-                @click="$router.back()"
-            />
-            <div class="od-topbar__title">{{ building?.name ?? 'Building' }}</div>
-        </div>
+    <q-page class="bg-white text-dark q-px-md q-pb-xl" style="padding-top: 64px">
+        <page-header :title="building?.name ?? 'Building'" />
 
-        <div class="od-placeholder">Source Video</div>
+        <q-card flat bordered square class="bg-grey-3 flex flex-center text-grey-7 q-mb-md">
+            <div class="column items-center q-py-xl q-gutter-sm">
+                <q-icon name="ondemand_video" size="48px" />
+                <span>Source Video</span>
+            </div>
+        </q-card>
 
         <div class="row wrap items-center q-gutter-sm q-mb-md">
-            <q-chip dense outline color="primary" class="bg-primary-soft">{{
-                building?.address
-            }}</q-chip>
-            <q-chip dense outline color="primary" class="bg-primary-soft">{{
-                building?.size
-            }}</q-chip>
-            <q-chip dense outline color="primary" class="bg-primary-soft">{{
-                building?.duration
-            }}</q-chip>
+            <q-chip outline color="primary" class="bg-teal-1">{{ building?.address }}</q-chip>
+            <q-chip outline color="primary" class="bg-teal-1">{{ building?.size }}</q-chip>
+            <q-chip outline color="primary" class="bg-teal-1">{{ building?.duration }}</q-chip>
         </div>
 
-        <p class="text-muted q-mb-lg">{{ building?.description }}</p>
+        <p class="text-grey-6 q-mb-lg">{{ building?.description }}</p>
 
         <section class="q-mb-lg">
-            <h2 class="od-h-section q-mb-lg">Associated Plan</h2>
+            <h2 class="text-h6 text-weight-bold q-mb-lg">Associated Plan</h2>
             <q-list class="q-gutter-y-md">
-                <q-item
-                    class="od-card-row"
+                <q-card
+                    flat
+                    bordered
                     clickable
-                    tabindex="0"
                     @click="$router.push(`/library/building/${buildingId}/plan/2d`)"
+                    class="q-py-sm"
                 >
-                    <q-item-section avatar>
-                        <div class="od-icon-box">
-                            <floor-plan-thumb />
-                        </div>
-                    </q-item-section>
-                    <q-item-section class="q-gutter-y-xs">
-                        <div class="od-title">2D Plan</div>
-                        <div class="od-subtitle">
-                            Top-down floor plan with measurements and annotations
-                        </div>
-                    </q-item-section>
-                    <q-item-section side>
-                        <q-icon name="chevron_right" size="20px" color="dark" />
-                    </q-item-section>
-                </q-item>
+                    <q-item>
+                        <q-item-section avatar>
+                            <q-avatar
+                                square
+                                size="48px"
+                                color="white"
+                                text-color="primary"
+                                class="avatar-icon"
+                            >
+                                <floor-plan-thumb />
+                            </q-avatar>
+                        </q-item-section>
+                        <q-item-section>
+                            <q-item-label class="text-subtitle1 text-weight-medium"
+                                >2D Plan</q-item-label
+                            >
+                            <q-item-label caption
+                                >Top-down floor plan with measurements and annotations</q-item-label
+                            >
+                        </q-item-section>
+                        <q-item-section side>
+                            <q-icon name="chevron_right" size="20px" color="dark" />
+                        </q-item-section>
+                    </q-item>
+                </q-card>
 
-                <q-item
-                    class="od-card-row"
+                <q-card
+                    flat
+                    bordered
                     clickable
-                    tabindex="0"
                     @click="$router.push(`/library/building/${buildingId}/plan/3d`)"
+                    class="q-py-sm"
                 >
-                    <q-item-section avatar>
-                        <div class="od-icon-box">
-                            <q-icon name="view_in_ar" size="31px" />
-                        </div>
-                    </q-item-section>
-                    <q-item-section class="q-gutter-y-xs">
-                        <div class="od-title">3D Plan</div>
-                        <div class="od-subtitle">
-                            Interactive 3D model with orbit and export controls
-                        </div>
-                    </q-item-section>
-                    <q-item-section side>
-                        <q-icon name="chevron_right" size="20px" color="dark" />
-                    </q-item-section>
-                </q-item>
+                    <q-item>
+                        <q-item-section avatar>
+                            <q-avatar
+                                square
+                                size="48px"
+                                font-size="31px"
+                                color="white"
+                                text-color="primary"
+                                class="avatar-icon"
+                            >
+                                <q-icon name="view_in_ar" />
+                            </q-avatar>
+                        </q-item-section>
+                        <q-item-section>
+                            <q-item-label class="text-subtitle1 text-weight-medium"
+                                >3D Plan</q-item-label
+                            >
+                            <q-item-label caption
+                                >Interactive 3D model with orbit and export controls</q-item-label
+                            >
+                        </q-item-section>
+                        <q-item-section side>
+                            <q-icon name="chevron_right" size="20px" color="dark" />
+                        </q-item-section>
+                    </q-item>
+                </q-card>
             </q-list>
         </section>
 
         <q-btn
             label="Create Building Data and Report"
             color="primary"
-            class="od-btn full-width q-mb-md"
+            class="full-width q-mb-md"
             unelevated
             no-caps
             @click="$router.push(`/library/building/${buildingId}/data`)"
@@ -92,7 +102,7 @@
             label="Delete Capture"
             outline
             color="negative"
-            class="od-btn full-width"
+            class="full-width"
             unelevated
             no-caps
             @click="confirmDelete"
@@ -106,6 +116,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import { useBuildingsStore } from 'src/stores/buildings';
 import FloorPlanThumb from 'src/components/FloorPlanThumb.vue';
+import PageHeader from 'src/components/PageHeader.vue';
 
 const route = useRoute();
 const router = useRouter();
