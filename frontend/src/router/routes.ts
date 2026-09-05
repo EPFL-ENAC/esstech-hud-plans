@@ -20,6 +20,11 @@ const routes: RouteRecordRaw[] = [
                 path: '/admin',
                 component: () => import('pages/AdminPage.vue'),
             },
+            {
+                // Temporary developer route for testing the workflows API.
+                path: '/workflow-test',
+                component: () => import('pages/WorkflowTestPage.vue'),
+            },
         ],
     },
 

@@ -5,7 +5,9 @@ import secrets
 import shlex
 import subprocess
 import threading
+from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 
 import paramiko
 from api.config import config
@@ -14,6 +16,14 @@ from api.lib.compute.remote import RemoteCompute, StepName
 logger = logging.getLogger("uvicorn.error")
 
 LOGS_DIR_PATH = "log"
+type ScitasLogCapture = Literal["stdout", "stderr", "combined"]
+
+
+@dataclass(frozen=True)
+class ScitasJobResult:
+    state: str
+    return_code: int
+
 
 # Persistent SSH client ---------------------------------------------------
 _ssh_client: paramiko.SSHClient | None = None
@@ -54,6 +64,11 @@ SLURM_STATES_FAILED = {
     "NODE_FAIL",
     "PREEMPTED",
 }
+
+
+def _normalize_slurm_state(state: str) -> str:
+    """Return the canonical state from Slurm's optionally annotated value."""
+    return state.strip().split(maxsplit=1)[0].removesuffix("+")
 
 
 def _get_ssh_client() -> paramiko.SSHClient:
@@ -203,8 +218,13 @@ class Scitas(RemoteCompute):
         command: list[str],
         n_gpu: int = 1,
         workspace_rel_path: str | None = None,
+        working_directory_rel_path: str | None = None,
+        capture: ScitasLogCapture = "combined",
     ) -> str:
         """Submit a Slurm batch job via SSH and return our internal job name."""
+        if working_directory_rel_path is not None and workspace_rel_path is None:
+            raise ValueError("working_directory_rel_path requires workspace_rel_path")
+
         hex_suffix = secrets.token_hex(4)
         job_name = f"{tool}-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{hex_suffix}"
 
@@ -215,6 +235,16 @@ class Scitas(RemoteCompute):
         )
 
         log_file_abs = posixpath.join(export_root, LOGS_DIR_PATH, f"{job_name}.log")
+        os.makedirs(os.path.dirname(Scitas.get_log_file_path(job_name)), exist_ok=True)
+        if capture == "stdout":
+            stdout_path, stderr_path = log_file_abs, "/dev/null"
+        elif capture == "stderr":
+            stdout_path, stderr_path = "/dev/null", log_file_abs
+        elif capture == "combined":
+            stdout_path = stderr_path = log_file_abs
+        else:
+            raise ValueError(f"Unsupported command log capture mode: {capture}")
+
         shell_cmd = " ".join(shlex.quote(arg) for arg in command)
         account_line = (
             f"#SBATCH --account={config.SCITAS_ACCOUNT}\n"
@@ -230,13 +260,27 @@ class Scitas(RemoteCompute):
 #SBATCH --cpus-per-task=5
 #SBATCH --mem=28G
 #SBATCH --time=12:00:00
-#SBATCH --output={log_file_abs}
-#SBATCH --error={log_file_abs}
+#SBATCH --output={stdout_path}
+#SBATCH --error={stderr_path}
 {config.SCITAS_SBATCH_ARGS_BRUSH if tool == "brush" else config.SCITAS_SBATCH_ARGS_COLMAP}
 """
 
         if workspace_rel_path:
             workspace_rel = workspace_rel_path.lstrip("/")
+            working_directory_rel = (
+                working_directory_rel_path.lstrip("/")
+                if working_directory_rel_path is not None
+                else None
+            )
+            working_directory_assignment = (
+                (
+                    "WORKING_DIRECTORY_REL="
+                    f"{shlex.quote(working_directory_rel)}\n"
+                    'WORKING_DIR="$SCRATCH_ROOT/$WORKING_DIRECTORY_REL"'
+                )
+                if working_directory_rel is not None
+                else 'WORKING_DIR="$SCRATCH_ROOT"'
+            )
             batch_script += f"""
 set -e
 EXPORT_ROOT={shlex.quote(export_root)}
@@ -250,13 +294,21 @@ mkdir -p "$(dirname {shlex.quote(log_file_abs)})"
 # Stage-in: copy data from export to scratch
 rsync -avL --ignore-existing "$EXPORT_DIR/" "$SCRATCH_DIR/"
 
-cd "$SCRATCH_ROOT" || cd "$HOME"
+{working_directory_assignment}
+cd "$WORKING_DIR"
 
 # Run inside apptainer with GPU support
+set +e
 apptainer exec --nv {shlex.quote(image_name)} {shell_cmd}
+COMMAND_EXIT_CODE=$?
 
 # Stage-out: copy results back to export
 rsync -avL --ignore-existing "$SCRATCH_DIR/" "$EXPORT_DIR/"
+STAGE_OUT_EXIT_CODE=$?
+if [ "$COMMAND_EXIT_CODE" -ne 0 ]; then
+    exit "$COMMAND_EXIT_CODE"
+fi
+exit "$STAGE_OUT_EXIT_CODE"
 """
         else:
             batch_script += f"""
@@ -306,16 +358,62 @@ apptainer exec --nv {shlex.quote(image_name)} {shell_cmd}
         # Running / pending jobs are visible in squeue
         out, _, rc = _exec_ssh_command(f"squeue -j {shlex.quote(job_id)} -h -o '%T'")
         if rc == 0 and out:
-            return out.strip()
+            return _normalize_slurm_state(out)
 
         # Job has left the queue – look up its final state in sacct
         out, _, rc = _exec_ssh_command(
             f"sacct -j {shlex.quote(job_id)} -n -P -o State | head -n 1"
         )
         if rc == 0 and out:
-            return out.strip()
+            return _normalize_slurm_state(out)
 
         return None
+
+    @staticmethod
+    def get_job_result(job_name: str) -> ScitasJobResult | None:
+        """Return the terminal Slurm state and process exit code when available."""
+        job_id = _get_slurm_job_id(job_name)
+        if job_id is None:
+            return None
+
+        out, _, rc = _exec_ssh_command(
+            f"sacct -X -j {shlex.quote(job_id)} -n -P -o State,ExitCode | head -n 1"
+        )
+        if rc != 0 or not out:
+            return None
+
+        state_value, separator, exit_code_value = out.partition("|")
+        if not separator:
+            return None
+
+        state = _normalize_slurm_state(state_value)
+        if state not in SLURM_STATES_COMPLETED:
+            return None
+
+        exit_status, separator, signal_status = exit_code_value.strip().partition(":")
+        try:
+            return_code = int(exit_status)
+            signal = int(signal_status) if separator else 0
+        except ValueError:
+            return None
+
+        if return_code == 0 and signal != 0:
+            return_code = 128 + signal
+        if return_code == 0 and state in SLURM_STATES_FAILED:
+            return_code = 1
+
+        return ScitasJobResult(state=state, return_code=return_code)
+
+    @staticmethod
+    def cancel_job(job_name: str) -> None:
+        """Cancel a submitted Slurm job."""
+        job_id = _get_slurm_job_id(job_name)
+        if job_id is None:
+            raise RuntimeError(f"Could not resolve Slurm job ID for {job_name}")
+
+        _, error, return_code = _exec_ssh_command(f"scancel {shlex.quote(job_id)}")
+        if return_code != 0:
+            raise RuntimeError(f"Failed to cancel Scitas job {job_name}: {error}")
 
     @staticmethod
     def check_job_started(job_name: str) -> bool:

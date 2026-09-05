@@ -19,4 +19,9 @@ fi
 # Then, run `runai list projects` and `runai config project <project_name>` to set the default project
 
 rclone config create jumphost.rcp.epfl.ch sftp host=jumphost.rcp.epfl.ch user=$SSH_USERNAME key_file=/root/.ssh/id_ed25519
-uvicorn --host=0.0.0.0 --timeout-keep-alive=0 api.main:app --reload
+export PREFECT_API_URL=http://127.0.0.1:4200/api
+
+prefect server start --host 127.0.0.1 --port 4200 --no-ui --background
+python -m api.lib.workflows &
+
+exec uvicorn --host=0.0.0.0 --timeout-keep-alive=0 api.main:app
