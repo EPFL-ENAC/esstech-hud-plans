@@ -8,6 +8,7 @@ from .base import (
     LogCallback,
 )
 from .local import LOCAL_EXECUTABLES_DIRECTORY, LocalCommandExecutionEnvironment
+from .scitas import ScitasCommandExecutionEnvironment
 
 __all__ = [
     "LOCAL_EXECUTABLES_DIRECTORY",
@@ -19,4 +20,5 @@ __all__ = [
     "CommandResult",
     "LocalCommandExecutionEnvironment",
     "LogCallback",
+    "ScitasCommandExecutionEnvironment",
 ]

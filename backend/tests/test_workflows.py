@@ -299,8 +299,9 @@ def test_reconstruct_with_colmap_task_sends_output_to_prefect_run_logger(
     ]
 
 
-def test_frame_extraction_flow_runs_ffmpeg_before_colmap(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+@pytest.mark.parametrize("use_scitas", [False, True])
+def test_frame_extraction_flow_selects_colmap_environment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, use_scitas: bool
 ) -> None:
     calls: list[tuple] = []
     settings = FrameExtractionWorkflowSettings()
@@ -318,6 +319,7 @@ def test_frame_extraction_flow_runs_ffmpeg_before_colmap(
         return str(tmp_path / "colmap")
 
     monkeypatch.setattr(frame_workflow, "get_run_logger", lambda: FakeRunLogger())
+    monkeypatch.setattr(frame_workflow.config, "USE_SCITAS", use_scitas)
     monkeypatch.setattr(frame_workflow, "extract_frames_task", fake_extract_frames_task)
     monkeypatch.setattr(
         frame_workflow,
@@ -336,6 +338,11 @@ def test_frame_extraction_flow_runs_ffmpeg_before_colmap(
     )
 
     assert result == str(tmp_path / "colmap")
+    colmap_environment = (
+        frame_workflow.SCITAS_EXECUTION_ENVIRONMENT
+        if use_scitas
+        else frame_workflow.LOCAL_EXECUTION_ENVIRONMENT
+    )
     assert calls == [
         (
             "ffmpeg",
@@ -346,6 +353,7 @@ def test_frame_extraction_flow_runs_ffmpeg_before_colmap(
                 "fps": 2.0,
                 "fit_in_width": 1920,
                 "fit_in_height": 1920,
+                "execution_environment": frame_workflow.LOCAL_EXECUTION_ENVIRONMENT,
             },
         ),
         (
@@ -355,6 +363,7 @@ def test_frame_extraction_flow_runs_ffmpeg_before_colmap(
                 "frames_directory": str(tmp_path / "frames"),
                 "colmap_directory": str(tmp_path / "colmap"),
                 "settings": settings.colmap,
+                "execution_environment": colmap_environment,
             },
         ),
     ]

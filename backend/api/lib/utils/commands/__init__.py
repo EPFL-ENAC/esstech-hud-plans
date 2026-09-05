@@ -14,6 +14,7 @@ from .environments import (
     CommandResult,
     LocalCommandExecutionEnvironment,
     LogCallback,
+    ScitasCommandExecutionEnvironment,
 )
 
 __all__ = [
@@ -28,6 +29,7 @@ __all__ = [
     "CommandTool",
     "LocalCommandExecutionEnvironment",
     "LogCallback",
+    "ScitasCommandExecutionEnvironment",
     "iter_command_log_records",
     "workspace_relative_path",
 ]

@@ -4,11 +4,13 @@ from pathlib import Path
 from typing import Self
 from uuid import UUID, uuid4
 
+from api.config import config
 from api.lib.compute.colmap import run_colmap_reconstruction
 from api.lib.compute.ffmpeg import run_frame_extraction
 from api.lib.utils.commands import (
     CommandExecutionEnvironment,
     LocalCommandExecutionEnvironment,
+    ScitasCommandExecutionEnvironment,
 )
 from api.models.workflows import ColmapSettings, FrameExtractionWorkflowSettings
 from fastapi import UploadFile
@@ -19,6 +21,7 @@ from starlette.concurrency import run_in_threadpool
 
 FRAME_EXTRACTION_DEPLOYMENT = "frame-extraction/default"
 LOCAL_EXECUTION_ENVIRONMENT = LocalCommandExecutionEnvironment()
+SCITAS_EXECUTION_ENVIRONMENT = ScitasCommandExecutionEnvironment()
 
 
 @dataclass(frozen=True)
@@ -169,7 +172,11 @@ def frame_extraction_flow(
     run_logger = get_run_logger()
     run_logger.info("Starting frame extraction for artifact %s", artifact_id)
 
-    execution_environment = LOCAL_EXECUTION_ENVIRONMENT  # if scitas then set to a new class that inherits from CommandExecutionEnvironment and implements the execute method
+    colmap_execution_environment = (
+        SCITAS_EXECUTION_ENVIRONMENT
+        if config.USE_SCITAS
+        else LOCAL_EXECUTION_ENVIRONMENT
+    )
 
     extracted_frames_directory = extract_frames_task(
         workspace_directory=workspace_directory,
@@ -178,14 +185,14 @@ def frame_extraction_flow(
         fps=settings.ffmpeg.fps,
         fit_in_width=settings.ffmpeg.fit_in_width,
         fit_in_height=settings.ffmpeg.fit_in_height,
-        execution_environment=execution_environment,
+        execution_environment=LOCAL_EXECUTION_ENVIRONMENT,
     )
     return reconstruct_with_colmap_task(
         workspace_directory=workspace_directory,
         frames_directory=extracted_frames_directory,
         colmap_directory=colmap_directory,
         settings=settings.colmap,
-        execution_environment=execution_environment,
+        execution_environment=colmap_execution_environment,
     )
 
 
