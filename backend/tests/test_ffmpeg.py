@@ -47,6 +47,24 @@ def test_build_frame_extraction_command_uses_workspace_relative_paths(
     )
 
 
+def test_build_frame_extraction_command_can_extract_every_frame(
+    tmp_path: Path,
+) -> None:
+    command = ffmpeg.build_frame_extraction_command(
+        tmp_path / "input.mp4",
+        tmp_path / "frames_raw",
+        workspace_directory=tmp_path,
+        fps=None,
+        fit_in_width=1920,
+        fit_in_height=1080,
+    )
+
+    filter_index = command.arguments.index("-vf")
+    assert command.arguments[filter_index + 1] == (
+        "scale=1920:1080:force_original_aspect_ratio=decrease"
+    )
+
+
 def test_build_frame_extraction_command_rejects_paths_outside_workspace(
     tmp_path: Path,
 ) -> None:

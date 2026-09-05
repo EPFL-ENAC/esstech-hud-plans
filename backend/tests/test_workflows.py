@@ -15,6 +15,7 @@ from api.models.workflows import (
     BrushSettings,
     ColmapSettings,
     FfmpegSettings,
+    FramePickerSettings,
     SplatGenerationWorkflowSettings,
 )
 from api.services.auth import require_user
@@ -77,6 +78,7 @@ def test_splat_generation_artifact_owns_its_paths_and_lifecycle(
     assert artifact.root_directory.parent == workflow_data_directory
     assert artifact.video_path.parent == artifact.root_directory / "video"
     assert artifact.frames_directory == artifact.root_directory / "frames"
+    assert artifact.raw_frames_directory == artifact.root_directory / "frames_raw"
     assert artifact.colmap_directory == artifact.root_directory / "colmap"
     assert artifact.colmap_sparse_directory == (
         artifact.colmap_directory / "sparse" / "0"
@@ -141,6 +143,7 @@ def test_schedule_splat_generation_returns_prefect_run_id(
         "artifact_id": str(artifact.artifact_id),
         "workspace_directory": str(artifact.root_directory.resolve()),
         "video_path": str(artifact.video_path.resolve()),
+        "raw_frames_directory": str(artifact.raw_frames_directory.resolve()),
         "frames_directory": str(artifact.frames_directory.resolve()),
         "colmap_directory": str(artifact.colmap_directory.resolve()),
         "splat_path": str(artifact.splat_path.resolve()),
@@ -150,6 +153,7 @@ def test_schedule_splat_generation_returns_prefect_run_id(
                 "fit_in_width": 640,
                 "fit_in_height": 480,
             },
+            "frame_picker": None,
             "colmap": {
                 "data_type": "internet",
                 "quality": "high",
@@ -274,6 +278,73 @@ def test_extract_frames_task_sends_ffmpeg_output_to_prefect_run_logger(
     ]
 
 
+def test_pick_frames_task_sends_progress_to_prefect_run_logger(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    records: list[tuple] = []
+    captured: dict = {}
+    settings = FramePickerSettings()
+
+    class FakeRunLogger:
+        def info(self, *args) -> None:
+            records.append(args)
+
+    def fake_pick_frames(**kwargs):
+        captured.update(kwargs)
+        kwargs["on_progress"]("collecting frames")
+        kwargs["on_progress"]("analyzing", 0.5)
+        return [object()]
+
+    monkeypatch.setattr(splat_workflow, "get_run_logger", lambda: FakeRunLogger())
+    monkeypatch.setattr(splat_workflow, "pick_frames", fake_pick_frames)
+
+    result = splat_workflow.pick_frames_task.fn(
+        str(tmp_path),
+        str(tmp_path / "input.mp4"),
+        str(tmp_path / "frames_raw"),
+        str(tmp_path / "frames"),
+        settings,
+    )
+
+    assert result == str((tmp_path / "frames").resolve())
+    assert captured == {
+        "video_source_path": str(tmp_path / "input.mp4"),
+        "input_folder": str(tmp_path / "frames_raw"),
+        "output_folder": str(tmp_path / "frames"),
+        "distance_threshold": 0.2,
+        "min_fps": 1,
+        "remove_outliers": True,
+        "outlier_window_size": 7,
+        "outlier_sharpness_ratio": 0.1,
+        "on_progress": captured["on_progress"],
+        "output_symlink_relative_to": str(tmp_path),
+    }
+    assert records == [
+        ("frame-picker: %s", "collecting frames"),
+        ("frame-picker [%d%%]: %s", 50, "analyzing"),
+    ]
+
+
+def test_pick_frames_task_rejects_empty_selection(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class FakeRunLogger:
+        def info(self, *args) -> None:
+            pass
+
+    monkeypatch.setattr(splat_workflow, "get_run_logger", lambda: FakeRunLogger())
+    monkeypatch.setattr(splat_workflow, "pick_frames", lambda **kwargs: [])
+
+    with pytest.raises(RuntimeError, match="without selecting any frames"):
+        splat_workflow.pick_frames_task.fn(
+            str(tmp_path),
+            str(tmp_path / "input.mp4"),
+            str(tmp_path / "frames_raw"),
+            str(tmp_path / "frames"),
+            FramePickerSettings(),
+        )
+
+
 def test_reconstruct_with_colmap_task_sends_output_to_prefect_run_logger(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -357,12 +428,17 @@ def test_train_with_brush_task_sends_output_to_prefect_run_logger(
     ]
 
 
+@pytest.mark.parametrize("use_frame_picker", [False, True])
 @pytest.mark.parametrize("use_scitas", [False, True])
 def test_splat_generation_flow_selects_gpu_environment(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, use_scitas: bool
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    use_scitas: bool,
+    use_frame_picker: bool,
 ) -> None:
     calls: list[tuple] = []
-    settings = SplatGenerationWorkflowSettings()
+    picker_settings = FramePickerSettings() if use_frame_picker else None
+    settings = SplatGenerationWorkflowSettings(frame_picker=picker_settings)
 
     class FakeRunLogger:
         def info(self, *args) -> None:
@@ -370,6 +446,10 @@ def test_splat_generation_flow_selects_gpu_environment(
 
     def fake_extract_frames_task(**kwargs):
         calls.append(("ffmpeg", kwargs))
+        return kwargs["frames_directory"]
+
+    def fake_picker_task(**kwargs):
+        calls.append(("frame-picker", kwargs))
         return str(tmp_path / "frames")
 
     def fake_colmap_task(**kwargs):
@@ -383,6 +463,7 @@ def test_splat_generation_flow_selects_gpu_environment(
     monkeypatch.setattr(splat_workflow, "get_run_logger", lambda: FakeRunLogger())
     monkeypatch.setattr(splat_workflow.config, "USE_SCITAS", use_scitas)
     monkeypatch.setattr(splat_workflow, "extract_frames_task", fake_extract_frames_task)
+    monkeypatch.setattr(splat_workflow, "pick_frames_task", fake_picker_task)
     monkeypatch.setattr(
         splat_workflow,
         "reconstruct_with_colmap_task",
@@ -394,6 +475,7 @@ def test_splat_generation_flow_selects_gpu_environment(
         artifact_id=uuid4(),
         workspace_directory=str(tmp_path),
         video_path="input.mov",
+        raw_frames_directory=str(tmp_path / "frames_raw"),
         frames_directory=str(tmp_path / "frames"),
         colmap_directory=str(tmp_path / "colmap"),
         splat_path=str(tmp_path / "splat.ply"),
@@ -407,40 +489,60 @@ def test_splat_generation_flow_selects_gpu_environment(
         if use_scitas
         else splat_workflow.LOCAL_EXECUTION_ENVIRONMENT
     )
-    assert calls == [
+    expected_calls: list[tuple[str, dict[str, object]]] = [
         (
             "ffmpeg",
             {
                 "workspace_directory": str(tmp_path),
                 "video_path": "input.mov",
-                "frames_directory": str(tmp_path / "frames"),
-                "fps": 2.0,
+                "frames_directory": str(
+                    tmp_path / ("frames_raw" if use_frame_picker else "frames")
+                ),
+                "fps": None if use_frame_picker else 2.0,
                 "fit_in_width": 1920,
                 "fit_in_height": 1920,
                 "execution_environment": splat_workflow.LOCAL_EXECUTION_ENVIRONMENT,
             },
         ),
-        (
-            "colmap",
-            {
-                "workspace_directory": str(tmp_path),
-                "frames_directory": str(tmp_path / "frames"),
-                "colmap_directory": str(tmp_path / "colmap"),
-                "settings": settings.colmap,
-                "execution_environment": gpu_environment,
-            },
-        ),
-        (
-            "brush",
-            {
-                "workspace_directory": str(tmp_path),
-                "dataset_directory": str(tmp_path),
-                "splat_path": str(tmp_path / "splat.ply"),
-                "settings": settings.brush,
-                "execution_environment": gpu_environment,
-            },
-        ),
     ]
+    if picker_settings is not None:
+        expected_calls.append(
+            (
+                "frame-picker",
+                {
+                    "workspace_directory": str(tmp_path),
+                    "video_path": "input.mov",
+                    "input_frames_directory": str(tmp_path / "frames_raw"),
+                    "frames_directory": str(tmp_path / "frames"),
+                    "settings": picker_settings,
+                },
+            )
+        )
+    expected_calls.extend(
+        [
+            (
+                "colmap",
+                {
+                    "workspace_directory": str(tmp_path),
+                    "frames_directory": str(tmp_path / "frames"),
+                    "colmap_directory": str(tmp_path / "colmap"),
+                    "settings": settings.colmap,
+                    "execution_environment": gpu_environment,
+                },
+            ),
+            (
+                "brush",
+                {
+                    "workspace_directory": str(tmp_path),
+                    "dataset_directory": str(tmp_path),
+                    "splat_path": str(tmp_path / "splat.ply"),
+                    "settings": settings.brush,
+                    "execution_environment": gpu_environment,
+                },
+            ),
+        ]
+    )
+    assert calls == expected_calls
 
 
 def test_submit_counter_returns_202(
@@ -507,6 +609,12 @@ def test_submit_splat_generation_validates_nested_tool_settings(
                 fit_in_width=1280,
                 fit_in_height=720,
             ),
+            frame_picker=FramePickerSettings(
+                min_fps=2,
+                distance_threshold=0.3,
+                remove_outliers=False,
+                outlier_sharpness_ratio=0.25,
+            ),
             colmap=ColmapSettings(
                 data_type="individual",
                 quality="medium",
@@ -537,6 +645,12 @@ def test_submit_splat_generation_validates_nested_tool_settings(
             "fps": 4,
             "fit_in_width": 1280,
             "fit_in_height": 720,
+        },
+        "frame_picker": {
+            "min_fps": 2,
+            "distance_threshold": 0.3,
+            "remove_outliers": False,
+            "outlier_sharpness_ratio": 0.25,
         },
         "colmap": {
             "data_type": "individual",
@@ -570,7 +684,14 @@ def test_submit_splat_generation_validates_nested_tool_settings(
     assert response.status_code == 202
 
 
-@pytest.mark.parametrize("settings", ["not-json", '{"ffmpeg":{"fps":0}}'])
+@pytest.mark.parametrize(
+    "settings",
+    [
+        "not-json",
+        '{"ffmpeg":{"fps":0}}',
+        '{"frame_picker":{"min_fps":0}}',
+    ],
+)
 def test_submit_splat_generation_rejects_invalid_nested_settings(
     settings: str,
     workflow_data_directory: Path,
@@ -584,6 +705,28 @@ def test_submit_splat_generation_rejects_invalid_nested_settings(
 
     assert response.status_code == 422
     assert not workflow_data_directory.exists()
+
+
+def test_submit_splat_generation_accepts_explicitly_disabled_frame_picker(
+    monkeypatch: pytest.MonkeyPatch,
+    workflow_data_directory: Path,
+    client: TestClient,
+) -> None:
+    workflow_id = uuid4()
+
+    async def fake_schedule(*, artifact, settings, owner_id):
+        assert settings.frame_picker is None
+        return workflow_id
+
+    monkeypatch.setattr(workflow_views, "schedule_splat_generation", fake_schedule)
+
+    response = client.post(
+        "/workflows/splat-generation",
+        files={"file": ("input.mp4", b"video bytes", "video/mp4")},
+        data={"settings": json.dumps({"frame_picker": None})},
+    )
+
+    assert response.status_code == 202
 
 
 def test_submit_splat_generation_requires_settings(

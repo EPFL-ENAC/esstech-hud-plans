@@ -13,14 +13,15 @@ def build_frame_extraction_command(
     frames_directory: Path,
     *,
     workspace_directory: Path,
-    fps: float,
+    fps: float | None,
     fit_in_width: int,
     fit_in_height: int,
 ) -> Command:
     filters = (
-        f"scale={fit_in_width}:{fit_in_height}:"
-        f"force_original_aspect_ratio=decrease,fps={fps}"
+        f"scale={fit_in_width}:{fit_in_height}:force_original_aspect_ratio=decrease"
     )
+    if fps is not None:
+        filters += f",fps={fps}"
     relative_video_path = workspace_relative_path(video_path, workspace_directory)
     relative_frames_directory = workspace_relative_path(
         frames_directory, workspace_directory
@@ -50,7 +51,7 @@ def run_frame_extraction(
     *,
     workspace_directory: Path,
     execution_environment: CommandExecutionEnvironment,
-    fps: float,
+    fps: float | None,
     fit_in_width: int,
     fit_in_height: int,
     on_log: LogCallback | None = None,

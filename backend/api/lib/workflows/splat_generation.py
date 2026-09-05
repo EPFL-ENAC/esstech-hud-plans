@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 from api.config import config
 from api.lib.compute.brush import run_brush_training
 from api.lib.compute.colmap import run_colmap_reconstruction
+from api.lib.compute.evaluate_video_frame import pick_frames
 from api.lib.compute.ffmpeg import run_frame_extraction
 from api.lib.utils.commands import (
     CommandExecutionEnvironment,
@@ -16,6 +17,7 @@ from api.lib.utils.commands import (
 from api.models.workflows import (
     BrushSettings,
     ColmapSettings,
+    FramePickerSettings,
     SplatGenerationWorkflowSettings,
 )
 from fastapi import UploadFile
@@ -48,6 +50,10 @@ class SplatGenerationArtifact:
     @property
     def frames_directory(self) -> Path:
         return self.root_directory / "frames"
+
+    @property
+    def raw_frames_directory(self) -> Path:
+        return self.root_directory / "frames_raw"
 
     @property
     def colmap_directory(self) -> Path:
@@ -118,7 +124,7 @@ def extract_frames_task(
     workspace_directory: str,
     video_path: str,
     frames_directory: str,
-    fps: float,
+    fps: float | None,
     fit_in_width: int,
     fit_in_height: int,
     execution_environment: CommandExecutionEnvironment = LOCAL_EXECUTION_ENVIRONMENT,
@@ -139,6 +145,40 @@ def extract_frames_task(
         on_log=log_ffmpeg,
     )
     return str(output_directory)
+
+
+@task(name="pick-video-frames")
+def pick_frames_task(
+    workspace_directory: str,
+    video_path: str,
+    input_frames_directory: str,
+    frames_directory: str,
+    settings: FramePickerSettings,
+) -> str:
+    run_logger = get_run_logger()
+
+    def log_frame_picker(msg: str, progress: float | None = None) -> None:
+        if progress is None:
+            run_logger.info("frame-picker: %s", msg)
+        else:
+            run_logger.info("frame-picker [%d%%]: %s", round(progress * 100), msg)
+
+    selected_frames = pick_frames(
+        video_source_path=video_path,
+        input_folder=input_frames_directory,
+        output_folder=frames_directory,
+        distance_threshold=settings.distance_threshold,
+        min_fps=settings.min_fps,
+        remove_outliers=settings.remove_outliers,
+        outlier_window_size=7,
+        outlier_sharpness_ratio=settings.outlier_sharpness_ratio,
+        on_progress=log_frame_picker,
+        output_symlink_relative_to=workspace_directory,
+    )
+    if not selected_frames:
+        raise RuntimeError("Frame picker completed without selecting any frames")
+
+    return str(Path(frames_directory).resolve())
 
 
 @task(name="reconstruct-with-colmap")
@@ -194,6 +234,7 @@ def splat_generation_flow(
     artifact_id: UUID,
     workspace_directory: str,
     video_path: str,
+    raw_frames_directory: str,
     frames_directory: str,
     colmap_directory: str,
     splat_path: str,
@@ -212,18 +253,33 @@ def splat_generation_flow(
         else LOCAL_EXECUTION_ENVIRONMENT
     )
 
+    frame_picker_settings = settings.frame_picker
+    extraction_directory = (
+        raw_frames_directory if frame_picker_settings is not None else frames_directory
+    )
     extracted_frames_directory = extract_frames_task(
         workspace_directory=workspace_directory,
         video_path=video_path,
-        frames_directory=frames_directory,
-        fps=settings.ffmpeg.fps,
+        frames_directory=extraction_directory,
+        fps=None if frame_picker_settings is not None else settings.ffmpeg.fps,
         fit_in_width=settings.ffmpeg.fit_in_width,
         fit_in_height=settings.ffmpeg.fit_in_height,
         execution_environment=LOCAL_EXECUTION_ENVIRONMENT,
     )
+    selected_frames_directory = (
+        pick_frames_task(
+            workspace_directory=workspace_directory,
+            video_path=video_path,
+            input_frames_directory=extracted_frames_directory,
+            frames_directory=frames_directory,
+            settings=frame_picker_settings,
+        )
+        if frame_picker_settings is not None
+        else extracted_frames_directory
+    )
     reconstructed_colmap_directory = reconstruct_with_colmap_task(
         workspace_directory=workspace_directory,
-        frames_directory=extracted_frames_directory,
+        frames_directory=selected_frames_directory,
         colmap_directory=colmap_directory,
         settings=settings.colmap,
         execution_environment=gpu_execution_environment,
@@ -248,6 +304,7 @@ async def schedule_splat_generation(
             "artifact_id": str(artifact.artifact_id),
             "workspace_directory": str(artifact.root_directory.resolve()),
             "video_path": str(artifact.video_path.resolve()),
+            "raw_frames_directory": str(artifact.raw_frames_directory.resolve()),
             "frames_directory": str(artifact.frames_directory.resolve()),
             "colmap_directory": str(artifact.colmap_directory.resolve()),
             "splat_path": str(artifact.splat_path.resolve()),

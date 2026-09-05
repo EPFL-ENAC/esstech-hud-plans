@@ -22,6 +22,13 @@ class FfmpegSettings(BaseModel):
     fit_in_height: int = Field(default=1920, gt=0)
 
 
+class FramePickerSettings(BaseModel):
+    min_fps: int = Field(default=1, gt=0)
+    distance_threshold: float = Field(default=0.2, ge=0)
+    remove_outliers: bool = True
+    outlier_sharpness_ratio: float = Field(default=0.1, ge=0, le=1)
+
+
 class ColmapSettings(BaseModel):
     data_type: Literal["individual", "video", "internet"] = "video"
     quality: Literal["low", "medium", "high", "extreme"] = "low"
@@ -49,6 +56,10 @@ class SplatGenerationWorkflowSettings(BaseModel):
     ffmpeg: FfmpegSettings = Field(
         default_factory=FfmpegSettings,
         description="Settings for the ffmpeg frame-extraction task.",
+    )
+    frame_picker: FramePickerSettings | None = Field(
+        default=None,
+        description="Optional settings for movement- and sharpness-based frame selection.",
     )
     colmap: ColmapSettings = Field(
         default_factory=ColmapSettings,

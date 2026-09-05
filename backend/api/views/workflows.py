@@ -86,7 +86,8 @@ async def submit_splat_generation(
         Form(
             description=(
                 "JSON-encoded SplatGenerationWorkflowSettings with separate "
-                '"ffmpeg", "colmap", and "brush" objects.'
+                '"ffmpeg", "colmap", and "brush" objects, plus an optional '
+                '"frame_picker" object.'
             )
         ),
     ],

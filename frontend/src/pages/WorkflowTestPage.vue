@@ -67,6 +67,10 @@
 
                     <q-separator />
 
+                    <frame-picker-settings v-model="framePickerConfig" />
+
+                    <q-separator />
+
                     <div class="text-subtitle1 text-weight-medium">COLMAP settings</div>
                     <div class="row q-col-gutter-md">
                         <q-select
@@ -256,8 +260,10 @@
 import { computed, nextTick, onBeforeUnmount, reactive, ref } from 'vue';
 import { baseUrl } from 'boot/api';
 import BrushSettings from 'src/components/BrushSettings.vue';
+import FramePickerSettings from 'src/components/FramePickerSettings.vue';
 import { authFetch } from 'src/lib/auth';
 import { type BrushTrainingConfig, makeDefaultBrushConfig } from 'src/lib/splats/brush';
+import { type FramePickerConfig, makeDefaultFramePickerConfig } from 'src/lib/splats/framePicker';
 
 type RequestName = 'submit' | 'status' | 'result';
 
@@ -301,6 +307,7 @@ const settings = reactive({
         useGlobalMapper: false,
     },
 });
+const framePickerConfig = ref<FramePickerConfig>(makeDefaultFramePickerConfig());
 const brushConfig = ref<BrushTrainingConfig>(makeDefaultBrushConfig());
 const colmapDataTypeOptions = [
     { label: 'Individual images', value: 'individual' },
@@ -328,7 +335,12 @@ const canSubmit = computed(
         videoFile.value !== null &&
         settings.ffmpeg.fps > 0 &&
         settings.ffmpeg.fitInWidth > 0 &&
-        settings.ffmpeg.fitInHeight > 0,
+        settings.ffmpeg.fitInHeight > 0 &&
+        (!framePickerConfig.value.enabled ||
+            (framePickerConfig.value.min_fps > 0 &&
+                framePickerConfig.value.distance_threshold >= 0 &&
+                framePickerConfig.value.outlier_sharpness_ratio >= 0 &&
+                framePickerConfig.value.outlier_sharpness_ratio <= 1)),
 );
 const formattedResponse = computed(() => {
     if (!responseLabel.value) return 'Responses will appear here.';
@@ -397,6 +409,14 @@ async function submitSplatGeneration(): Promise<void> {
                 fit_in_width: settings.ffmpeg.fitInWidth,
                 fit_in_height: settings.ffmpeg.fitInHeight,
             },
+            frame_picker: framePickerConfig.value.enabled
+                ? {
+                      min_fps: framePickerConfig.value.min_fps,
+                      distance_threshold: framePickerConfig.value.distance_threshold,
+                      remove_outliers: framePickerConfig.value.remove_outliers,
+                      outlier_sharpness_ratio: framePickerConfig.value.outlier_sharpness_ratio,
+                  }
+                : null,
             colmap: {
                 data_type: settings.colmap.dataType,
                 quality: settings.colmap.quality,

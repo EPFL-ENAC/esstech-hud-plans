@@ -3,6 +3,7 @@ from api.models.workflows import (
     BrushSettings,
     ColmapSettings,
     FfmpegSettings,
+    FramePickerSettings,
     SplatGenerationWorkflowSettings,
 )
 from pydantic import ValidationError
@@ -16,6 +17,7 @@ def test_splat_generation_workflow_settings_defaults_are_grouped_by_tool() -> No
         fit_in_width=1920,
         fit_in_height=1920,
     )
+    assert settings.frame_picker is None
     assert settings.colmap == ColmapSettings(
         data_type="video",
         quality="low",
@@ -53,6 +55,29 @@ def test_frame_extraction_settings_require_positive_values(
 ) -> None:
     with pytest.raises(ValidationError):
         FfmpegSettings(**{field: value})
+
+
+def test_frame_picker_settings_defaults() -> None:
+    assert FramePickerSettings() == FramePickerSettings(
+        min_fps=1,
+        distance_threshold=0.2,
+        remove_outliers=True,
+        outlier_sharpness_ratio=0.1,
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("min_fps", 0),
+        ("distance_threshold", -0.1),
+        ("outlier_sharpness_ratio", -0.1),
+        ("outlier_sharpness_ratio", 1.1),
+    ],
+)
+def test_frame_picker_settings_reject_invalid_values(field: str, value: object) -> None:
+    with pytest.raises(ValidationError):
+        FramePickerSettings.model_validate({field: value})
 
 
 @pytest.mark.parametrize(
