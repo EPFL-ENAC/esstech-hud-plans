@@ -10,14 +10,14 @@ from api.lib.workflows.common import (
     stream_workflow_logs,
 )
 from api.lib.workflows.counter import schedule_counter
-from api.lib.workflows.frame_extraction import (
-    FrameExtractionArtifact,
-    schedule_frame_extraction,
+from api.lib.workflows.splat_generation import (
+    SplatGenerationArtifact,
+    schedule_splat_generation,
 )
 from api.models.auth import User
 from api.models.workflows import (
-    FrameExtractionResultResponse,
-    FrameExtractionWorkflowSettings,
+    SplatGenerationResultResponse,
+    SplatGenerationWorkflowSettings,
     WorkflowStatus,
     WorkflowStatusResponse,
     WorkflowSubmissionResponse,
@@ -75,18 +75,18 @@ async def submit_counter(
 
 
 @router.post(
-    "/frame-extraction",
+    "/splat-generation",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=WorkflowSubmissionResponse,
 )
-async def submit_frame_extraction(
+async def submit_splat_generation(
     file: Annotated[UploadFile, File()],
     settings: Annotated[
         str,
         Form(
             description=(
-                "JSON-encoded FrameExtractionWorkflowSettings with separate "
-                '"ffmpeg" and "colmap" objects.'
+                "JSON-encoded SplatGenerationWorkflowSettings with separate "
+                '"ffmpeg", "colmap", and "brush" objects.'
             )
         ),
     ],
@@ -98,7 +98,7 @@ async def submit_frame_extraction(
         raise HTTPException(status_code=400, detail="Uploaded file must be a video")
 
     try:
-        workflow_settings = FrameExtractionWorkflowSettings.model_validate_json(
+        workflow_settings = SplatGenerationWorkflowSettings.model_validate_json(
             settings
         )
     except ValidationError as exc:
@@ -107,22 +107,22 @@ async def submit_frame_extraction(
             detail=exc.errors(include_url=False),
         ) from exc
 
-    artifact = await FrameExtractionArtifact.from_uploaded_file(
+    artifact = await SplatGenerationArtifact.from_uploaded_file(
         file, workflow_common.WORKFLOW_DATA_DIRECTORY
     )
 
     try:
-        workflow_id = await schedule_frame_extraction(
+        workflow_id = await schedule_splat_generation(
             artifact=artifact,
             settings=workflow_settings,
             owner_id=current_user.sub,
         )
     except Exception as exc:
-        logger.exception("Failed to schedule frame extraction")
+        logger.exception("Failed to schedule splat generation")
         artifact.remove()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Frame extraction service is unavailable",
+            detail="Splat generation service is unavailable",
         ) from exc
 
     return WorkflowSubmissionResponse(workflow_id=workflow_id)
@@ -198,10 +198,10 @@ async def get_workflow_status(
     )
 
 
-@router.get("/result/{workflow_id}", response_model=FrameExtractionResultResponse)
+@router.get("/result/{workflow_id}", response_model=SplatGenerationResultResponse)
 async def get_workflow_result(
     current_workflow: Annotated[FlowRun, Depends(get_current_workflow)],
-) -> FrameExtractionResultResponse:
+) -> SplatGenerationResultResponse:
     if current_workflow.state_type != StateType.COMPLETED:
         state_name = (
             current_workflow.state_type.value.lower()
@@ -214,7 +214,7 @@ async def get_workflow_result(
         )
 
     try:
-        artifact = FrameExtractionArtifact.from_flow_run(
+        artifact = SplatGenerationArtifact.from_flow_run(
             current_workflow, workflow_common.WORKFLOW_DATA_DIRECTORY
         )
     except ValueError as exc:
@@ -235,7 +235,14 @@ async def get_workflow_result(
             detail="Workflow completed but its COLMAP sparse reconstruction is missing",
         )
 
-    return FrameExtractionResultResponse(
+    if not artifact.splat_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Workflow completed but its splat PLY is missing",
+        )
+
+    return SplatGenerationResultResponse(
         frames_directory=str(artifact.frames_directory.resolve()),
         colmap_directory=str(artifact.colmap_directory.resolve()),
+        splat_path=str(artifact.splat_path.resolve()),
     )

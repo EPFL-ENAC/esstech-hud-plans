@@ -9,12 +9,13 @@ import pytest
 from api.lib.workflows import __main__ as workflow_runner
 from api.lib.workflows import common as workflow_common
 from api.lib.workflows import counter as counter_workflow
-from api.lib.workflows import frame_extraction as frame_workflow
+from api.lib.workflows import splat_generation as splat_workflow
 from api.models.auth import User
 from api.models.workflows import (
+    BrushSettings,
     ColmapSettings,
     FfmpegSettings,
-    FrameExtractionWorkflowSettings,
+    SplatGenerationWorkflowSettings,
 )
 from api.services.auth import require_user
 from api.views import workflows as workflow_views
@@ -67,10 +68,10 @@ def _log(message: str, *, timestamp: datetime | None = None) -> Log:
     )
 
 
-def test_frame_extraction_artifact_owns_its_paths_and_lifecycle(
+def test_splat_generation_artifact_owns_its_paths_and_lifecycle(
     workflow_data_directory: Path,
 ) -> None:
-    artifact = frame_workflow.FrameExtractionArtifact.create(workflow_data_directory)
+    artifact = splat_workflow.SplatGenerationArtifact.create(workflow_data_directory)
 
     assert artifact.video_path.name == "input.mp4"
     assert artifact.root_directory.parent == workflow_data_directory
@@ -80,12 +81,13 @@ def test_frame_extraction_artifact_owns_its_paths_and_lifecycle(
     assert artifact.colmap_sparse_directory == (
         artifact.colmap_directory / "sparse" / "0"
     )
+    assert artifact.splat_path == artifact.root_directory / "splat.ply"
 
-    loaded = frame_workflow.FrameExtractionArtifact.load(
+    loaded = splat_workflow.SplatGenerationArtifact.load(
         artifact.artifact_id, workflow_data_directory
     )
     assert loaded == artifact
-    from_flow_run = frame_workflow.FrameExtractionArtifact.from_flow_run(
+    from_flow_run = splat_workflow.SplatGenerationArtifact.from_flow_run(
         _flow_run(StateType.COMPLETED, artifact_id=artifact.artifact_id),
         workflow_data_directory,
     )
@@ -96,10 +98,10 @@ def test_frame_extraction_artifact_owns_its_paths_and_lifecycle(
     assert not artifact.root_directory.exists()
 
 
-def test_schedule_frame_extraction_returns_prefect_run_id(
+def test_schedule_splat_generation_returns_prefect_run_id(
     monkeypatch: pytest.MonkeyPatch, workflow_data_directory: Path
 ) -> None:
-    artifact = frame_workflow.FrameExtractionArtifact.create(workflow_data_directory)
+    artifact = splat_workflow.SplatGenerationArtifact.create(workflow_data_directory)
     expected_id = uuid4()
     captured: dict = {}
 
@@ -107,12 +109,12 @@ def test_schedule_frame_extraction_returns_prefect_run_id(
         captured.update(kwargs)
         return SimpleNamespace(id=expected_id)
 
-    monkeypatch.setattr(frame_workflow, "arun_deployment", fake_run_deployment)
+    monkeypatch.setattr(splat_workflow, "arun_deployment", fake_run_deployment)
 
     result = asyncio.run(
-        frame_workflow.schedule_frame_extraction(
+        splat_workflow.schedule_splat_generation(
             artifact,
-            FrameExtractionWorkflowSettings(
+            SplatGenerationWorkflowSettings(
                 ffmpeg=FfmpegSettings(
                     fps=3,
                     fit_in_width=640,
@@ -132,7 +134,7 @@ def test_schedule_frame_extraction_returns_prefect_run_id(
     )
 
     assert result == expected_id
-    assert captured["name"] == "frame-extraction/default"
+    assert captured["name"] == "splat-generation/default"
     assert captured["timeout"] == 0
     assert captured["as_subflow"] is False
     assert captured["parameters"] == {
@@ -141,6 +143,7 @@ def test_schedule_frame_extraction_returns_prefect_run_id(
         "video_path": str(artifact.video_path.resolve()),
         "frames_directory": str(artifact.frames_directory.resolve()),
         "colmap_directory": str(artifact.colmap_directory.resolve()),
+        "splat_path": str(artifact.splat_path.resolve()),
         "settings": {
             "ffmpeg": {
                 "fps": 3.0,
@@ -154,6 +157,19 @@ def test_schedule_frame_extraction_returns_prefect_run_id(
                 "single_camera": False,
                 "use_gpu": True,
                 "use_global_mapper": True,
+            },
+            "brush": {
+                "total_steps": 10_000,
+                "render_mode": "default",
+                "sh_degree": 3,
+                "max_splats": 10_000_000,
+                "refine_every": 200,
+                "growth_grad_threshold": 0.0025,
+                "growth_stop_iter": 15_000,
+                "max_resolution": 1920,
+                "subsample_frames": 1,
+                "alpha_mode": "transparent",
+                "export_every": 5_000,
             },
         },
         "owner_id": "owner-1",
@@ -202,7 +218,7 @@ def test_schedule_counter_returns_prefect_run_id(
     }
 
 
-def test_workflow_runner_serves_frame_extraction(
+def test_workflow_runner_serves_splat_generation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict = {}
@@ -211,7 +227,7 @@ def test_workflow_runner_serves_frame_extraction(
         def serve(self, **kwargs) -> None:
             captured.update(kwargs)
 
-    monkeypatch.setattr(workflow_runner, "frame_extraction_flow", FakeFlow())
+    monkeypatch.setattr(workflow_runner, "splat_generation_flow", FakeFlow())
 
     workflow_runner.serve_workflows()
 
@@ -231,18 +247,18 @@ def test_extract_frames_task_sends_ffmpeg_output_to_prefect_run_logger(
         assert kwargs["workspace_directory"] == tmp_path
         assert (
             kwargs["execution_environment"]
-            is frame_workflow.LOCAL_EXECUTION_ENVIRONMENT
+            is splat_workflow.LOCAL_EXECUTION_ENVIRONMENT
         )
         on_log("frame=1")
         on_log("frame=2")
         return tmp_path / "frames"
 
-    monkeypatch.setattr(frame_workflow, "get_run_logger", lambda: FakeRunLogger())
+    monkeypatch.setattr(splat_workflow, "get_run_logger", lambda: FakeRunLogger())
     monkeypatch.setattr(
-        frame_workflow, "run_frame_extraction", fake_run_frame_extraction
+        splat_workflow, "run_frame_extraction", fake_run_frame_extraction
     )
 
-    result = frame_workflow.extract_frames_task.fn(
+    result = splat_workflow.extract_frames_task.fn(
         str(tmp_path),
         "input",
         str(tmp_path / "frames"),
@@ -272,20 +288,20 @@ def test_reconstruct_with_colmap_task_sends_output_to_prefect_run_logger(
         assert kwargs["workspace_directory"] == tmp_path
         assert (
             kwargs["execution_environment"]
-            is frame_workflow.LOCAL_EXECUTION_ENVIRONMENT
+            is splat_workflow.LOCAL_EXECUTION_ENVIRONMENT
         )
         on_log("feature extraction")
         on_log("mapping")
         return tmp_path / "colmap"
 
-    monkeypatch.setattr(frame_workflow, "get_run_logger", lambda: FakeRunLogger())
+    monkeypatch.setattr(splat_workflow, "get_run_logger", lambda: FakeRunLogger())
     monkeypatch.setattr(
-        frame_workflow,
+        splat_workflow,
         "run_colmap_reconstruction",
         fake_run_colmap_reconstruction,
     )
 
-    result = frame_workflow.reconstruct_with_colmap_task.fn(
+    result = splat_workflow.reconstruct_with_colmap_task.fn(
         str(tmp_path),
         str(tmp_path / "frames"),
         str(tmp_path / "colmap"),
@@ -299,12 +315,54 @@ def test_reconstruct_with_colmap_task_sends_output_to_prefect_run_logger(
     ]
 
 
+def test_train_with_brush_task_sends_output_to_prefect_run_logger(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    records: list[tuple[str, str]] = []
+    settings = BrushSettings()
+
+    class FakeRunLogger:
+        def info(self, message: str, record: str) -> None:
+            records.append((message, record))
+
+    def fake_run_brush_training(*args, on_log, **kwargs):
+        assert args == (tmp_path, tmp_path / "splat.ply", settings)
+        assert kwargs["workspace_directory"] == tmp_path
+        assert (
+            kwargs["execution_environment"]
+            is splat_workflow.LOCAL_EXECUTION_ENVIRONMENT
+        )
+        on_log("step 1/10000")
+        on_log("exporting")
+        return tmp_path / "splat.ply"
+
+    monkeypatch.setattr(splat_workflow, "get_run_logger", lambda: FakeRunLogger())
+    monkeypatch.setattr(
+        splat_workflow,
+        "run_brush_training",
+        fake_run_brush_training,
+    )
+
+    result = splat_workflow.train_with_brush_task.fn(
+        str(tmp_path),
+        str(tmp_path),
+        str(tmp_path / "splat.ply"),
+        settings,
+    )
+
+    assert result == str(tmp_path / "splat.ply")
+    assert records == [
+        ("brush: %s", "step 1/10000"),
+        ("brush: %s", "exporting"),
+    ]
+
+
 @pytest.mark.parametrize("use_scitas", [False, True])
-def test_frame_extraction_flow_selects_colmap_environment(
+def test_splat_generation_flow_selects_gpu_environment(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, use_scitas: bool
 ) -> None:
     calls: list[tuple] = []
-    settings = FrameExtractionWorkflowSettings()
+    settings = SplatGenerationWorkflowSettings()
 
     class FakeRunLogger:
         def info(self, *args) -> None:
@@ -318,30 +376,36 @@ def test_frame_extraction_flow_selects_colmap_environment(
         calls.append(("colmap", kwargs))
         return str(tmp_path / "colmap")
 
-    monkeypatch.setattr(frame_workflow, "get_run_logger", lambda: FakeRunLogger())
-    monkeypatch.setattr(frame_workflow.config, "USE_SCITAS", use_scitas)
-    monkeypatch.setattr(frame_workflow, "extract_frames_task", fake_extract_frames_task)
+    def fake_brush_task(**kwargs):
+        calls.append(("brush", kwargs))
+        return str(tmp_path / "splat.ply")
+
+    monkeypatch.setattr(splat_workflow, "get_run_logger", lambda: FakeRunLogger())
+    monkeypatch.setattr(splat_workflow.config, "USE_SCITAS", use_scitas)
+    monkeypatch.setattr(splat_workflow, "extract_frames_task", fake_extract_frames_task)
     monkeypatch.setattr(
-        frame_workflow,
+        splat_workflow,
         "reconstruct_with_colmap_task",
         fake_colmap_task,
     )
+    monkeypatch.setattr(splat_workflow, "train_with_brush_task", fake_brush_task)
 
-    result = frame_workflow.frame_extraction_flow.fn(
+    result = splat_workflow.splat_generation_flow.fn(
         artifact_id=uuid4(),
         workspace_directory=str(tmp_path),
         video_path="input.mov",
         frames_directory=str(tmp_path / "frames"),
         colmap_directory=str(tmp_path / "colmap"),
+        splat_path=str(tmp_path / "splat.ply"),
         settings=settings,
         owner_id="owner-1",
     )
 
-    assert result == str(tmp_path / "colmap")
-    colmap_environment = (
-        frame_workflow.SCITAS_EXECUTION_ENVIRONMENT
+    assert result == str(tmp_path / "splat.ply")
+    gpu_environment = (
+        splat_workflow.SCITAS_EXECUTION_ENVIRONMENT
         if use_scitas
-        else frame_workflow.LOCAL_EXECUTION_ENVIRONMENT
+        else splat_workflow.LOCAL_EXECUTION_ENVIRONMENT
     )
     assert calls == [
         (
@@ -353,7 +417,7 @@ def test_frame_extraction_flow_selects_colmap_environment(
                 "fps": 2.0,
                 "fit_in_width": 1920,
                 "fit_in_height": 1920,
-                "execution_environment": frame_workflow.LOCAL_EXECUTION_ENVIRONMENT,
+                "execution_environment": splat_workflow.LOCAL_EXECUTION_ENVIRONMENT,
             },
         ),
         (
@@ -363,7 +427,17 @@ def test_frame_extraction_flow_selects_colmap_environment(
                 "frames_directory": str(tmp_path / "frames"),
                 "colmap_directory": str(tmp_path / "colmap"),
                 "settings": settings.colmap,
-                "execution_environment": colmap_environment,
+                "execution_environment": gpu_environment,
+            },
+        ),
+        (
+            "brush",
+            {
+                "workspace_directory": str(tmp_path),
+                "dataset_directory": str(tmp_path),
+                "splat_path": str(tmp_path / "splat.ply"),
+                "settings": settings.brush,
+                "execution_environment": gpu_environment,
             },
         ),
     ]
@@ -387,7 +461,7 @@ def test_submit_counter_returns_202(
     assert response.json() == {"workflow_id": str(workflow_id)}
 
 
-def test_submit_frame_extraction_stores_upload_and_returns_202(
+def test_submit_splat_generation_stores_upload_and_returns_202(
     monkeypatch: pytest.MonkeyPatch,
     workflow_data_directory: Path,
     client: TestClient,
@@ -397,14 +471,14 @@ def test_submit_frame_extraction_stores_upload_and_returns_202(
     async def fake_schedule(*, artifact, settings, owner_id):
         assert artifact.video_path.read_bytes() == b"video bytes"
         assert artifact.video_path.name == "input.mp4"
-        assert settings == FrameExtractionWorkflowSettings()
+        assert settings == SplatGenerationWorkflowSettings()
         assert owner_id == "owner-1"
         return workflow_id
 
-    monkeypatch.setattr(workflow_views, "schedule_frame_extraction", fake_schedule)
+    monkeypatch.setattr(workflow_views, "schedule_splat_generation", fake_schedule)
 
     response = client.post(
-        "/workflows/frame-extraction",
+        "/workflows/splat-generation",
         files={"file": ("../../unsafe name.MP4", b"video bytes", "video/mp4")},
         data={"settings": "{}"},
     )
@@ -413,7 +487,13 @@ def test_submit_frame_extraction_stores_upload_and_returns_202(
     assert response.json() == {"workflow_id": str(workflow_id)}
 
 
-def test_submit_frame_extraction_validates_nested_tool_settings(
+def test_frame_extraction_submission_route_was_removed(client: TestClient) -> None:
+    response = client.post("/workflows/frame-extraction")
+
+    assert response.status_code == 404
+
+
+def test_submit_splat_generation_validates_nested_tool_settings(
     monkeypatch: pytest.MonkeyPatch,
     workflow_data_directory: Path,
     client: TestClient,
@@ -421,7 +501,7 @@ def test_submit_frame_extraction_validates_nested_tool_settings(
     workflow_id = uuid4()
 
     async def fake_schedule(*, artifact, settings, owner_id):
-        assert settings == FrameExtractionWorkflowSettings(
+        assert settings == SplatGenerationWorkflowSettings(
             ffmpeg=FfmpegSettings(
                 fps=4,
                 fit_in_width=1280,
@@ -435,10 +515,23 @@ def test_submit_frame_extraction_validates_nested_tool_settings(
                 use_gpu=True,
                 use_global_mapper=True,
             ),
+            brush=BrushSettings(
+                total_steps=20_000,
+                render_mode="mip",
+                sh_degree=2,
+                max_splats=2_000_000,
+                refine_every=100,
+                growth_grad_threshold=0.005,
+                growth_stop_iter=12_000,
+                max_resolution=1280,
+                subsample_frames=2,
+                alpha_mode="masked",
+                export_every=2_500,
+            ),
         )
         return workflow_id
 
-    monkeypatch.setattr(workflow_views, "schedule_frame_extraction", fake_schedule)
+    monkeypatch.setattr(workflow_views, "schedule_splat_generation", fake_schedule)
     settings = {
         "ffmpeg": {
             "fps": 4,
@@ -453,10 +546,23 @@ def test_submit_frame_extraction_validates_nested_tool_settings(
             "use_gpu": True,
             "use_global_mapper": True,
         },
+        "brush": {
+            "total_steps": 20_000,
+            "render_mode": "mip",
+            "sh_degree": 2,
+            "max_splats": 2_000_000,
+            "refine_every": 100,
+            "growth_grad_threshold": 0.005,
+            "growth_stop_iter": 12_000,
+            "max_resolution": 1280,
+            "subsample_frames": 2,
+            "alpha_mode": "masked",
+            "export_every": 2_500,
+        },
     }
 
     response = client.post(
-        "/workflows/frame-extraction",
+        "/workflows/splat-generation",
         files={"file": ("input.mp4", b"video bytes", "video/mp4")},
         data={"settings": json.dumps(settings)},
     )
@@ -465,13 +571,13 @@ def test_submit_frame_extraction_validates_nested_tool_settings(
 
 
 @pytest.mark.parametrize("settings", ["not-json", '{"ffmpeg":{"fps":0}}'])
-def test_submit_frame_extraction_rejects_invalid_nested_settings(
+def test_submit_splat_generation_rejects_invalid_nested_settings(
     settings: str,
     workflow_data_directory: Path,
     client: TestClient,
 ) -> None:
     response = client.post(
-        "/workflows/frame-extraction",
+        "/workflows/splat-generation",
         files={"file": ("input.mp4", b"video bytes", "video/mp4")},
         data={"settings": settings},
     )
@@ -480,12 +586,12 @@ def test_submit_frame_extraction_rejects_invalid_nested_settings(
     assert not workflow_data_directory.exists()
 
 
-def test_submit_frame_extraction_requires_settings(
+def test_submit_splat_generation_requires_settings(
     workflow_data_directory: Path,
     client: TestClient,
 ) -> None:
     response = client.post(
-        "/workflows/frame-extraction",
+        "/workflows/splat-generation",
         files={"file": ("input.mp4", b"video bytes", "video/mp4")},
     )
 
@@ -493,7 +599,7 @@ def test_submit_frame_extraction_requires_settings(
     assert not workflow_data_directory.exists()
 
 
-def test_submit_frame_extraction_cleans_up_after_scheduling_failure(
+def test_submit_splat_generation_cleans_up_after_scheduling_failure(
     monkeypatch: pytest.MonkeyPatch,
     workflow_data_directory: Path,
     client: TestClient,
@@ -501,10 +607,10 @@ def test_submit_frame_extraction_cleans_up_after_scheduling_failure(
     async def fake_schedule(**kwargs):
         raise ConnectionError("Prefect is offline")
 
-    monkeypatch.setattr(workflow_views, "schedule_frame_extraction", fake_schedule)
+    monkeypatch.setattr(workflow_views, "schedule_splat_generation", fake_schedule)
 
     response = client.post(
-        "/workflows/frame-extraction",
+        "/workflows/splat-generation",
         files={"file": ("input.mp4", b"video bytes", "video/mp4")},
         data={"settings": "{}"},
     )
@@ -513,11 +619,11 @@ def test_submit_frame_extraction_cleans_up_after_scheduling_failure(
     assert list(workflow_data_directory.iterdir()) == []
 
 
-def test_submit_frame_extraction_rejects_non_video(
+def test_submit_splat_generation_rejects_non_video(
     workflow_data_directory: Path, client: TestClient
 ) -> None:
     response = client.post(
-        "/workflows/frame-extraction",
+        "/workflows/splat-generation",
         files={"file": ("input.txt", b"not a video", "text/plain")},
         data={"settings": "{}"},
     )
@@ -591,9 +697,10 @@ def test_workflow_result_returns_completed_artifact_directories(
     client: TestClient,
 ) -> None:
     workflow_id = uuid4()
-    artifact = frame_workflow.FrameExtractionArtifact.create(workflow_data_directory)
+    artifact = splat_workflow.SplatGenerationArtifact.create(workflow_data_directory)
     artifact.frames_directory.mkdir(parents=True)
     artifact.colmap_sparse_directory.mkdir(parents=True)
+    artifact.splat_path.touch()
 
     async def fake_get_owned_workflow_run(*args, **kwargs):
         return _flow_run(StateType.COMPLETED, artifact_id=artifact.artifact_id)
@@ -608,6 +715,7 @@ def test_workflow_result_returns_completed_artifact_directories(
     assert response.json() == {
         "frames_directory": str(artifact.frames_directory.resolve()),
         "colmap_directory": str(artifact.colmap_directory.resolve()),
+        "splat_path": str(artifact.splat_path.resolve()),
     }
 
 
@@ -616,7 +724,7 @@ def test_workflow_result_rejects_missing_colmap_reconstruction(
     workflow_data_directory: Path,
     client: TestClient,
 ) -> None:
-    artifact = frame_workflow.FrameExtractionArtifact.create(workflow_data_directory)
+    artifact = splat_workflow.SplatGenerationArtifact.create(workflow_data_directory)
     artifact.frames_directory.mkdir(parents=True)
 
     async def fake_get_owned_workflow_run(*args, **kwargs):
@@ -630,6 +738,28 @@ def test_workflow_result_rejects_missing_colmap_reconstruction(
 
     assert response.status_code == 500
     assert "COLMAP sparse reconstruction" in response.json()["detail"]
+
+
+def test_workflow_result_rejects_missing_splat(
+    monkeypatch: pytest.MonkeyPatch,
+    workflow_data_directory: Path,
+    client: TestClient,
+) -> None:
+    artifact = splat_workflow.SplatGenerationArtifact.create(workflow_data_directory)
+    artifact.frames_directory.mkdir(parents=True)
+    artifact.colmap_sparse_directory.mkdir(parents=True)
+
+    async def fake_get_owned_workflow_run(*args, **kwargs):
+        return _flow_run(StateType.COMPLETED, artifact_id=artifact.artifact_id)
+
+    monkeypatch.setattr(
+        workflow_views, "get_owned_workflow_run", fake_get_owned_workflow_run
+    )
+
+    response = client.get(f"/workflows/result/{uuid4()}")
+
+    assert response.status_code == 500
+    assert "splat PLY" in response.json()["detail"]
 
 
 def test_workflow_result_returns_409_until_completed(

@@ -4,7 +4,7 @@
             <div>
                 <h1 class="text-h5 q-my-none">Workflows API test</h1>
                 <div class="text-caption text-grey-7 q-mt-xs">
-                    Temporary page for exercising the frame-extraction workflow endpoints.
+                    Temporary page for exercising the splat-generation workflow endpoints.
                 </div>
             </div>
 
@@ -15,13 +15,13 @@
 
             <q-card flat bordered>
                 <q-card-section>
-                    <div class="text-h6">1. Submit frame extraction</div>
-                    <div class="text-caption text-grey-7">POST /workflows/frame-extraction</div>
+                    <div class="text-h6">1. Submit splat generation</div>
+                    <div class="text-caption text-grey-7">POST /workflows/splat-generation</div>
                 </q-card-section>
 
                 <q-separator />
 
-                <q-form class="q-pa-md q-gutter-y-md" @submit="submitFrameExtraction">
+                <q-form class="q-pa-md q-gutter-y-md" @submit="submitSplatGeneration">
                     <q-file
                         v-model="videoFile"
                         outlined
@@ -110,6 +110,10 @@
                             label="Use global mapper"
                         />
                     </div>
+
+                    <q-separator />
+
+                    <brush-settings v-model="brushConfig" />
 
                     <q-btn
                         color="primary"
@@ -251,7 +255,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref } from 'vue';
 import { baseUrl } from 'boot/api';
+import BrushSettings from 'src/components/BrushSettings.vue';
 import { authFetch } from 'src/lib/auth';
+import { type BrushTrainingConfig, makeDefaultBrushConfig } from 'src/lib/splats/brush';
 
 type RequestName = 'submit' | 'status' | 'result';
 
@@ -295,6 +301,7 @@ const settings = reactive({
         useGlobalMapper: false,
     },
 });
+const brushConfig = ref<BrushTrainingConfig>(makeDefaultBrushConfig());
 const colmapDataTypeOptions = [
     { label: 'Individual images', value: 'individual' },
     { label: 'Video frames', value: 'video' },
@@ -377,7 +384,7 @@ async function captureRequest(
     }
 }
 
-async function submitFrameExtraction(): Promise<void> {
+async function submitSplatGeneration(): Promise<void> {
     if (!videoFile.value || !canSubmit.value) return;
 
     const formData = new FormData();
@@ -398,11 +405,24 @@ async function submitFrameExtraction(): Promise<void> {
                 use_gpu: settings.colmap.useGpu,
                 use_global_mapper: settings.colmap.useGlobalMapper,
             },
+            brush: {
+                total_steps: brushConfig.value.totalSteps,
+                render_mode: brushConfig.value.renderMode,
+                sh_degree: brushConfig.value.shDegree,
+                max_splats: brushConfig.value.maxSplats,
+                refine_every: brushConfig.value.refineEvery,
+                growth_grad_threshold: brushConfig.value.growthGradThreshold,
+                growth_stop_iter: brushConfig.value.growthStopIter,
+                max_resolution: brushConfig.value.maxResolution,
+                subsample_frames: brushConfig.value.subsampleFrames,
+                alpha_mode: brushConfig.value.alphaMode,
+                export_every: brushConfig.value.exportEvery,
+            },
         }),
     );
 
-    const response = await captureRequest('submit', 'POST /workflows/frame-extraction', () =>
-        authFetch(`${baseUrl}/workflows/frame-extraction`, {
+    const response = await captureRequest('submit', 'POST /workflows/splat-generation', () =>
+        authFetch(`${baseUrl}/workflows/splat-generation`, {
             method: 'POST',
             body: formData,
         }),

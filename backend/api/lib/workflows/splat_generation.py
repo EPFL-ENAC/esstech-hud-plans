@@ -5,6 +5,7 @@ from typing import Self
 from uuid import UUID, uuid4
 
 from api.config import config
+from api.lib.compute.brush import run_brush_training
 from api.lib.compute.colmap import run_colmap_reconstruction
 from api.lib.compute.ffmpeg import run_frame_extraction
 from api.lib.utils.commands import (
@@ -12,20 +13,24 @@ from api.lib.utils.commands import (
     LocalCommandExecutionEnvironment,
     ScitasCommandExecutionEnvironment,
 )
-from api.models.workflows import ColmapSettings, FrameExtractionWorkflowSettings
+from api.models.workflows import (
+    BrushSettings,
+    ColmapSettings,
+    SplatGenerationWorkflowSettings,
+)
 from fastapi import UploadFile
 from prefect import flow, get_run_logger, task
 from prefect.client.schemas.objects import FlowRun
 from prefect.deployments import arun_deployment
 from starlette.concurrency import run_in_threadpool
 
-FRAME_EXTRACTION_DEPLOYMENT = "frame-extraction/default"
+SPLAT_GENERATION_DEPLOYMENT = "splat-generation/default"
 LOCAL_EXECUTION_ENVIRONMENT = LocalCommandExecutionEnvironment()
 SCITAS_EXECUTION_ENVIRONMENT = ScitasCommandExecutionEnvironment()
 
 
 @dataclass(frozen=True)
-class FrameExtractionArtifact:
+class SplatGenerationArtifact:
     artifact_id: UUID
     storage_root: Path
     video_format: str = "mp4"
@@ -51,6 +56,10 @@ class FrameExtractionArtifact:
     @property
     def colmap_sparse_directory(self) -> Path:
         return self.colmap_directory / "sparse" / "0"
+
+    @property
+    def splat_path(self) -> Path:
+        return self.root_directory / "splat.ply"
 
     @classmethod
     def create(cls, storage_root: Path, video_format: str = "mp4") -> Self:
@@ -156,23 +165,48 @@ def reconstruct_with_colmap_task(
     return str(output_directory)
 
 
-@flow(name="frame-extraction")
-def frame_extraction_flow(
+@task(name="train-with-brush")
+def train_with_brush_task(
+    workspace_directory: str,
+    dataset_directory: str,
+    splat_path: str,
+    settings: BrushSettings,
+    execution_environment: CommandExecutionEnvironment = LOCAL_EXECUTION_ENVIRONMENT,
+) -> str:
+    run_logger = get_run_logger()
+
+    def log_brush(record: str) -> None:
+        run_logger.info("brush: %s", record)
+
+    output_path = run_brush_training(
+        Path(dataset_directory),
+        Path(splat_path),
+        settings,
+        workspace_directory=Path(workspace_directory),
+        execution_environment=execution_environment,
+        on_log=log_brush,
+    )
+    return str(output_path)
+
+
+@flow(name="splat-generation")
+def splat_generation_flow(
     artifact_id: UUID,
     workspace_directory: str,
     video_path: str,
     frames_directory: str,
     colmap_directory: str,
-    settings: FrameExtractionWorkflowSettings,
+    splat_path: str,
+    settings: SplatGenerationWorkflowSettings,
     owner_id: str,
 ) -> str:
     if not owner_id:
         raise ValueError("owner_id must not be empty")
 
     run_logger = get_run_logger()
-    run_logger.info("Starting frame extraction for artifact %s", artifact_id)
+    run_logger.info("Starting splat generation for artifact %s", artifact_id)
 
-    colmap_execution_environment = (
+    gpu_execution_environment = (
         SCITAS_EXECUTION_ENVIRONMENT
         if config.USE_SCITAS
         else LOCAL_EXECUTION_ENVIRONMENT
@@ -187,28 +221,36 @@ def frame_extraction_flow(
         fit_in_height=settings.ffmpeg.fit_in_height,
         execution_environment=LOCAL_EXECUTION_ENVIRONMENT,
     )
-    return reconstruct_with_colmap_task(
+    reconstructed_colmap_directory = reconstruct_with_colmap_task(
         workspace_directory=workspace_directory,
         frames_directory=extracted_frames_directory,
         colmap_directory=colmap_directory,
         settings=settings.colmap,
-        execution_environment=colmap_execution_environment,
+        execution_environment=gpu_execution_environment,
+    )
+    return train_with_brush_task(
+        workspace_directory=workspace_directory,
+        dataset_directory=str(Path(reconstructed_colmap_directory).parent),
+        splat_path=splat_path,
+        settings=settings.brush,
+        execution_environment=gpu_execution_environment,
     )
 
 
-async def schedule_frame_extraction(
-    artifact: FrameExtractionArtifact,
-    settings: FrameExtractionWorkflowSettings,
+async def schedule_splat_generation(
+    artifact: SplatGenerationArtifact,
+    settings: SplatGenerationWorkflowSettings,
     owner_id: str,
 ) -> UUID:
     flow_run = await arun_deployment(
-        name=FRAME_EXTRACTION_DEPLOYMENT,
+        name=SPLAT_GENERATION_DEPLOYMENT,
         parameters={
             "artifact_id": str(artifact.artifact_id),
             "workspace_directory": str(artifact.root_directory.resolve()),
             "video_path": str(artifact.video_path.resolve()),
             "frames_directory": str(artifact.frames_directory.resolve()),
             "colmap_directory": str(artifact.colmap_directory.resolve()),
+            "splat_path": str(artifact.splat_path.resolve()),
             "settings": settings.model_dump(mode="json"),
             "owner_id": owner_id,
         },

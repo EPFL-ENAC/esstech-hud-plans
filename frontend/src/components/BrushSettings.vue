@@ -161,6 +161,18 @@ const resetDefaults = () => {
                     />
                 </div>
             </div>
+
+            <q-separator />
+            <div class="text-subtitle2 text-primary">Exports</div>
+
+            <q-input
+                v-model.number="config.exportEvery"
+                type="number"
+                min="1"
+                label="Export Every (Steps)"
+                outlined
+                dense
+            />
         </q-card-section>
 
         <q-separator />

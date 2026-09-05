@@ -1,8 +1,8 @@
-from api.lib.workflows.frame_extraction import frame_extraction_flow
+from api.lib.workflows.splat_generation import splat_generation_flow
 
 
 def serve_workflows() -> None:
-    frame_extraction_flow.serve(name="default", limit=1)
+    splat_generation_flow.serve(name="default", limit=1)
 
 
 if __name__ == "__main__":
