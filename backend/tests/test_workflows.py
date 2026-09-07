@@ -477,16 +477,18 @@ def test_splat_generation_flow_selects_gpu_environment(
     )
     monkeypatch.setattr(splat_workflow, "train_with_brush_task", fake_brush_task)
 
-    result = splat_workflow.splat_generation_flow.fn(
-        artifact_id=uuid4(),
-        workspace_directory=str(tmp_path),
-        video_path="input.mov",
-        raw_frames_directory=str(tmp_path / "frames_raw"),
-        frames_directory=str(tmp_path / "frames"),
-        colmap_directory=str(tmp_path / "colmap"),
-        splat_path=str(tmp_path / "splat.ply"),
-        settings=settings,
-        owner_id=USER_ID,
+    result = asyncio.run(
+        splat_workflow.splat_generation_flow.fn(
+            artifact_id=uuid4(),
+            workspace_directory=str(tmp_path),
+            video_path="input.mov",
+            raw_frames_directory=str(tmp_path / "frames_raw"),
+            frames_directory=str(tmp_path / "frames"),
+            colmap_directory=str(tmp_path / "colmap"),
+            splat_path=str(tmp_path / "splat.ply"),
+            settings=settings,
+            owner_id=USER_ID,
+        )
     )
 
     assert result == str(tmp_path / "splat.ply")

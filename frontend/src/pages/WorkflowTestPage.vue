@@ -21,113 +21,13 @@
 
                 <q-separator />
 
-                <q-form class="q-pa-md q-gutter-y-md" @submit="submitSplatGeneration">
-                    <q-file
-                        v-model="videoFile"
-                        outlined
-                        accept="video/*"
-                        label="Video file"
-                        clearable
-                    >
-                        <template #prepend>
-                            <q-icon name="movie" />
-                        </template>
-                    </q-file>
-
-                    <div class="text-subtitle1 text-weight-medium">ffmpeg settings</div>
-                    <div class="row q-col-gutter-md">
-                        <q-input
-                            v-model.number="settings.ffmpeg.fps"
-                            class="col-12 col-sm-4"
-                            outlined
-                            type="number"
-                            min="0.01"
-                            step="0.01"
-                            label="FPS"
-                        />
-                        <q-input
-                            v-model.number="settings.ffmpeg.fitInWidth"
-                            class="col-12 col-sm-4"
-                            outlined
-                            type="number"
-                            min="1"
-                            step="1"
-                            label="Fit-in width"
-                        />
-                        <q-input
-                            v-model.number="settings.ffmpeg.fitInHeight"
-                            class="col-12 col-sm-4"
-                            outlined
-                            type="number"
-                            min="1"
-                            step="1"
-                            label="Fit-in height"
-                        />
-                    </div>
-
-                    <q-separator />
-
-                    <frame-picker-settings v-model="framePickerConfig" />
-
-                    <q-separator />
-
-                    <div class="text-subtitle1 text-weight-medium">COLMAP settings</div>
-                    <div class="row q-col-gutter-md">
-                        <q-select
-                            v-model="settings.colmap.dataType"
-                            class="col-12 col-sm-4"
-                            outlined
-                            emit-value
-                            map-options
-                            :options="colmapDataTypeOptions"
-                            label="Data type"
-                        />
-                        <q-select
-                            v-model="settings.colmap.quality"
-                            class="col-12 col-sm-4"
-                            outlined
-                            :options="colmapQualityOptions"
-                            label="Quality"
-                        />
-                        <q-select
-                            v-model="settings.colmap.cameraModel"
-                            class="col-12 col-sm-4"
-                            outlined
-                            :options="colmapCameraModelOptions"
-                            label="Camera model"
-                        />
-                    </div>
-                    <div class="row q-col-gutter-md">
-                        <q-toggle
-                            v-model="settings.colmap.singleCamera"
-                            class="col-12 col-sm-4"
-                            label="Use shared camera intrinsics"
-                        />
-                        <q-toggle
-                            v-model="settings.colmap.useGpu"
-                            class="col-12 col-sm-4"
-                            label="Use GPU"
-                        />
-                        <q-toggle
-                            v-model="settings.colmap.useGlobalMapper"
-                            class="col-12 col-sm-4"
-                            label="Use global mapper"
-                        />
-                    </div>
-
-                    <q-separator />
-
-                    <brush-settings v-model="brushConfig" />
-
-                    <q-btn
-                        color="primary"
-                        icon="upload"
-                        label="Submit workflow"
-                        type="submit"
-                        :disable="!canSubmit || isBusy"
+                <q-card-section>
+                    <reconstruction-submission-form
+                        submit-label="Submit workflow"
                         :loading="activeRequest === 'submit'"
+                        @submit="submitSplatGeneration"
                     />
-                </q-form>
+                </q-card-section>
             </q-card>
 
             <q-card flat bordered>
@@ -257,13 +157,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, reactive, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
 import { baseUrl } from 'boot/api';
-import BrushSettings from 'src/components/BrushSettings.vue';
-import FramePickerSettings from 'src/components/FramePickerSettings.vue';
+import ReconstructionSubmissionForm from 'src/components/ReconstructionSubmissionForm.vue';
 import { authFetch } from 'src/lib/auth';
-import { type BrushTrainingConfig, makeDefaultBrushConfig } from 'src/lib/splats/brush';
-import { type FramePickerConfig, makeDefaultFramePickerConfig } from 'src/lib/splats/framePicker';
+import type { ReconstructionSubmission } from 'src/lib/buildings';
 
 type RequestName = 'submit' | 'status' | 'result';
 
@@ -291,31 +189,6 @@ interface WorkflowLog {
 
 type LogStreamState = 'idle' | 'connecting' | 'listening' | 'finished' | 'stopped' | 'error';
 
-const videoFile = ref<File | null>(null);
-const settings = reactive({
-    ffmpeg: {
-        fps: 2,
-        fitInWidth: 1920,
-        fitInHeight: 1920,
-    },
-    colmap: {
-        dataType: 'video',
-        quality: 'low',
-        cameraModel: 'OPENCV',
-        singleCamera: true,
-        useGpu: false,
-        useGlobalMapper: false,
-    },
-});
-const framePickerConfig = ref<FramePickerConfig>(makeDefaultFramePickerConfig());
-const brushConfig = ref<BrushTrainingConfig>(makeDefaultBrushConfig());
-const colmapDataTypeOptions = [
-    { label: 'Individual images', value: 'individual' },
-    { label: 'Video frames', value: 'video' },
-    { label: 'Internet images', value: 'internet' },
-];
-const colmapQualityOptions = ['low', 'medium', 'high', 'extreme'];
-const colmapCameraModelOptions = ['PINHOLE', 'OPENCV', 'OPENCV_FISHEYE', 'RADIAL'];
 const workflowId = ref('');
 const workflowStatus = ref<WorkflowStatusResponse | null>(null);
 const workflowLogs = ref<WorkflowLog[]>([]);
@@ -330,18 +203,6 @@ const responseStatus = ref<number | null>(null);
 const responseBody = ref<unknown>(null);
 
 const isBusy = computed(() => activeRequest.value !== null);
-const canSubmit = computed(
-    () =>
-        videoFile.value !== null &&
-        settings.ffmpeg.fps > 0 &&
-        settings.ffmpeg.fitInWidth > 0 &&
-        settings.ffmpeg.fitInHeight > 0 &&
-        (!framePickerConfig.value.enabled ||
-            (framePickerConfig.value.min_fps > 0 &&
-                framePickerConfig.value.distance_threshold >= 0 &&
-                framePickerConfig.value.outlier_sharpness_ratio >= 0 &&
-                framePickerConfig.value.outlier_sharpness_ratio <= 1)),
-);
 const formattedResponse = computed(() => {
     if (!responseLabel.value) return 'Responses will appear here.';
     if (typeof responseBody.value === 'string') return responseBody.value;
@@ -396,50 +257,10 @@ async function captureRequest(
     }
 }
 
-async function submitSplatGeneration(): Promise<void> {
-    if (!videoFile.value || !canSubmit.value) return;
-
+async function submitSplatGeneration(submission: ReconstructionSubmission): Promise<void> {
     const formData = new FormData();
-    formData.append('file', videoFile.value);
-    formData.append(
-        'settings',
-        JSON.stringify({
-            ffmpeg: {
-                fps: settings.ffmpeg.fps,
-                fit_in_width: settings.ffmpeg.fitInWidth,
-                fit_in_height: settings.ffmpeg.fitInHeight,
-            },
-            frame_picker: framePickerConfig.value.enabled
-                ? {
-                      min_fps: framePickerConfig.value.min_fps,
-                      distance_threshold: framePickerConfig.value.distance_threshold,
-                      remove_outliers: framePickerConfig.value.remove_outliers,
-                      outlier_sharpness_ratio: framePickerConfig.value.outlier_sharpness_ratio,
-                  }
-                : null,
-            colmap: {
-                data_type: settings.colmap.dataType,
-                quality: settings.colmap.quality,
-                camera_model: settings.colmap.cameraModel,
-                single_camera: settings.colmap.singleCamera,
-                use_gpu: settings.colmap.useGpu,
-                use_global_mapper: settings.colmap.useGlobalMapper,
-            },
-            brush: {
-                total_steps: brushConfig.value.totalSteps,
-                render_mode: brushConfig.value.renderMode,
-                sh_degree: brushConfig.value.shDegree,
-                max_splats: brushConfig.value.maxSplats,
-                refine_every: brushConfig.value.refineEvery,
-                growth_grad_threshold: brushConfig.value.growthGradThreshold,
-                growth_stop_iter: brushConfig.value.growthStopIter,
-                max_resolution: brushConfig.value.maxResolution,
-                subsample_frames: brushConfig.value.subsampleFrames,
-                alpha_mode: brushConfig.value.alphaMode,
-                export_every: brushConfig.value.exportEvery,
-            },
-        }),
-    );
+    formData.append('file', submission.video);
+    formData.append('settings', JSON.stringify(submission.settings));
 
     const response = await captureRequest('submit', 'POST /workflows/splat-generation', () =>
         authFetch(`${baseUrl}/workflows/splat-generation`, {

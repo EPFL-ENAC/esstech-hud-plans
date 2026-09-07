@@ -59,11 +59,13 @@ def test_only_building_row_inherits_from_sqlmodel() -> None:
 @pytest.mark.parametrize(
     "payload",
     [
-        {"name": "", "latitude": 46.52, "longitude": 6.57},
         {"name": "EPFL", "latitude": -90.01, "longitude": 6.57},
         {"name": "EPFL", "latitude": 90.01, "longitude": 6.57},
         {"name": "EPFL", "latitude": 46.52, "longitude": -180.01},
         {"name": "EPFL", "latitude": 46.52, "longitude": 180.01},
+        {"name": "EPFL", "latitude": 46.52},
+        {"name": "EPFL", "longitude": 6.57},
+        {"name": "EPFL", "latitude": None, "longitude": 6.57},
     ],
 )
 def test_building_create_validates_values(payload: dict[str, object]) -> None:
@@ -71,10 +73,31 @@ def test_building_create_validates_values(payload: dict[str, object]) -> None:
         BuildingCreate.model_validate(payload)
 
 
-@pytest.mark.parametrize("field_name", ["name", "latitude", "longitude"])
-def test_building_update_rejects_explicit_nulls(field_name: str) -> None:
+def test_building_create_defaults_to_empty_optional_metadata() -> None:
+    payload = BuildingCreate()
+    assert payload.name == ""
+    assert payload.latitude is None
+    assert payload.longitude is None
+
+
+def test_building_update_rejects_null_name() -> None:
     with pytest.raises(ValidationError):
-        BuildingUpdate.model_validate({field_name: None})
+        BuildingUpdate.model_validate({"name": None})
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"latitude": 46.52},
+        {"longitude": 6.57},
+        {"latitude": None, "longitude": 6.57},
+    ],
+)
+def test_building_update_requires_a_complete_coordinate_pair(
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        BuildingUpdate.model_validate(payload)
 
 
 def test_building_service_crud_and_ownership() -> None:
@@ -119,12 +142,19 @@ def test_building_service_crud_and_ownership() -> None:
 
             updated = await buildings.update(
                 first,
-                BuildingUpdate(name="Renamed", latitude=46.6),
+                BuildingUpdate(name="Renamed", latitude=46.6, longitude=6.7),
             )
             assert updated.name == "Renamed"
             assert updated.latitude == 46.6
-            assert updated.longitude == 6.5668
+            assert updated.longitude == 6.7
             assert updated.updated_at > original_updated_at
+
+            cleared = await buildings.update(
+                updated,
+                BuildingUpdate(latitude=None, longitude=None),
+            )
+            assert cleared.latitude is None
+            assert cleared.longitude is None
 
             await buildings.delete(updated)
             assert await buildings.get(first.id, user_id=USER_ID) is None
@@ -202,12 +232,12 @@ def test_building_routes_cover_crud(api_client: TestClient) -> None:
 
     update_response = api_client.patch(
         f"/buildings/{building_id}",
-        json={"name": "BC renamed", "longitude": 6.564},
+        json={"name": "", "latitude": None, "longitude": None},
     )
     assert update_response.status_code == 200
-    assert update_response.json()["name"] == "BC renamed"
-    assert update_response.json()["latitude"] == 46.518
-    assert update_response.json()["longitude"] == 6.564
+    assert update_response.json()["name"] == ""
+    assert update_response.json()["latitude"] is None
+    assert update_response.json()["longitude"] is None
 
     delete_response = api_client.delete(f"/buildings/{building_id}")
     assert delete_response.status_code == 204
@@ -222,6 +252,15 @@ def test_building_routes_validate_payload_and_pagination(
         api_client.post(
             "/buildings",
             json={"name": "", "latitude": 91, "longitude": 0},
+        ).status_code
+        == 422
+    )
+    assert api_client.post("/buildings", json={"latitude": 46}).status_code == 422
+    building_id = api_client.post("/buildings", json={}).json()["id"]
+    assert (
+        api_client.patch(
+            f"/buildings/{building_id}",
+            json={"latitude": None},
         ).status_code
         == 422
     )

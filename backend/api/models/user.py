@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from pydantic import Field as PydanticField
 from sqlalchemy import Column, DateTime
 from sqlalchemy.orm import relationship
@@ -35,6 +35,19 @@ class UserUpdate(BaseModel):
     username: str | None = None
     email: str | None = None
     name: str | None = None
+
+
+class UserRead(BaseModel):
+    """Persisted user representation returned by the API."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    username: str | None
+    email: str | None
+    name: str | None
+    created_at: datetime
+    updated_at: datetime
 
 
 class User(SQLModel, table=True):  # type: ignore[call-arg]

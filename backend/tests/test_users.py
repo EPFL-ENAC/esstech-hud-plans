@@ -5,8 +5,12 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from api.models.auth import AuthenticatedUser
-from api.models.user import User, UserCreate, UserUpdate
+from api.models.user import User, UserCreate, UserRead, UserUpdate
+from api.services.auth import require_user
 from api.services.users import UserService
+from api.views import users as user_views
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -30,8 +34,10 @@ async def user_service() -> AsyncIterator[UserService]:
 def test_only_database_user_inherits_from_sqlmodel() -> None:
     assert issubclass(UserCreate, BaseModel)
     assert issubclass(UserUpdate, BaseModel)
+    assert issubclass(UserRead, BaseModel)
     assert not issubclass(UserCreate, SQLModel)
     assert not issubclass(UserUpdate, SQLModel)
+    assert not issubclass(UserRead, SQLModel)
     assert User.__tablename__ == "users"
 
 
@@ -52,6 +58,48 @@ def test_create_get_and_list_users() -> None:
             assert await users.list(offset=1, limit=1) == [second]
 
     asyncio.run(run())
+
+
+def test_current_user_route_returns_persisted_user() -> None:
+    now = datetime.now(UTC)
+    current_user = User(
+        id=uuid4(),
+        keycloak_sub="subject-1",
+        username="tester",
+        email="tester@example.com",
+        name="Test User",
+        created_at=now,
+        updated_at=now,
+    )
+    app = FastAPI()
+    app.include_router(user_views.router, prefix="/user")
+    app.dependency_overrides[require_user] = lambda: current_user
+
+    with TestClient(app) as client:
+        response = client.get("/user/me")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload == {
+        "id": str(current_user.id),
+        "username": "tester",
+        "email": "tester@example.com",
+        "name": "Test User",
+        "created_at": payload["created_at"],
+        "updated_at": payload["updated_at"],
+    }
+    assert datetime.fromisoformat(payload["created_at"]) == now
+    assert datetime.fromisoformat(payload["updated_at"]) == now
+
+
+def test_current_user_route_requires_authentication() -> None:
+    app = FastAPI()
+    app.include_router(user_views.router, prefix="/user")
+
+    with TestClient(app) as client:
+        response = client.get("/user/me")
+
+    assert response.status_code in {401, 403}
 
 
 def test_list_users_validates_pagination() -> None:
