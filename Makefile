@@ -28,5 +28,14 @@ reset-db:
 	docker compose down --volumes
 	docker compose up -d
 
+db-upgrade:
+	cd backend && make db-upgrade
+
+db-downgrade:
+	cd backend && make db-downgrade
+
+db-revision:
+	cd backend && make db-revision name="$(name)"
+
 test:
 	cd backend && make test

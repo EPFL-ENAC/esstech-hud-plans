@@ -34,8 +34,13 @@ In one shell, run:
 
 ```bash
 make run-db
+make db-upgrade
 make run-backend
 ```
+
+Database schema changes are managed explicitly with Alembic. Use
+`make db-revision name="description"` to generate a revision and
+`make db-downgrade` to roll back one revision.
 
 The Prefect server is included in `make run-db`. In another shell, start the
 local workflow deployment process:

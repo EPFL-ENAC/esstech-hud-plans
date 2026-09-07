@@ -10,7 +10,7 @@ from api.lib.workflows import __main__ as workflow_runner
 from api.lib.workflows import common as workflow_common
 from api.lib.workflows import counter as counter_workflow
 from api.lib.workflows import splat_generation as splat_workflow
-from api.models.auth import User
+from api.models.user import User
 from api.models.workflows import (
     BrushSettings,
     ColmapSettings,
@@ -24,6 +24,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from prefect.client.schemas.objects import Log, StateType
 
+USER_ID = UUID("00000000-0000-0000-0000-000000000001")
+OTHER_USER_ID = UUID("00000000-0000-0000-0000-000000000002")
+
 
 @pytest.fixture
 def workflow_data_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
@@ -36,14 +39,17 @@ def workflow_data_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
 def client() -> TestClient:
     app = FastAPI()
     app.include_router(workflow_views.router, prefix="/workflows")
-    app.dependency_overrides[require_user] = lambda: User(sub="owner-1")
+    app.dependency_overrides[require_user] = lambda: User(
+        id=USER_ID,
+        keycloak_sub="subject-1",
+    )
     return TestClient(app)
 
 
 def _flow_run(
     state_type: StateType,
     *,
-    owner_id: str = "owner-1",
+    owner_id: UUID = USER_ID,
     artifact_id: UUID | None = None,
     message: str | None = None,
 ):
@@ -52,7 +58,7 @@ def _flow_run(
         state_type=state_type,
         state=SimpleNamespace(message=message),
         parameters={
-            "owner_id": owner_id,
+            "owner_id": str(owner_id),
             "artifact_id": str(artifact_id or uuid4()),
         },
     )
@@ -131,7 +137,7 @@ def test_schedule_splat_generation_returns_prefect_run_id(
                     use_global_mapper=True,
                 ),
             ),
-            "owner-1",
+            USER_ID,
         )
     )
 
@@ -176,7 +182,7 @@ def test_schedule_splat_generation_returns_prefect_run_id(
                 "export_every": 5_000,
             },
         },
-        "owner_id": "owner-1",
+        "owner_id": str(USER_ID),
     }
 
 
@@ -193,7 +199,7 @@ def test_counter_flow_logs_once_per_second_for_sixty_seconds(
     monkeypatch.setattr(counter_workflow.time, "sleep", sleeps.append)
     monkeypatch.setattr(counter_workflow, "get_run_logger", lambda: FakeRunLogger())
 
-    counter_workflow.counter_flow.fn("owner-1")
+    counter_workflow.counter_flow.fn(USER_ID)
 
     assert sleeps == [1] * 60
     assert records == [("Counter: %d", count) for count in range(1, 61)]
@@ -211,12 +217,12 @@ def test_schedule_counter_returns_prefect_run_id(
 
     monkeypatch.setattr(counter_workflow, "arun_deployment", fake_run_deployment)
 
-    result = asyncio.run(counter_workflow.schedule_counter("owner-1"))
+    result = asyncio.run(counter_workflow.schedule_counter(USER_ID))
 
     assert result == expected_id
     assert captured == {
         "name": "counter/default",
-        "parameters": {"owner_id": "owner-1"},
+        "parameters": {"owner_id": str(USER_ID)},
         "timeout": 0,
         "as_subflow": False,
     }
@@ -471,16 +477,18 @@ def test_splat_generation_flow_selects_gpu_environment(
     )
     monkeypatch.setattr(splat_workflow, "train_with_brush_task", fake_brush_task)
 
-    result = splat_workflow.splat_generation_flow.fn(
-        artifact_id=uuid4(),
-        workspace_directory=str(tmp_path),
-        video_path="input.mov",
-        raw_frames_directory=str(tmp_path / "frames_raw"),
-        frames_directory=str(tmp_path / "frames"),
-        colmap_directory=str(tmp_path / "colmap"),
-        splat_path=str(tmp_path / "splat.ply"),
-        settings=settings,
-        owner_id="owner-1",
+    result = asyncio.run(
+        splat_workflow.splat_generation_flow.fn(
+            artifact_id=uuid4(),
+            workspace_directory=str(tmp_path),
+            video_path="input.mov",
+            raw_frames_directory=str(tmp_path / "frames_raw"),
+            frames_directory=str(tmp_path / "frames"),
+            colmap_directory=str(tmp_path / "colmap"),
+            splat_path=str(tmp_path / "splat.ply"),
+            settings=settings,
+            owner_id=USER_ID,
+        )
     )
 
     assert result == str(tmp_path / "splat.ply")
@@ -551,8 +559,8 @@ def test_submit_counter_returns_202(
 ) -> None:
     workflow_id = uuid4()
 
-    async def fake_schedule(owner_id: str):
-        assert owner_id == "owner-1"
+    async def fake_schedule(owner_id: UUID):
+        assert owner_id == USER_ID
         return workflow_id
 
     monkeypatch.setattr(workflow_views, "schedule_counter", fake_schedule)
@@ -574,7 +582,7 @@ def test_submit_splat_generation_stores_upload_and_returns_202(
         assert artifact.video_path.read_bytes() == b"video bytes"
         assert artifact.video_path.name == "input.mp4"
         assert settings == SplatGenerationWorkflowSettings()
-        assert owner_id == "owner-1"
+        assert owner_id == USER_ID
         return workflow_id
 
     monkeypatch.setattr(workflow_views, "schedule_splat_generation", fake_schedule)
@@ -783,8 +791,8 @@ def test_workflow_status_maps_prefect_states(
 ) -> None:
     workflow_id = uuid4()
 
-    async def fake_get_owned_workflow_run(*, workflow_id: UUID, owner_id: str):
-        assert owner_id == "owner-1"
+    async def fake_get_owned_workflow_run(*, workflow_id: UUID, owner_id: UUID):
+        assert owner_id == USER_ID
         flow_run = _flow_run(state_type, message="A status message")
         flow_run.id = workflow_id
         return flow_run
@@ -975,13 +983,13 @@ class _FakePrefectClientContext:
 def test_get_owned_workflow_run_rejects_another_owner(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    flow_run = _flow_run(StateType.RUNNING, owner_id="owner-2")
+    flow_run = _flow_run(StateType.RUNNING, owner_id=OTHER_USER_ID)
     monkeypatch.setattr(
         workflow_common, "get_client", lambda: _FakePrefectClientContext(flow_run)
     )
 
     with pytest.raises(workflow_common.WorkflowNotFoundError):
-        asyncio.run(workflow_common.get_owned_workflow_run(uuid4(), "owner-1"))
+        asyncio.run(workflow_common.get_owned_workflow_run(uuid4(), USER_ID))
 
 
 class _FakeLogsClientContext:
@@ -1221,7 +1229,7 @@ def test_listen_to_workflow_streams_snapshot_then_logs(
     stream_closed = False
 
     async def fake_get_owned_workflow_run(*, workflow_id, owner_id):
-        assert owner_id == "owner-1"
+        assert owner_id == USER_ID
         flow_run.id = workflow_id
         return flow_run
 

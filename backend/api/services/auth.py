@@ -1,12 +1,20 @@
 from __future__ import annotations
 
-from typing import Any
+import logging
+from typing import Annotated, Any
 
 import jwt
 from api.config import config
-from api.models.auth import User
+from api.db import get_session
+from api.models.auth import AuthenticatedUser
+from api.models.user import User
+from api.services.users import UserService
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.exc import SQLAlchemyError
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -29,8 +37,19 @@ def _get_jwks_client() -> jwt.PyJWKClient:
     return _jwks_client
 
 
-def _parse_user(payload: dict[str, Any]) -> User:
-    """Build a User from the claims of a verified Keycloak token."""
+def _optional_string(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value or None
+
+
+def _parse_authenticated_user(payload: dict[str, Any]) -> AuthenticatedUser:
+    """Build an authenticated identity from verified Keycloak claims."""
+
+    sub = _optional_string(payload.get("sub"))
+    if sub is None:
+        raise jwt.InvalidTokenError("Token is missing its subject")
 
     realm_access = payload.get("realm_access") or {}
     roles = list(realm_access.get("roles") or [])
@@ -39,20 +58,20 @@ def _parse_user(payload: dict[str, Any]) -> User:
     resource_access = payload.get("resource_access") or {}
     client_entry = resource_access.get(config.KEYCLOAK_CLIENT_ID) or {}
     client_roles = list(client_entry.get("roles") or [])
-    return User(
-        sub=str(payload.get("sub", "")),
-        username=str(payload.get("preferred_username", "")),
-        email=str(payload.get("email", "")),
-        name=str(payload.get("name", "")),
+    return AuthenticatedUser(
+        sub=sub,
+        username=_optional_string(payload.get("preferred_username")),
+        email=_optional_string(payload.get("email")),
+        name=_optional_string(payload.get("name")),
         roles=roles,
         client_roles=client_roles,
     )
 
 
-def require_user(
+def authenticate_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
-) -> User:
-    """Resolve the authenticated user from the bearer token.
+) -> AuthenticatedUser:
+    """Validate a bearer token and return its authenticated identity.
 
     Verifies the JWT signature against the Keycloak JWKS and parses the
     identity and roles from the token claims. Raises 401 when the token is
@@ -87,24 +106,48 @@ def require_user(
             and azp != config.KEYCLOAK_CLIENT_ID
         ):
             raise jwt.InvalidAudienceError("Audience doesn't match")
+        return _parse_authenticated_user(payload)
     except (jwt.PyJWTError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
         ) from exc
 
-    return _parse_user(payload)
+
+def get_user_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> UserService:
+    """Build a request-scoped user service."""
+
+    return UserService(session)
 
 
-def require_admin(
+async def require_user(
+    identity: Annotated[AuthenticatedUser, Depends(authenticate_user)],
+    users: Annotated[UserService, Depends(get_user_service)],
+) -> User:
+    """Resolve a verified identity to its persisted application user."""
+
+    try:
+        return await users.sync_authenticated_user(identity)
+    except (OSError, SQLAlchemyError) as exc:
+        logger.exception("Failed to synchronize authenticated user")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="User database is unavailable",
+        ) from exc
+
+
+async def require_admin(
     current_user: User = Depends(require_user),
+    identity: AuthenticatedUser = Depends(authenticate_user),
 ) -> User:
     """Resolve the authenticated user and require the admin role.
 
     Raises 403 when the user does not hold the \"admin\" client role.
     """
 
-    if not current_user.is_admin:
+    if not identity.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privileges required",

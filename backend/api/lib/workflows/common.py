@@ -81,14 +81,14 @@ class WorkflowLogStreamItem:
         return f"event: {self.type}\ndata: {serialized_data}\n\n"
 
 
-async def get_owned_workflow_run(workflow_id: UUID, owner_id: str) -> FlowRun:
+async def get_owned_workflow_run(workflow_id: UUID, owner_id: UUID) -> FlowRun:
     try:
         async with get_client() as client:
             flow_run = await client.read_flow_run(workflow_id)
     except ObjectNotFound as exc:
         raise WorkflowNotFoundError from exc
 
-    if flow_run.parameters.get("owner_id") != owner_id:
+    if flow_run.parameters.get("owner_id") != str(owner_id):
         raise WorkflowNotFoundError
 
     return flow_run

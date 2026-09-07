@@ -14,7 +14,7 @@ from api.lib.workflows.splat_generation import (
     SplatGenerationArtifact,
     schedule_splat_generation,
 )
-from api.models.auth import User
+from api.models.user import User
 from api.models.workflows import (
     SplatGenerationResultResponse,
     SplatGenerationWorkflowSettings,
@@ -40,7 +40,7 @@ async def get_current_workflow(
     try:
         return await get_owned_workflow_run(
             workflow_id=workflow_id,
-            owner_id=current_user.sub,
+            owner_id=current_user.id,
         )
     except WorkflowNotFoundError as exc:
         raise HTTPException(
@@ -63,7 +63,7 @@ async def submit_counter(
     current_user: User = Depends(require_user),
 ) -> WorkflowSubmissionResponse:
     try:
-        workflow_id = await schedule_counter(current_user.sub)
+        workflow_id = await schedule_counter(current_user.id)
     except Exception as exc:
         logger.exception("Failed to schedule counter workflow")
         raise HTTPException(
@@ -116,7 +116,7 @@ async def submit_splat_generation(
         workflow_id = await schedule_splat_generation(
             artifact=artifact,
             settings=workflow_settings,
-            owner_id=current_user.sub,
+            owner_id=current_user.id,
         )
     except Exception as exc:
         logger.exception("Failed to schedule splat generation")

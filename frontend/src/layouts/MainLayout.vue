@@ -6,6 +6,8 @@
 
                 <q-toolbar-title> Quasar App </q-toolbar-title>
 
+                <q-btn flat dense icon="location_city" label="Buildings" to="/buildings" />
+
                 <q-btn
                     flat
                     dense
