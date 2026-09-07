@@ -25,7 +25,7 @@
                     bordered
                     clickable
                     @click="$router.push(`/building/${buildingId}/plan/2d`)"
-                    class="q-py-sm"
+                    class="link-card q-py-sm"
                 >
                     <q-item>
                         <q-item-section avatar>
@@ -58,7 +58,7 @@
                     bordered
                     clickable
                     @click="$router.push(`/building/${buildingId}/plan/3d`)"
-                    class="q-py-sm"
+                    class="link-card q-py-sm"
                 >
                     <q-item>
                         <q-item-section avatar>

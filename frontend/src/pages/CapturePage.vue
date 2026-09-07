@@ -3,7 +3,13 @@
         <h1 class="text-h5 text-weight-bold q-mb-lg">How would you like to capture?</h1>
 
         <q-list class="q-gutter-y-md">
-            <q-card flat bordered clickable class="q-py-sm" @click="$router.push('/capture/video')">
+            <q-card
+                flat
+                bordered
+                clickable
+                class="link-card q-py-sm"
+                @click="$router.push('/capture/video')"
+            >
                 <q-item>
                     <q-item-section avatar>
                         <q-avatar
@@ -29,7 +35,13 @@
                 </q-item>
             </q-card>
 
-            <q-card flat bordered clickable class="q-py-sm" @click="$router.push('/capture/new')">
+            <q-card
+                flat
+                bordered
+                clickable
+                class="link-card q-py-sm"
+                @click="$router.push('/capture/new')"
+            >
                 <q-item>
                     <q-item-section avatar>
                         <q-avatar

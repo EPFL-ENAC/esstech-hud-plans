@@ -3,7 +3,7 @@
         <h1 class="text-h5 text-weight-bold q-mb-lg">More</h1>
 
         <q-list class="q-gutter-y-md">
-            <q-card flat bordered class="items-center">
+            <q-card flat bordered class="link-card items-center">
                 <q-item>
                     <q-item-section>
                         <q-item-label class="text-subtitle1 text-weight-medium"
@@ -16,7 +16,7 @@
                 </q-item>
             </q-card>
 
-            <q-card flat bordered class="items-center">
+            <q-card flat bordered class="link-card items-center">
                 <q-item>
                     <q-item-section>
                         <q-item-label class="text-subtitle1 text-weight-medium"
@@ -29,7 +29,7 @@
                 </q-item>
             </q-card>
 
-            <q-card flat bordered class="items-center">
+            <q-card flat bordered class="link-card items-center">
                 <q-item>
                     <q-item-section>
                         <q-item-label class="text-subtitle1 text-weight-medium">
@@ -42,7 +42,7 @@
                 </q-item>
             </q-card>
 
-            <q-card flat bordered clickable @click="handleLogout">
+            <q-card flat bordered clickable class="link-card" @click="handleLogout">
                 <q-item class="text-negative">
                     <q-item-section>
                         <q-item-label class="text-subtitle1 text-weight-medium"

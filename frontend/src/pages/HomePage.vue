@@ -4,7 +4,13 @@
             <h2 class="text-h6 text-weight-bold q-mb-md">Quick Actions</h2>
             <div class="row q-col-gutter-md">
                 <div class="col-6">
-                    <q-card flat bordered clickable @click="$router.push('/capture')">
+                    <q-card
+                        flat
+                        bordered
+                        clickable
+                        class="link-card"
+                        @click="$router.push('/capture')"
+                    >
                         <q-card-section class="column">
                             <q-avatar
                                 square
@@ -21,7 +27,13 @@
                     </q-card>
                 </div>
                 <div class="col-6">
-                    <q-card flat bordered clickable @click="$router.push('/library')">
+                    <q-card
+                        flat
+                        bordered
+                        clickable
+                        class="link-card"
+                        @click="$router.push('/library')"
+                    >
                         <q-card-section class="column">
                             <q-avatar
                                 square
