@@ -118,7 +118,7 @@ function openBuilding(id: string) {
     if (building?.status === 'processing') {
         void router.push(`/capture/processing/${id}`);
     } else {
-        void router.push(`/library/building/${id}`);
+        void router.push(`/building/${id}`);
     }
 }
 </script>

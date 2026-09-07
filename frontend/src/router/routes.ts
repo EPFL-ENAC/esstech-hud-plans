@@ -9,60 +9,114 @@ const routes: RouteRecordRaw[] = [
                 path: '',
                 redirect: '/home',
             },
+            // Real tab pages. They render in the main (default) view and are
+            // kept alive so their state survives opening a detail drawer.
             {
                 path: 'home',
+                name: 'home',
+                meta: { tab: true },
                 component: () => import('pages/HomePage.vue'),
             },
             {
                 path: 'capture',
+                name: 'capture',
+                meta: { tab: true },
                 component: () => import('pages/CapturePage.vue'),
             },
             {
-                path: 'capture/video',
-                component: () => import('pages/CaptureVideoPage.vue'),
-            },
-            {
-                path: 'capture/new',
-                component: () => import('pages/NewCapturePage.vue'),
-            },
-            {
-                path: 'capture/processing/:id',
-                component: () => import('pages/ProcessingPage.vue'),
-            },
-            {
                 path: 'library',
+                name: 'library',
+                meta: { tab: true },
                 component: () => import('pages/LibraryPage.vue'),
             },
             {
-                path: 'library/building/:id',
-                component: () => import('pages/BuildingPage.vue'),
-            },
-            {
-                path: 'library/building/:id/plan/2d',
-                component: () => import('pages/Plan2DPage.vue'),
-            },
-            {
-                path: 'library/building/:id/plan/3d',
-                component: () => import('pages/Plan3DPage.vue'),
-            },
-            {
-                path: 'library/building/:id/data',
-                component: () => import('pages/BuildingDataPage.vue'),
-            },
-            {
                 path: 'more',
+                name: 'more',
+                meta: { tab: true },
                 component: () => import('pages/MorePage.vue'),
             },
+
+            // Detail pages. These open in the right drawer over the current
+            // tab page (BackgroundPage keeps the underlying page mounted).
+            // They live outside /library so a building is not a "child" of the
+            // Library page.
             {
-                path: '/splat/:id',
+                path: 'building/:id',
+                meta: { drawer: true },
+                components: {
+                    default: () => import('components/BackgroundPage.vue'),
+                    detail: () => import('pages/BuildingPage.vue'),
+                },
+            },
+            {
+                path: 'building/:id/plan/2d',
+                meta: { drawer: true },
+                components: {
+                    default: () => import('components/BackgroundPage.vue'),
+                    detail: () => import('pages/Plan2DPage.vue'),
+                },
+            },
+            {
+                path: 'building/:id/plan/3d',
+                meta: { drawer: true },
+                components: {
+                    default: () => import('components/BackgroundPage.vue'),
+                    detail: () => import('pages/Plan3DPage.vue'),
+                },
+            },
+            {
+                path: 'building/:id/data',
+                meta: { drawer: true },
+                components: {
+                    default: () => import('components/BackgroundPage.vue'),
+                    detail: () => import('pages/BuildingDataPage.vue'),
+                },
+            },
+            {
+                path: 'capture/video',
+                meta: { drawer: true },
+                components: {
+                    default: () => import('components/BackgroundPage.vue'),
+                    detail: () => import('pages/CaptureVideoPage.vue'),
+                },
+            },
+            {
+                path: 'capture/new',
+                meta: { drawer: true },
+                components: {
+                    default: () => import('components/BackgroundPage.vue'),
+                    detail: () => import('pages/NewCapturePage.vue'),
+                },
+            },
+            {
+                path: 'capture/processing/:id',
+                meta: { drawer: true },
+                components: {
+                    default: () => import('components/BackgroundPage.vue'),
+                    detail: () => import('pages/ProcessingPage.vue'),
+                },
+            },
+
+            {
+                path: '/admin',
+                component: () => import('pages/AdminPage.vue'),
+            },
+        ],
+    },
+
+    // Splat viewer: its own full-screen page plus a left pipeline drawer
+    // (named view "drawer"). Uses a dedicated layout so the main navigation
+    // drawer and footer do not affect it.
+    {
+        path: '/splat/:id',
+        component: () => import('layouts/SplatLayout.vue'),
+        children: [
+            {
+                path: '',
                 components: {
                     default: () => import('pages/SplatPage.vue'),
                     drawer: () => import('src/drawers/SplatPipelineDrawer.vue'),
                 },
-            },
-            {
-                path: '/admin',
-                component: () => import('pages/AdminPage.vue'),
             },
         ],
     },

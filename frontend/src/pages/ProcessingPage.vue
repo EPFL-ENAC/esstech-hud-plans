@@ -87,7 +87,7 @@ function startSimulation() {
                 message: `${current.name} is ready.`,
                 position: 'top',
             });
-            void router.replace(`/library/building/${current.id}`);
+            void router.replace(`/building/${current.id}`);
         }
     }, 1200);
 }

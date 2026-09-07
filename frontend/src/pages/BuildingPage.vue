@@ -24,7 +24,7 @@
                     flat
                     bordered
                     clickable
-                    @click="$router.push(`/library/building/${buildingId}/plan/2d`)"
+                    @click="$router.push(`/building/${buildingId}/plan/2d`)"
                     class="q-py-sm"
                 >
                     <q-item>
@@ -57,7 +57,7 @@
                     flat
                     bordered
                     clickable
-                    @click="$router.push(`/library/building/${buildingId}/plan/3d`)"
+                    @click="$router.push(`/building/${buildingId}/plan/3d`)"
                     class="q-py-sm"
                 >
                     <q-item>
@@ -95,7 +95,7 @@
             class="full-width q-mb-md"
             unelevated
             no-caps
-            @click="$router.push(`/library/building/${buildingId}/data`)"
+            @click="$router.push(`/building/${buildingId}/data`)"
         />
 
         <q-btn
