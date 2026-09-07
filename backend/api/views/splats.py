@@ -4,7 +4,6 @@ import os
 import shutil
 
 from api.lib.compute.video_frame import VideoFrame
-from api.models.auth import User
 from api.models.splats import (
     BlueprintConfig,
     BrushTrainingConfig,

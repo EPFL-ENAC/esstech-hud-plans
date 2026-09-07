@@ -239,11 +239,8 @@ def splat_generation_flow(
     colmap_directory: str,
     splat_path: str,
     settings: SplatGenerationWorkflowSettings,
-    owner_id: str,
+    owner_id: UUID,
 ) -> str:
-    if not owner_id:
-        raise ValueError("owner_id must not be empty")
-
     run_logger = get_run_logger()
     run_logger.info("Starting splat generation for artifact %s", artifact_id)
 
@@ -296,7 +293,7 @@ def splat_generation_flow(
 async def schedule_splat_generation(
     artifact: SplatGenerationArtifact,
     settings: SplatGenerationWorkflowSettings,
-    owner_id: str,
+    owner_id: UUID,
 ) -> UUID:
     flow_run = await arun_deployment(
         name=SPLAT_GENERATION_DEPLOYMENT,
@@ -309,7 +306,7 @@ async def schedule_splat_generation(
             "colmap_directory": str(artifact.colmap_directory.resolve()),
             "splat_path": str(artifact.splat_path.resolve()),
             "settings": settings.model_dump(mode="json"),
-            "owner_id": owner_id,
+            "owner_id": str(owner_id),
         },
         timeout=0,
         as_subflow=False,
