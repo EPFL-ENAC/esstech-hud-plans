@@ -1,6 +1,6 @@
 <template>
-    <q-page class="bg-white text-dark q-pa-md q-pb-xl">
-        <section class="q-mb-lg">
+    <q-page class="bg-white text-dark q-pb-xl">
+        <section class="q-px-md q-pt-md q-mb-lg">
             <h2 class="text-h6 text-weight-bold q-mb-md">Quick Actions</h2>
             <div class="row q-col-gutter-md">
                 <div class="col-6">
@@ -41,19 +41,20 @@
         </section>
 
         <section v-if="buildingsStore.inProgressBuildings.length" class="q-mb-lg">
-            <h2 class="text-h6 text-weight-bold q-mb-md">In Progress</h2>
+            <h2 class="text-h6 text-weight-bold q-mb-md q-px-md">In Progress</h2>
             <building-list>
                 <building-list-item
                     v-for="building in buildingsStore.inProgressBuildings"
                     :key="building.id"
                     :building="building"
+                    show-chevron
                     @click="openBuilding(building.id)"
                 />
             </building-list>
         </section>
 
         <section>
-            <h2 class="text-h6 text-weight-bold q-mb-md">Recent</h2>
+            <h2 class="text-h6 text-weight-bold q-mb-md q-px-md">Recent</h2>
             <building-list>
                 <building-list-item
                     v-for="building in buildingsStore.readyBuildings"

@@ -1,5 +1,5 @@
 <template>
-    <q-page class="bg-white text-dark q-px-md q-pb-xl" style="padding-top: 64px">
+    <q-page class="bg-white text-dark q-pb-xl" style="padding-top: 64px">
         <page-header :back="false" title="Library">
             <q-btn
                 flat
@@ -16,13 +16,13 @@
             indicator-color="primary"
             align="left"
             bordered
-            class="q-mb-md"
+            class="q-px-md q-mb-md"
         >
             <q-tab name="list" label="List" />
             <q-tab name="map" label="Map" />
         </q-tabs>
 
-        <q-input v-model="search" outlined rounded placeholder="Search" class="q-mb-md">
+        <q-input v-model="search" outlined rounded placeholder="Search" class="q-mx-md q-mb-md">
             <template #prepend>
                 <q-icon name="search" />
             </template>
@@ -33,7 +33,7 @@
                 v-for="building in filteredBuildings"
                 :key="building.id"
                 :building="building"
-                :show-chevron="building.status === 'ready'"
+                show-chevron
                 @click="openBuilding(building.id)"
             />
         </building-list>
@@ -43,7 +43,7 @@
             flat
             bordered
             square
-            class="bg-grey-3 relative-position"
+            class="bg-grey-3 relative-position q-mx-md"
             style="aspect-ratio: 3 / 4; overflow: hidden"
         >
             <svg viewBox="0 0 320 420" class="absolute-full" preserveAspectRatio="xMidYMid slice">

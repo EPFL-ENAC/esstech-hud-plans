@@ -68,7 +68,8 @@ export function getClientRoles(): string[] {
         return [];
     }
     const resourceAccess = payload.resource_access as
-        Record<string, { roles?: string[] }> | undefined;
+        | Record<string, { roles?: string[] }>
+        | undefined;
     return resourceAccess?.[keycloakClientId]?.roles ?? [];
 }
 
