@@ -80,6 +80,17 @@
                         <q-banner v-if="item.error_message" dense class="bg-red-1 text-negative">
                             {{ item.error_message }}
                         </q-banner>
+                        <ReconstructionVideo
+                            v-if="item.input_video_path"
+                            :building-id="item.building_id"
+                            :reconstruction-id="item.id"
+                        />
+                        <div v-else class="text-grey-7">Input video is not available yet.</div>
+                        <ReconstructionSplat
+                            v-if="item.status === 'completed'"
+                            :building-id="item.building_id"
+                            :reconstruction-id="item.id"
+                        />
                         <div>
                             <span class="text-caption text-grey-7">Prefect workflow: </span>
                             <span class="text-caption selectable-text">{{
@@ -106,6 +117,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
+import ReconstructionVideo from 'src/components/ReconstructionVideo.vue';
+import ReconstructionSplat from 'src/components/ReconstructionSplat.vue';
 import {
     type Building,
     type Reconstruction,

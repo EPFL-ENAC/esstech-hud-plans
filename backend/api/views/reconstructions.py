@@ -1,26 +1,34 @@
 from __future__ import annotations
 
 import logging
+import mimetypes
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
 from api.db import get_session
+from api.lib.workflows import common as workflow_common
 from api.lib.workflows.common import (
     WorkflowNotFoundError,
     get_owned_workflow_run,
     stream_workflow_logs,
 )
 from api.models.building import Building
-from api.models.reconstruction import Reconstruction, ReconstructionRead
+from api.models.reconstruction import (
+    Reconstruction,
+    ReconstructionRead,
+    ReconstructionStatus,
+)
 from api.models.workflows import SplatGenerationWorkflowSettings
 from api.services.reconstructions import (
     ReconstructionCreationError,
     ReconstructionService,
 )
+from api.utils.responses import inline_file_response
 from api.views.buildings import get_current_building
 from fastapi import Depends, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.routing import APIRouter
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
@@ -71,6 +79,55 @@ async def get_current_reconstruction(
             detail="Reconstruction not found",
         )
     return reconstruction
+
+
+CurrentReconstruction = Annotated[Reconstruction, Depends(get_current_reconstruction)]
+
+
+@router.get("/{reconstruction_id}/video", response_class=FileResponse)
+def get_reconstruction_video(
+    reconstruction: CurrentReconstruction,
+) -> FileResponse:
+    if not reconstruction.input_video_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Reconstruction video not found",
+        )
+
+    path = Path(reconstruction.input_video_path)
+    media_type = mimetypes.guess_type(path.name)[0]
+    if media_type is None or not media_type.startswith("video/"):
+        media_type = "application/octet-stream"
+
+    return inline_file_response(
+        path,
+        root_directory=(
+            workflow_common.WORKFLOW_DATA_DIRECTORY.resolve() / reconstruction.id.hex
+        ),
+        media_type=media_type,
+    )
+
+
+@router.get("/{reconstruction_id}/splat", response_class=FileResponse)
+def get_reconstruction_splat(
+    reconstruction: CurrentReconstruction,
+) -> FileResponse:
+    if (
+        reconstruction.status != ReconstructionStatus.COMPLETED
+        or not reconstruction.splat_path
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Reconstruction splat not found",
+        )
+
+    return inline_file_response(
+        Path(reconstruction.splat_path),
+        root_directory=(
+            workflow_common.WORKFLOW_DATA_DIRECTORY.resolve() / reconstruction.id.hex
+        ),
+        media_type="application/octet-stream",
+    )
 
 
 @router.post(

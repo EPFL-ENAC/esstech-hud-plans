@@ -150,6 +150,44 @@ export function listReconstructions(buildingId: string): Promise<Reconstruction[
     return requestJson(`/buildings/${encodeURIComponent(buildingId)}/reconstructions`);
 }
 
+export async function getReconstructionVideo(
+    buildingId: string,
+    reconstructionId: string,
+    signal: AbortSignal,
+): Promise<Blob> {
+    const response = await authFetch(
+        `${baseUrl}/buildings/${encodeURIComponent(buildingId)}/reconstructions/${encodeURIComponent(reconstructionId)}/video`,
+        { signal },
+    );
+    if (!response.ok) {
+        throw new ApiError(
+            `Video request failed with HTTP ${response.status}`,
+            response.status,
+            null,
+        );
+    }
+    return response.blob();
+}
+
+export async function getReconstructionSplat(
+    buildingId: string,
+    reconstructionId: string,
+    signal: AbortSignal,
+): Promise<ArrayBuffer> {
+    const response = await authFetch(
+        `${baseUrl}/buildings/${encodeURIComponent(buildingId)}/reconstructions/${encodeURIComponent(reconstructionId)}/splat`,
+        { signal },
+    );
+    if (!response.ok) {
+        throw new ApiError(
+            `Splat request failed with HTTP ${response.status}`,
+            response.status,
+            null,
+        );
+    }
+    return response.arrayBuffer();
+}
+
 export function createReconstruction(
     buildingId: string,
     submission: ReconstructionSubmission,

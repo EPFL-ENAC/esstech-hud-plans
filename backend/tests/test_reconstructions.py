@@ -533,6 +533,266 @@ def test_nested_reconstruction_routes_create_list_and_get(
     assert fetched.json() == created
 
 
+def _set_artifact_path(
+    client: TestClient,
+    reconstruction_id: UUID,
+    artifact: str,
+    path: Path | None,
+    *,
+    status: ReconstructionStatus | None = None,
+) -> None:
+    async def update() -> None:
+        async for session in client.app.dependency_overrides[get_session]():
+            reconstruction = await session.get(Reconstruction, reconstruction_id)
+            assert reconstruction is not None
+            field = "input_video_path" if artifact == "video" else "splat_path"
+            setattr(reconstruction, field, str(path) if path is not None else None)
+            if status is not None:
+                reconstruction.status = status
+                reconstruction.progress = (
+                    1.0 if status == ReconstructionStatus.COMPLETED else 0.95
+                )
+            await session.commit()
+
+    assert client.portal is not None
+    client.portal.call(update)
+
+
+@pytest.fixture(params=["video", "splat"])
+def reconstruction_asset(
+    request: pytest.FixtureRequest,
+    reconstruction_api: tuple[TestClient, UUID],
+) -> tuple[TestClient, UUID, str, Path]:
+    client, building_id = reconstruction_api
+    created = _submit_reconstruction(client, building_id).json()
+    reconstruction_id = UUID(created["id"])
+    artifact = request.param
+    if artifact == "video":
+        path = Path(created["input_video_path"])
+    else:
+        path = Path(created["workspace_directory"]) / "splat.ply"
+        path.write_bytes(b"ply\nformat binary_little_endian 1.0\nend_header\n")
+        _set_artifact_path(
+            client,
+            reconstruction_id,
+            artifact,
+            path,
+            status=ReconstructionStatus.COMPLETED,
+        )
+    return client, reconstruction_id, artifact, path
+
+
+def _asset_url(reconstruction_id: UUID, artifact: str) -> str:
+    return f"/buildings/{BUILDING_ID}/reconstructions/{reconstruction_id}/{artifact}"
+
+
+def test_reconstruction_assets_serve_inline_bytes_when_available(
+    reconstruction_asset: tuple[TestClient, UUID, str, Path],
+) -> None:
+    client, reconstruction_id, artifact, path = reconstruction_asset
+    response = client.get(_asset_url(reconstruction_id, artifact))
+
+    assert response.status_code == 200
+    assert response.content == path.read_bytes()
+    assert response.headers["content-type"] == (
+        "video/mp4" if artifact == "video" else "application/octet-stream"
+    )
+    assert response.headers["content-disposition"] == f'inline; filename="{path.name}"'
+    assert response.headers["content-length"] == str(path.stat().st_size)
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.headers["accept-ranges"] == "bytes"
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        state
+        for state in ReconstructionStatus
+        if state != ReconstructionStatus.COMPLETED
+    ],
+)
+def test_unfinished_reconstructions_serve_video_but_not_splat(
+    reconstruction_asset: tuple[TestClient, UUID, str, Path],
+    status: ReconstructionStatus,
+) -> None:
+    client, reconstruction_id, artifact, path = reconstruction_asset
+    _set_artifact_path(client, reconstruction_id, artifact, path, status=status)
+
+    response = client.get(_asset_url(reconstruction_id, artifact))
+
+    if artifact == "video":
+        assert response.status_code == 200
+        assert response.content == path.read_bytes()
+    else:
+        # A path recorded at 95% and a physical file do not publish a splat.
+        assert response.status_code == 404
+        assert response.json() == {"detail": "Reconstruction splat not found"}
+
+
+@pytest.mark.parametrize(
+    "suffix, media_type",
+    [
+        (".mov", "video/quicktime"),
+        (".unknown", "application/octet-stream"),
+        (".html", "application/octet-stream"),
+    ],
+)
+def test_reconstruction_video_infers_media_type(
+    reconstruction_api: tuple[TestClient, UUID],
+    suffix: str,
+    media_type: str,
+) -> None:
+    client, building_id = reconstruction_api
+    created = _submit_reconstruction(client, building_id).json()
+    reconstruction_id = UUID(created["id"])
+    path = Path(created["input_video_path"]).with_suffix(suffix)
+    path.write_bytes(b"video bytes")
+    _set_artifact_path(client, reconstruction_id, "video", path)
+
+    response = client.get(_asset_url(reconstruction_id, "video"))
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == media_type
+
+
+def test_reconstruction_assets_support_byte_ranges(
+    reconstruction_asset: tuple[TestClient, UUID, str, Path],
+) -> None:
+    client, reconstruction_id, artifact, path = reconstruction_asset
+    url = _asset_url(reconstruction_id, artifact)
+    content = path.read_bytes()
+
+    response = client.get(url, headers={"Range": "bytes=1-4"})
+    assert response.status_code == 206
+    assert response.content == content[1:5]
+    assert response.headers["content-range"] == f"bytes 1-4/{len(content)}"
+    assert response.headers["content-length"] == "4"
+
+    response = client.get(url, headers={"Range": f"bytes={len(content)}-"})
+    assert response.status_code == 416
+    assert response.headers["content-range"] == f"*/{len(content)}"
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "unset",
+        "missing",
+        "directory",
+        "outside",
+        "sibling",
+        "symlink",
+        "workspace_symlink",
+    ],
+)
+def test_reconstruction_assets_reject_unavailable_or_escaped_paths(
+    reconstruction_asset: tuple[TestClient, UUID, str, Path],
+    tmp_path: Path,
+    case: str,
+) -> None:
+    path: Path | None
+    client, reconstruction_id, artifact, path = reconstruction_asset
+    if case == "unset":
+        path = None
+    elif case == "missing":
+        path.unlink()
+    elif case == "directory":
+        path = path.parent
+    elif case in {"outside", "sibling", "symlink"}:
+        outside = tmp_path / ("outside" if case != "sibling" else uuid4().hex)
+        outside.mkdir()
+        target = outside / "secret.bin"
+        target.write_bytes(b"must not be served")
+        if case == "symlink":
+            path.unlink()
+            path.symlink_to(target)
+        elif case == "outside":
+            # Keep '..' in the stored path to exercise normalization too.
+            path = tmp_path / reconstruction_id.hex / ".." / "outside" / target.name
+        else:
+            path = target
+    elif case == "workspace_symlink":
+        workspace = tmp_path / reconstruction_id.hex
+        moved = tmp_path / "moved"
+        workspace.rename(moved)
+        workspace.symlink_to(moved, target_is_directory=True)
+    _set_artifact_path(client, reconstruction_id, artifact, path)
+
+    response = client.get(_asset_url(reconstruction_id, artifact))
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": (
+            f"Reconstruction {artifact} not found"
+            if case == "unset"
+            else "File not found"
+        )
+    }
+
+
+def test_reconstruction_assets_require_authentication_and_ownership(
+    reconstruction_asset: tuple[TestClient, UUID, str, Path],
+) -> None:
+    client, reconstruction_id, artifact, _ = reconstruction_asset
+    url = _asset_url(reconstruction_id, artifact)
+    original = client.app.dependency_overrides.pop(require_user)
+    try:
+        assert client.get(url).status_code == 401
+        client.app.dependency_overrides[require_user] = lambda: User(
+            id=OTHER_USER_ID, keycloak_sub="subject-2"
+        )
+        assert client.get(url).status_code == 404
+    finally:
+        client.app.dependency_overrides[require_user] = original
+
+    other_building = client.post("/buildings", json={"name": "Other"}).json()
+    wrong_parent = url.replace(str(BUILDING_ID), other_building["id"])
+    assert client.get(wrong_parent).status_code == 404
+    assert client.get(_asset_url(uuid4(), artifact)).status_code == 404
+
+
+@pytest.mark.parametrize("operation", ["stat", "open"])
+def test_reconstruction_assets_map_storage_failures_to_503(
+    reconstruction_asset: tuple[TestClient, UUID, str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    client, reconstruction_id, artifact, path = reconstruction_asset
+    original = getattr(Path, operation)
+
+    def fail_access(self: Path, *args: object, **kwargs: object):
+        if self == path:
+            raise PermissionError(f"Cannot access {path}")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, operation, fail_access)
+    response = client.get(_asset_url(reconstruction_id, artifact))
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "File storage is unavailable"}
+
+
+def test_reconstruction_assets_map_database_failures_to_503(
+    reconstruction_asset: tuple[TestClient, UUID, str, Path],
+) -> None:
+    client, reconstruction_id, artifact, _ = reconstruction_asset
+
+    class FailingReconstructionService(ReconstructionService):
+        def __init__(self) -> None:
+            pass
+
+        async def get(self, reconstruction_id: UUID, *, building_id: UUID):
+            raise OperationalError("SELECT", {}, RuntimeError("offline"))
+
+    client.app.dependency_overrides[reconstruction_views.get_reconstruction_service] = (
+        FailingReconstructionService
+    )
+    response = client.get(_asset_url(reconstruction_id, artifact))
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Reconstruction database is unavailable"}
+
+
 def test_nested_reconstruction_routes_hide_foreign_building(
     reconstruction_api: tuple[TestClient, UUID],
 ) -> None:
