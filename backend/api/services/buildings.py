@@ -1,11 +1,21 @@
 from __future__ import annotations
 
+from typing import Literal
 from uuid import UUID
 
-from api.models.building import Building, BuildingCreate, BuildingUpdate
+from api.models.building import (
+    Building,
+    BuildingCreate,
+    BuildingListItemRead,
+    BuildingRead,
+    BuildingUpdate,
+)
+from api.models.reconstruction import Reconstruction
 from api.models.user import utc_now
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
+
+SortOrder = Literal["asc", "desc"]
 
 
 class BuildingService:
@@ -29,20 +39,43 @@ class BuildingService:
         user_id: UUID,
         offset: int = 0,
         limit: int = 100,
-    ) -> list[Building]:
+        sort_order: SortOrder = "desc",
+    ) -> list[BuildingListItemRead]:
         if offset < 0:
             raise ValueError("offset must be non-negative")
         if not 1 <= limit <= 100:
             raise ValueError("limit must be between 1 and 100")
+        if sort_order not in ("asc", "desc"):
+            raise ValueError("sort_order must be asc or desc")
 
+        ordering = (
+            (col(Building.created_at).asc(), col(Building.id).asc())
+            if sort_order == "asc"
+            else (col(Building.created_at).desc(), col(Building.id).desc())
+        )
+
+        latest_reconstruction_id = (
+            select(Reconstruction.id)
+            .where(Reconstruction.building_id == Building.id)
+            .order_by(
+                col(Reconstruction.created_at).desc(), col(Reconstruction.id).desc()
+            )
+            .limit(1)
+            .correlate(Building)
+            .scalar_subquery()
+        )
         result = await self._session.exec(
-            select(Building)
+            select(Building, Reconstruction)
+            .outerjoin(Reconstruction, Reconstruction.id == latest_reconstruction_id)
             .where(Building.user_id == user_id)
-            .order_by(col(Building.created_at), col(Building.id))
+            .order_by(*ordering)
             .offset(offset)
             .limit(limit)
         )
-        return list(result.all())
+        return [
+            BuildingRead.model_validate(building).to_list_item(reconstruction)
+            for building, reconstruction in result.all()
+        ]
 
     async def create(
         self,

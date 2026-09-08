@@ -29,6 +29,16 @@ export type ReconstructionStatus =
     | 'cancelled'
     | 'crashed';
 
+export interface ReconstructionSummary {
+    id: string;
+    status: ReconstructionStatus;
+    progress: number; // 0–1
+}
+
+export interface BuildingListItem extends Building {
+    latest_reconstruction: ReconstructionSummary | null;
+}
+
 export interface FfmpegSettings {
     fps: number;
     fit_in_width: number;
@@ -126,8 +136,23 @@ export function getCurrentUser(): Promise<CurrentUser> {
     return requestJson('/user/me');
 }
 
-export function listBuildings(): Promise<Building[]> {
-    return requestJson('/buildings');
+export interface ListBuildingsOptions {
+    offset?: number;
+    limit?: number;
+    sort_order?: 'asc' | 'desc';
+}
+
+export function listBuildings({
+    offset = 0,
+    limit = 100,
+    sort_order = 'desc',
+}: ListBuildingsOptions = {}): Promise<BuildingListItem[]> {
+    const params = new URLSearchParams({
+        offset: String(offset),
+        limit: String(limit),
+        sort_order,
+    });
+    return requestJson(`/buildings?${params}`);
 }
 
 export function createBuilding(payload: {

@@ -5,10 +5,16 @@ from typing import Annotated
 from uuid import UUID
 
 from api.db import get_session
-from api.models.building import Building, BuildingCreate, BuildingRead, BuildingUpdate
+from api.models.building import (
+    Building,
+    BuildingCreate,
+    BuildingListItemRead,
+    BuildingRead,
+    BuildingUpdate,
+)
 from api.models.user import User
 from api.services.auth import require_user
-from api.services.buildings import BuildingService
+from api.services.buildings import BuildingService, SortOrder
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -70,18 +76,20 @@ async def create_building(
         raise _database_unavailable(exc) from exc
 
 
-@router.get("", response_model=list[BuildingRead])
+@router.get("", response_model=list[BuildingListItemRead])
 async def list_buildings(
     current_user: Annotated[User, Depends(require_user)],
     buildings: Annotated[BuildingService, Depends(get_building_service)],
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 100,
-) -> list[Building]:
+    sort_order: SortOrder = "desc",
+) -> list[BuildingListItemRead]:
     try:
         return await buildings.list(
             user_id=current_user.id,
             offset=offset,
             limit=limit,
+            sort_order=sort_order,
         )
     except (OSError, SQLAlchemyError) as exc:
         raise _database_unavailable(exc) from exc

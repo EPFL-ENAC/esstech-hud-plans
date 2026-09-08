@@ -52,49 +52,10 @@
             </div>
         </section>
 
-        <section v-if="buildingsStore.inProgressBuildings.length" class="q-mb-lg">
-            <h2 class="text-h6 text-weight-bold q-mb-md q-px-md">In Progress</h2>
-            <building-list>
-                <building-list-item
-                    v-for="building in buildingsStore.inProgressBuildings"
-                    :key="building.id"
-                    :building="building"
-                    show-chevron
-                    @click="openBuilding(building.id)"
-                />
-            </building-list>
-        </section>
-
-        <section>
-            <h2 class="text-h6 text-weight-bold q-mb-md q-px-md">Recent</h2>
-            <building-list>
-                <building-list-item
-                    v-for="building in buildingsStore.readyBuildings"
-                    :key="building.id"
-                    :building="building"
-                    show-chevron
-                    @click="openBuilding(building.id)"
-                />
-            </building-list>
-        </section>
+        <my-buildings-list />
     </q-page>
 </template>
 
 <script setup lang="ts">
-import { useRouter } from 'vue-router';
-import { useBuildingsStore } from 'src/stores/buildings';
-import BuildingListItem from 'src/components/BuildingListItem.vue';
-import BuildingList from 'src/components/BuildingList.vue';
-
-const router = useRouter();
-const buildingsStore = useBuildingsStore();
-
-function openBuilding(id: string) {
-    const building = buildingsStore.getById(id);
-    if (building?.status === 'processing') {
-        void router.push(`/capture/processing/${id}`);
-    } else {
-        void router.push(`/building/${id}`);
-    }
-}
+import MyBuildingsList from 'src/components/MyBuildingsList.vue';
 </script>

@@ -30,6 +30,13 @@ def test_application_migrations_preserve_parent_and_unmanaged_tables() -> None:
     optional_metadata_revision = _load_revision(
         "2026_09_07_0003-a42f9d8e7c31_make_building_metadata_optional.py"
     )
+    latest_reconstruction_revision = _load_revision(
+        "2026_09_08_0004-b51e8c2d7a90_index_latest_reconstruction.py"
+    )
+    assert (
+        latest_reconstruction_revision.down_revision
+        == optional_metadata_revision.revision
+    )
     engine = create_engine("sqlite://")
 
     unmanaged_metadata = MetaData()
@@ -47,8 +54,18 @@ def test_application_migrations_preserve_parent_and_unmanaged_tables() -> None:
             buildings_revision.upgrade()
             reconstructions_revision.upgrade()
             optional_metadata_revision.upgrade()
+            latest_reconstruction_revision.upgrade()
 
     inspector = inspect(engine)
+    indexes = {
+        index["name"]: index["column_names"]
+        for index in inspector.get_indexes("reconstructions")
+    }
+    assert indexes["ix_reconstructions_building_created_id"] == [
+        "building_id",
+        "created_at",
+        "id",
+    ]
     assert {"users", "buildings", "reconstructions", "prefect_flow_run"} <= set(
         inspector.get_table_names()
     )
@@ -100,12 +117,17 @@ def test_application_migrations_preserve_parent_and_unmanaged_tables() -> None:
     with engine.begin() as connection:
         context = MigrationContext.configure(connection)
         with Operations.context(context):
+            latest_reconstruction_revision.downgrade()
             optional_metadata_revision.downgrade()
 
         converted = connection.execute(
             text("SELECT name, latitude, longitude FROM buildings")
         ).one()
         assert converted == ("Unnamed building", 0.0, 0.0)
+
+    assert "ix_reconstructions_building_created_id" not in {
+        index["name"] for index in inspect(engine).get_indexes("reconstructions")
+    }
 
     with engine.begin() as connection:
         context = MigrationContext.configure(connection)

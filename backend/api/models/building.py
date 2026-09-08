@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+from api.models.reconstruction import Reconstruction, ReconstructionSummary
 from api.models.user import utc_now
 from pydantic import BaseModel, ConfigDict, model_validator
 from pydantic import Field as PydanticField
@@ -12,7 +13,6 @@ from sqlalchemy.orm import relationship
 from sqlmodel import Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
-    from api.models.reconstruction import Reconstruction
     from api.models.user import User
 
 
@@ -63,6 +63,25 @@ class BuildingRead(BaseModel):
     longitude: float | None
     created_at: datetime
     updated_at: datetime
+
+    def to_list_item(
+        self,
+        reconstruction: Reconstruction | None,
+    ) -> BuildingListItemRead:
+        return BuildingListItemRead(
+            **self.model_dump(),
+            latest_reconstruction=(
+                ReconstructionSummary.from_reconstruction(reconstruction)
+                if reconstruction is not None
+                else None
+            ),
+        )
+
+
+class BuildingListItemRead(BuildingRead):
+    """A building with its newest attempt, regardless of that attempt's status."""
+
+    latest_reconstruction: ReconstructionSummary | None
 
 
 class Building(SQLModel, table=True):  # type: ignore[call-arg]

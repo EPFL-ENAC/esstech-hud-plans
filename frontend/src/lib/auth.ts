@@ -61,6 +61,12 @@ function decodeJwtPayload(): Record<string, unknown> | null {
     }
 }
 
+/** Current account identity for user-scoped query caches. */
+export function getAuthSubject(): string | null {
+    const subject = decodeJwtPayload()?.sub;
+    return typeof subject === 'string' && subject.length > 0 ? subject : null;
+}
+
 /** Roles granted to this client for the app's Keycloak client. */
 export function getClientRoles(): string[] {
     const payload = decodeJwtPayload();

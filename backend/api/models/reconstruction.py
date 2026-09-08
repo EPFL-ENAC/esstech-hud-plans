@@ -8,7 +8,8 @@ from uuid import UUID, uuid4
 from api.models.user import utc_now
 from api.models.workflows import SplatGenerationWorkflowSettings
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import JSON, CheckConstraint, Column, DateTime, String
+from pydantic import Field as PydanticField
+from sqlalchemy import JSON, CheckConstraint, Column, DateTime, Index, String
 from sqlalchemy.orm import relationship
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -24,6 +25,25 @@ class ReconstructionStatus(StrEnum):
     FAILED = "failed"
     CANCELLED = "cancelled"
     CRASHED = "crashed"
+
+
+class ReconstructionSummary(BaseModel):
+    """Status of one reconstruction attempt, without its artifacts or history."""
+
+    id: UUID
+    status: ReconstructionStatus
+    progress: float = PydanticField(ge=0, le=1)
+
+    @classmethod
+    def from_reconstruction(
+        cls,
+        reconstruction: Reconstruction,
+    ) -> ReconstructionSummary:
+        return cls(
+            id=reconstruction.id,
+            status=reconstruction.status,
+            progress=reconstruction.progress,
+        )
 
 
 class ReconstructionArtifactUpdate(BaseModel):
@@ -64,6 +84,9 @@ class Reconstruction(SQLModel, table=True):  # type: ignore[call-arg]
 
     __tablename__ = "reconstructions"
     __table_args__ = (
+        Index(
+            "ix_reconstructions_building_created_id", "building_id", "created_at", "id"
+        ),
         CheckConstraint(
             "progress BETWEEN 0 AND 1",
             name="ck_reconstructions_progress_range",

@@ -1,19 +1,31 @@
 import asyncio
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
 from api.db import get_session
-from api.models.building import Building, BuildingCreate, BuildingRead, BuildingUpdate
+from api.models.building import (
+    Building,
+    BuildingCreate,
+    BuildingListItemRead,
+    BuildingRead,
+    BuildingUpdate,
+)
+from api.models.reconstruction import (
+    Reconstruction,
+    ReconstructionStatus,
+    ReconstructionSummary,
+)
 from api.models.user import User
 from api.services.auth import require_user
-from api.services.buildings import BuildingService
+from api.services.buildings import BuildingService, SortOrder
 from api.views import buildings as building_views
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, ValidationError
+from sqlalchemy import event
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -51,7 +63,13 @@ def test_only_building_row_inherits_from_sqlmodel() -> None:
     assert not issubclass(BuildingCreate, SQLModel)
     assert not issubclass(BuildingUpdate, SQLModel)
     assert not issubclass(BuildingRead, SQLModel)
+    assert issubclass(BuildingListItemRead, BuildingRead)
+    assert not issubclass(BuildingListItemRead, SQLModel)
     assert Building.__tablename__ == "buildings"
+    assert (
+        Building.__mapper__.relationships["reconstructions"].mapper.class_
+        is Reconstruction
+    )
     assert User.__mapper__.relationships["buildings"].back_populates == "user"
     assert Building.__mapper__.relationships["user"].back_populates == "buildings"
 
@@ -130,11 +148,16 @@ def test_building_service_crud_and_ownership() -> None:
 
             assert await buildings.get(first.id, user_id=USER_ID) == first
             assert await buildings.get(first.id, user_id=OTHER_USER_ID) is None
-            assert await buildings.list(user_id=USER_ID) == [first, duplicate_name]
-            assert await buildings.list(user_id=OTHER_USER_ID) == [other_user_building]
-            assert await buildings.list(user_id=USER_ID, offset=1, limit=1) == [
-                duplicate_name
-            ]
+            listed = await buildings.list(user_id=USER_ID)
+            assert [item.id for item in listed] == [duplicate_name.id, first.id]
+            assert all(item.latest_reconstruction is None for item in listed)
+            assert [
+                item.id for item in await buildings.list(user_id=OTHER_USER_ID)
+            ] == [other_user_building.id]
+            assert [
+                item.id
+                for item in await buildings.list(user_id=USER_ID, offset=1, limit=1)
+            ] == [first.id]
 
             original_updated_at = first.updated_at
             unchanged = await buildings.update(first, BuildingUpdate())
@@ -166,14 +189,213 @@ def test_building_service_crud_and_ownership() -> None:
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("sort_order", ["asc", "desc"])
+def test_building_list_orders_before_pagination(sort_order: SortOrder) -> None:
+    async def run() -> None:
+        async with building_service() as (buildings, session):
+            timestamp = datetime(2026, 9, 8, tzinfo=UTC)
+            # IDs deliberately disagree with creation order. Equal dates use ID.
+            oldest = Building(
+                id=UUID(int=30),
+                user_id=USER_ID,
+                name="Oldest",
+                created_at=timestamp - timedelta(days=1),
+            )
+            tied_first = Building(
+                id=UUID(int=10),
+                user_id=USER_ID,
+                name="First tie",
+                created_at=timestamp,
+            )
+            tied_second = Building(
+                id=UUID(int=20),
+                user_id=USER_ID,
+                name="Second tie",
+                created_at=timestamp,
+            )
+            other_user = Building(
+                id=UUID(int=40),
+                user_id=OTHER_USER_ID,
+                name="Other owner",
+                created_at=timestamp + timedelta(days=1),
+            )
+            session.add_all([tied_second, other_user, oldest, tied_first])
+            # Multiple attempts must not multiply building rows or consume page slots.
+            session.add_all(
+                [
+                    Reconstruction(building_id=building.id, settings={})
+                    for building in [tied_first, tied_second, other_user]
+                    for _ in range(3)
+                ]
+            )
+            await session.commit()
+
+            expected = [oldest, tied_first, tied_second]
+            if sort_order == "desc":
+                expected.reverse()
+            listed = await buildings.list(
+                user_id=USER_ID,
+                sort_order=sort_order,
+            )
+            assert [item.id for item in listed] == [
+                building.id for building in expected
+            ]
+            pages = [
+                await buildings.list(
+                    user_id=USER_ID,
+                    sort_order=sort_order,
+                    offset=index,
+                    limit=1,
+                )
+                for index in range(3)
+            ]
+            assert [[item.id for item in page] for page in pages] == [
+                [building.id] for building in expected
+            ]
+            assert (
+                await buildings.list(
+                    user_id=USER_ID,
+                    sort_order=sort_order,
+                    offset=3,
+                    limit=1,
+                )
+                == []
+            )
+
+    asyncio.run(run())
+
+
 def test_building_list_validates_pagination() -> None:
     async def run() -> None:
         async with building_service() as (buildings, _):
-            for kwargs in ({"offset": -1}, {"limit": 0}, {"limit": 101}):
+            for offset, limit in ((-1, 100), (0, 0), (0, 101)):
                 with pytest.raises(ValueError):
-                    await buildings.list(user_id=USER_ID, **kwargs)
+                    await buildings.list(
+                        user_id=USER_ID,
+                        offset=offset,
+                        limit=limit,
+                    )
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("status", list(ReconstructionStatus))
+def test_latest_attempt_ignores_status_and_older_updates(
+    status: ReconstructionStatus,
+) -> None:
+    async def run() -> None:
+        async with building_service() as (buildings, session):
+            building = await buildings.create(user_id=USER_ID, payload=BuildingCreate())
+            timestamp = datetime(2026, 9, 8, tzinfo=UTC)
+            older = Reconstruction(
+                id=UUID(int=300),
+                building_id=building.id,
+                settings={},
+                created_at=timestamp - timedelta(days=1),
+                status=ReconstructionStatus.RUNNING,
+                progress=0.8,
+            )
+            tied = Reconstruction(
+                id=UUID(int=100),
+                building_id=building.id,
+                settings={},
+                created_at=timestamp,
+                status=ReconstructionStatus.COMPLETED,
+                progress=1,
+            )
+            latest = Reconstruction(
+                id=UUID(int=200),
+                building_id=building.id,
+                settings={},
+                created_at=timestamp,
+                status=status,
+                progress=0.456,
+            )
+            session.add_all([latest, older, tied])
+            await session.commit()
+
+            expected = {"id": latest.id, "status": status, "progress": 0.456}
+            item = (await buildings.list(user_id=USER_ID))[0]
+            assert item.latest_reconstruction is not None
+            assert item.latest_reconstruction.model_dump() == expected
+
+            # An older attempt finishing later cannot displace the newest attempt.
+            older.status = ReconstructionStatus.COMPLETED
+            older.progress = 1
+            older.updated_at = timestamp + timedelta(days=1)
+            tied.updated_at = timestamp + timedelta(days=2)
+            session.add_all([older, tied])
+            await session.commit()
+            item = (await buildings.list(user_id=USER_ID))[0]
+            assert item.latest_reconstruction is not None
+            assert item.latest_reconstruction.model_dump() == expected
+
+    asyncio.run(run())
+
+
+def test_building_list_uses_one_query() -> None:
+    async def run() -> None:
+        async with building_service() as (buildings, session):
+            for index in range(3):
+                building = await buildings.create(
+                    user_id=USER_ID,
+                    payload=BuildingCreate(name=str(index)),
+                )
+                session.add_all(
+                    [
+                        Reconstruction(building_id=building.id, settings={})
+                        for _ in range(4)
+                    ]
+                )
+            await session.commit()
+            session.expunge_all()
+            statements: list[str] = []
+
+            def record_statement(
+                conn: object,
+                cursor: object,
+                statement: str,
+                parameters: object,
+                context: object,
+                executemany: object,
+            ) -> None:
+                statements.append(statement)
+
+            assert isinstance(session.bind, AsyncEngine)
+            engine = session.bind.sync_engine
+            event.listen(engine, "before_cursor_execute", record_statement)
+            try:
+                items = await buildings.list(user_id=USER_ID)
+                assert len(items) == 3
+                assert all(item.latest_reconstruction is not None for item in items)
+                assert len(statements) == 1
+            finally:
+                event.remove(engine, "before_cursor_execute", record_statement)
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("progress", [-0.01, 1.01])
+def test_reconstruction_summary_validates_progress(progress: float) -> None:
+    reconstruction = Reconstruction(
+        building_id=UUID(int=1),
+        settings={},
+        progress=progress,
+    )
+    with pytest.raises(ValidationError):
+        ReconstructionSummary.from_reconstruction(reconstruction)
+
+
+def test_reconstruction_latest_index_matches_model() -> None:
+    indexes = {
+        index.name: [column.name for column in index.columns]
+        for index in Reconstruction.__table__.indexes
+    }
+    assert indexes["ix_reconstructions_building_created_id"] == [
+        "building_id",
+        "created_at",
+        "id",
+    ]
 
 
 @pytest.fixture
@@ -224,7 +446,8 @@ def test_building_routes_cover_crud(api_client: TestClient) -> None:
 
     list_response = api_client.get("/buildings?offset=0&limit=10")
     assert list_response.status_code == 200
-    assert list_response.json() == [created]
+    assert list_response.json() == [{**created, "latest_reconstruction": None}]
+    assert "latest_reconstruction" not in created
 
     get_response = api_client.get(f"/buildings/{building_id}")
     assert get_response.status_code == 200
@@ -238,6 +461,7 @@ def test_building_routes_cover_crud(api_client: TestClient) -> None:
     assert update_response.json()["name"] == ""
     assert update_response.json()["latitude"] is None
     assert update_response.json()["longitude"] is None
+    assert "latest_reconstruction" not in update_response.json()
 
     delete_response = api_client.delete(f"/buildings/{building_id}")
     assert delete_response.status_code == 204
@@ -266,6 +490,58 @@ def test_building_routes_validate_payload_and_pagination(
     )
     assert api_client.get("/buildings?offset=-1").status_code == 422
     assert api_client.get("/buildings?limit=101").status_code == 422
+    assert api_client.get("/buildings?sort_order=invalid").status_code == 422
+
+
+def test_building_routes_support_sort_order(api_client: TestClient) -> None:
+    first = api_client.post("/buildings", json={"name": "First"}).json()
+    second = api_client.post("/buildings", json={"name": "Second"}).json()
+    first = {**first, "latest_reconstruction": None}
+    second = {**second, "latest_reconstruction": None}
+
+    assert api_client.get("/buildings").json() == [second, first]
+    assert api_client.get("/buildings?sort_order=desc").json() == [second, first]
+    assert api_client.get("/buildings?sort_order=asc").json() == [first, second]
+    assert api_client.get("/buildings?sort_order=desc&offset=1&limit=1").json() == [
+        first
+    ]
+
+
+@pytest.mark.parametrize("status", list(ReconstructionStatus))
+def test_building_routes_return_reconstruction_summary(
+    api_client: TestClient,
+    status: ReconstructionStatus,
+) -> None:
+    created = api_client.post("/buildings", json={"name": "With reconstruction"}).json()
+    reconstruction_id = UUID(int=500)
+
+    async def insert_reconstruction() -> None:
+        async for session in api_client.app.dependency_overrides[get_session]():
+            session.add(
+                Reconstruction(
+                    id=reconstruction_id,
+                    building_id=UUID(created["id"]),
+                    settings={},
+                    status=status,
+                    progress=0.375,
+                )
+            )
+            await session.commit()
+
+    asyncio.run(insert_reconstruction())
+    response = api_client.get("/buildings")
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            **created,
+            "latest_reconstruction": {
+                "id": str(reconstruction_id),
+                "status": status.value,
+                "progress": 0.375,
+            },
+        }
+    ]
+    assert api_client.get(f"/buildings/{created['id']}").json() == created
 
 
 def test_building_routes_hide_rows_owned_by_another_user(
@@ -282,6 +558,8 @@ def test_building_routes_hide_rows_owned_by_another_user(
         keycloak_sub="subject-2",
     )
     try:
+        assert api_client.get("/buildings?sort_order=desc").json() == []
+        assert api_client.get("/buildings?sort_order=asc").json() == []
         assert api_client.get(f"/buildings/{created['id']}").status_code == 404
         assert (
             api_client.patch(
@@ -301,7 +579,7 @@ def test_building_routes_map_database_failures_to_503(
         def __init__(self) -> None:
             pass
 
-        async def list(self, **kwargs: object) -> list[Building]:
+        async def list(self, **kwargs: object) -> list[BuildingListItemRead]:
             raise OperationalError("SELECT", {}, RuntimeError("offline"))
 
     api_client.app.dependency_overrides[building_views.get_building_service] = (
