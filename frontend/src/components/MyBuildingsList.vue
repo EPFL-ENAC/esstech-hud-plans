@@ -65,7 +65,7 @@
                 </q-item>
             </q-list>
             <p v-else class="q-px-md text-grey-7" role="status">
-                {{ offset === 0 ? 'No buildings yet.' : 'No buildings on this page.' }}
+                {{ emptyMessage }}
             </p>
         </template>
 
@@ -89,13 +89,30 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import FloorPlanThumb from 'src/components/FloorPlanThumb.vue';
 import ReconstructionStatusChip from 'src/components/ReconstructionStatusChip.vue';
 import { MY_BUILDINGS_PAGE_SIZE, useMyBuildingsQuery } from 'src/queries/buildings';
 
+const props = defineProps<{ search?: string | null }>();
+const normalizedSearch = computed(() => props.search?.trim() || null);
 const offset = ref(0);
-const { data, state, asyncStatus, refetch } = useMyBuildingsQuery(offset);
+watch(
+    normalizedSearch,
+    () => {
+        offset.value = 0;
+    },
+    { flush: 'sync' },
+);
+const { data, state, asyncStatus, refetch } = useMyBuildingsQuery(
+    offset,
+    undefined,
+    normalizedSearch,
+);
+const emptyMessage = computed(() => {
+    if (offset.value > 0) return 'No buildings on this page.';
+    return normalizedSearch.value ? 'No buildings match your search.' : 'No buildings yet.';
+});
 const isLoading = computed(() => asyncStatus.value === 'loading');
 const buildings = computed(() => data.value?.slice(0, MY_BUILDINGS_PAGE_SIZE) ?? []);
 const hasNext = computed(() => (data.value?.length ?? 0) > MY_BUILDINGS_PAGE_SIZE);

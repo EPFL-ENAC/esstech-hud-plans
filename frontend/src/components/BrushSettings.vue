@@ -6,6 +6,8 @@ import {
     alphaModeOptions,
 } from '../lib/splats/brush';
 
+withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false });
+
 const config = defineModel<BrushTrainingConfig>({
     required: true,
 });
@@ -16,7 +18,7 @@ const resetDefaults = () => {
 </script>
 
 <template>
-    <q-card flat bordered class="q-pa-md q-mb-md">
+    <q-card flat :bordered="!embedded" :class="embedded ? 'embedded-settings' : 'q-pa-md q-mb-md'">
         <q-card-section>
             <div class="text-h6 text-weight-light">Brush 3D Gaussian Splats Reconstruction</div>
             <div class="text-caption text-grey">
@@ -30,16 +32,16 @@ const resetDefaults = () => {
             <!-- Training Core -->
             <div class="text-subtitle2 text-primary">Core Training</div>
             <div class="row q-col-gutter-sm">
-                <div class="col-6">
+                <div class="col-12 col-sm-6">
                     <q-input
                         v-model.number="config.totalSteps"
                         type="number"
                         label="Total Steps"
                         outlined
-                        dense
+                        :dense="!embedded"
                     />
                 </div>
-                <div class="col-6">
+                <div class="col-12 col-sm-6">
                     <q-select
                         v-model="config.renderMode"
                         :options="renderModeOptions"
@@ -47,7 +49,7 @@ const resetDefaults = () => {
                         emit-value
                         map-options
                         outlined
-                        dense
+                        :dense="!embedded"
                     >
                         <template v-slot:option="scope">
                             <q-item v-bind="scope.itemProps">
@@ -66,7 +68,9 @@ const resetDefaults = () => {
                 :min="0"
                 :max="3"
                 :step="1"
-                label-always
+                type="number"
+                outlined
+                :dense="!embedded"
                 label="SH Degree (Spherical Harmonics)"
                 class="q-mt-lg"
             />
@@ -76,16 +80,16 @@ const resetDefaults = () => {
             <div class="text-subtitle2 text-primary">Refinement & Density</div>
 
             <div class="row q-col-gutter-sm">
-                <div class="col-6">
+                <div class="col-12 col-sm-6">
                     <q-input
                         v-model.number="config.maxSplats"
                         type="number"
                         label="Max Splats"
                         outlined
-                        dense
+                        :dense="!embedded"
                     />
                 </div>
-                <div class="col-6">
+                <div class="col-12 col-sm-6">
                     <q-input
                         v-model.number="config.growthGradThreshold"
                         type="number"
@@ -93,28 +97,28 @@ const resetDefaults = () => {
                         label="Growth Gradient Threshold"
                         hint="Lower = more aggressive densification"
                         outlined
-                        dense
+                        :dense="!embedded"
                     />
                 </div>
             </div>
 
             <div class="row q-col-gutter-sm">
-                <div class="col-6">
+                <div class="col-12 col-sm-6">
                     <q-input
                         v-model.number="config.refineEvery"
                         type="number"
                         label="Refine Every (Steps)"
                         outlined
-                        dense
+                        :dense="!embedded"
                     />
                 </div>
-                <div class="col-6">
+                <div class="col-12 col-sm-6">
                     <q-input
                         v-model.number="config.growthStopIter"
                         type="number"
                         label="Stop Growth At"
                         outlined
-                        dense
+                        :dense="!embedded"
                     />
                 </div>
             </div>
@@ -129,7 +133,7 @@ const resetDefaults = () => {
                 emit-value
                 map-options
                 outlined
-                dense
+                :dense="!embedded"
             >
                 <template v-slot:option="scope">
                     <q-item v-bind="scope.itemProps">
@@ -142,22 +146,22 @@ const resetDefaults = () => {
             </q-select>
 
             <div class="row q-col-gutter-sm">
-                <div class="col-6">
+                <div class="col-12 col-sm-6">
                     <q-input
                         v-model.number="config.maxResolution"
                         type="number"
                         label="Max Resolution"
                         outlined
-                        dense
+                        :dense="!embedded"
                     />
                 </div>
-                <div class="col-6">
+                <div class="col-12 col-sm-6">
                     <q-input
                         v-model.number="config.subsampleFrames"
                         type="number"
                         label="Subsample Every Nth Frame"
                         outlined
-                        dense
+                        :dense="!embedded"
                     />
                 </div>
             </div>
@@ -171,12 +175,33 @@ const resetDefaults = () => {
                 min="1"
                 label="Export Every (Steps)"
                 outlined
-                dense
+                :dense="!embedded"
             />
         </q-card-section>
 
         <q-separator />
 
-        <q-btn flat label="Reset Defaults" color="grey" @click="resetDefaults" />
+        <q-btn flat no-caps label="Reset Defaults" color="grey" @click="resetDefaults" />
     </q-card>
 </template>
+
+<style scoped>
+.embedded-settings > .q-card__section {
+    padding: 16px 0;
+}
+
+.embedded-settings > .q-card__section:first-child {
+    padding-top: 0;
+}
+
+.embedded-settings .text-h6 {
+    font-size: 1rem;
+    font-weight: 700;
+}
+
+.embedded-settings .text-subtitle2 {
+    letter-spacing: normal;
+    text-transform: none;
+    font-size: 0.875rem;
+}
+</style>

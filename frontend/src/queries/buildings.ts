@@ -16,10 +16,32 @@ import {
     getBuilding,
     listBuildingLocations,
     listBuildings,
+    type BuildingListItem,
     type ReconstructionStatusFilter,
 } from 'src/lib/buildings';
 
 export const MY_BUILDINGS_PAGE_SIZE = 20;
+
+export function useAllBuildingsQuery() {
+    const subject = getAuthSubject();
+
+    return useQuery({
+        key: ['buildings', subject, 'all'],
+        enabled: () => subject !== null,
+        query: async () => {
+            const buildings: BuildingListItem[] = [];
+            const limit = 100;
+            let page: BuildingListItem[];
+            do {
+                page = await listBuildings({ offset: buildings.length, limit });
+                buildings.push(...page);
+            } while (page.length === limit);
+            return buildings;
+        },
+        staleTime: 30_000,
+        refetchOnWindowFocus: true,
+    });
+}
 
 export function useBuildingLocationsQuery() {
     const subject = getAuthSubject();

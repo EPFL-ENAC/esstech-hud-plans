@@ -2,12 +2,7 @@
     <q-page class="bg-white text-dark q-px-md q-pb-xl" style="padding-top: 64px">
         <page-header title="Capture video" />
 
-        <q-card flat bordered square class="bg-grey-3 flex flex-center text-grey-7 q-mb-md">
-            <div class="column items-center q-py-xl q-gutter-sm">
-                <q-icon name="videocam" size="48px" />
-                <span>View of Camera</span>
-            </div>
-        </q-card>
+        <camera-viewfinder class="q-mb-md" />
 
         <section class="q-mb-lg">
             <h2 class="text-h6 text-weight-bold q-mb-lg">Tips for best results</h2>
@@ -43,13 +38,21 @@
             </q-list>
         </section>
 
-        <q-btn label="Start Recording" color="primary" class="full-width" unelevated no-caps />
+        <q-btn
+            label="Start Recording"
+            color="primary"
+            class="full-width"
+            unelevated
+            no-caps
+            disable
+        />
     </q-page>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue';
 import PageHeader from 'src/components/PageHeader.vue';
+import CameraViewfinder from 'src/components/CameraViewfinder.vue';
 
 const tips = ref([
     { icon: 'photo_camera', title: 'Use wide-angle lens', meta: 'Set to 0.5x or widest available' },

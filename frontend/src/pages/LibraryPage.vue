@@ -23,11 +23,14 @@
         </q-tabs>
 
         <q-input
-            model-value=""
+            v-show="tab === 'list'"
+            v-model="search"
+            :debounce="300"
+            clearable
             outlined
             rounded
-            readonly
-            placeholder="TODO: Search buildings"
+            placeholder="Search buildings"
+            aria-label="Search buildings"
             class="q-mx-md q-mb-md"
         >
             <template #prepend>
@@ -36,7 +39,7 @@
         </q-input>
 
         <keep-alive>
-            <my-buildings-list v-if="tab === 'list'" />
+            <my-buildings-list v-if="tab === 'list'" :search="search" />
             <my-buildings-map v-else />
         </keep-alive>
     </q-page>
@@ -50,5 +53,5 @@ import PageHeader from 'src/components/PageHeader.vue';
 import { useUiStore } from 'src/stores/ui';
 
 const MyBuildingsMap = defineAsyncComponent(() => import('src/components/MyBuildingsMap.vue'));
-const { libraryTab: tab } = storeToRefs(useUiStore());
+const { libraryTab: tab, librarySearch: search } = storeToRefs(useUiStore());
 </script>

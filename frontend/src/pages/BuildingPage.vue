@@ -46,6 +46,16 @@
                 <p v-else class="text-grey-7">Coordinates not set</p>
             </section>
 
+            <q-btn
+                label="New reconstruction"
+                icon="add"
+                color="primary"
+                class="full-width q-mb-md"
+                unelevated
+                no-caps
+                :to="{ path: '/capture/new', query: { buildingId } }"
+            />
+
             <building-reconstructions :key="buildingId" :building-id="buildingId" />
 
             <q-btn

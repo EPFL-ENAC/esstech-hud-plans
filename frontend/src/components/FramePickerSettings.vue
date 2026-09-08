@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { type FramePickerConfig, makeDefaultFramePickerConfig } from 'src/lib/splats/framePicker';
 
+withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false });
+
 const config = defineModel<FramePickerConfig>({
     required: true,
     default: () => makeDefaultFramePickerConfig(),
@@ -12,7 +14,7 @@ const resetToDefaults = () => {
 </script>
 
 <template>
-    <q-card flat bordered class="q-pa-md q-mb-md">
+    <q-card flat :bordered="!embedded" :class="embedded ? 'embedded-settings' : 'q-pa-md q-mb-md'">
         <q-card-section>
             <div class="row items-center no-wrap">
                 <div class="col">
@@ -30,7 +32,7 @@ const resetToDefaults = () => {
         <q-card-section class="q-gutter-y-md" :class="{ 'opacity-50': !config.enabled }">
             <div class="text-subtitle2 text-primary">Selection</div>
             <div class="row q-col-gutter-md">
-                <div class="col-6">
+                <div class="col-12 col-sm-6">
                     <q-input
                         v-model.number="config.min_fps"
                         type="number"
@@ -38,18 +40,18 @@ const resetToDefaults = () => {
                         label="Minimum FPS"
                         hint="Minimum selected-frame frequency"
                         outlined
-                        dense
+                        :dense="!embedded"
                         :disable="!config.enabled"
                     />
                 </div>
-                <div class="col-6">
+                <div class="col-12 col-sm-6">
                     <q-input
                         v-model.number="config.distance_threshold"
                         type="number"
                         label="Distance Threshold"
                         hint="Minimum movement between frames"
                         outlined
-                        dense
+                        :dense="!embedded"
                         min="0"
                         step="0.01"
                         :disable="!config.enabled"
@@ -75,14 +77,14 @@ const resetToDefaults = () => {
                 label="Sharpness Outlier Ratio"
                 hint="Discard a frame when its sharpness falls below this fraction of its neighbors"
                 outlined
-                dense
+                :dense="!embedded"
                 :disable="!config.enabled || !config.remove_outliers"
             />
         </q-card-section>
 
         <q-separator />
 
-        <q-btn flat label="Reset to Defaults" color="grey-7" @click="resetToDefaults" />
+        <q-btn flat no-caps label="Reset to Defaults" color="grey-7" @click="resetToDefaults" />
     </q-card>
 </template>
 
@@ -97,5 +99,24 @@ const resetToDefaults = () => {
 .opacity-50 {
     opacity: 0.5;
     pointer-events: none;
+}
+
+.embedded-settings > .q-card__section {
+    padding: 16px 0;
+}
+
+.embedded-settings > .q-card__section:first-child {
+    padding-top: 0;
+}
+
+.embedded-settings .text-h6 {
+    font-size: 1rem;
+    font-weight: 700;
+}
+
+.embedded-settings .text-subtitle2 {
+    letter-spacing: normal;
+    text-transform: none;
+    font-size: 0.875rem;
 }
 </style>

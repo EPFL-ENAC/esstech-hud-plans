@@ -41,38 +41,86 @@
                         </q-item-section>
                     </template>
                     <div class="q-pa-md">
-                        <div class="row wrap q-gutter-sm q-mb-md">
-                            <q-btn
-                                outline
-                                no-caps
-                                color="primary"
-                                icon="map"
-                                label="2D Plan"
-                                :to="`/building/${buildingId}/plan/2d`"
-                            />
-                            <span>
-                                <q-btn
-                                    outline
-                                    no-caps
-                                    color="primary"
-                                    icon="view_in_ar"
-                                    label="3D Plan"
-                                    :disable="!hasSplat(reconstruction)"
-                                    :to="{
-                                        name: 'reconstruction-3d-plan',
-                                        params: { buildingId, reconstructionId: reconstruction.id },
-                                    }"
-                                />
-                                <q-tooltip v-if="!hasSplat(reconstruction)">
-                                    The 3D plan is not available for this reconstruction.
-                                </q-tooltip>
-                            </span>
-                        </div>
                         <reconstruction-video
                             :building-id="buildingId"
                             :reconstruction-id="reconstruction.id"
                             :active="expandedId === reconstruction.id"
                         />
+                        <section class="q-mt-lg" aria-label="Associated Plan">
+                            <h3 class="text-h6 text-weight-bold q-mt-none q-mb-md">
+                                Associated Plan
+                            </h3>
+                            <q-list class="q-gutter-y-md">
+                                <q-item
+                                    clickable
+                                    aria-label="2D Plan"
+                                    :to="`/building/${buildingId}/plan/2d`"
+                                >
+                                    <q-item-section avatar>
+                                        <q-avatar
+                                            square
+                                            size="48px"
+                                            font-size="31px"
+                                            color="white"
+                                            text-color="primary"
+                                            class="avatar-icon"
+                                        >
+                                            <q-icon name="crop_square" />
+                                        </q-avatar>
+                                    </q-item-section>
+                                    <q-item-section>
+                                        <q-item-label class="text-subtitle1 text-weight-medium">
+                                            2D Plan
+                                        </q-item-label>
+                                        <q-item-label caption>
+                                            Top-down floor plan with measurements and annotations
+                                        </q-item-label>
+                                    </q-item-section>
+                                    <q-item-section side>
+                                        <q-icon name="chevron_right" size="20px" color="dark" />
+                                    </q-item-section>
+                                </q-item>
+                                <q-item
+                                    clickable
+                                    aria-label="3D Plan"
+                                    :disable="!hasSplat(reconstruction)"
+                                    :to="{
+                                        name: 'reconstruction-3d-plan',
+                                        params: {
+                                            buildingId,
+                                            reconstructionId: reconstruction.id,
+                                        },
+                                    }"
+                                >
+                                    <q-item-section avatar>
+                                        <q-avatar
+                                            square
+                                            size="48px"
+                                            font-size="31px"
+                                            color="white"
+                                            text-color="primary"
+                                            class="avatar-icon"
+                                        >
+                                            <q-icon name="view_in_ar" />
+                                        </q-avatar>
+                                    </q-item-section>
+                                    <q-item-section>
+                                        <q-item-label class="text-subtitle1 text-weight-medium">
+                                            3D Plan
+                                        </q-item-label>
+                                        <q-item-label caption>
+                                            Interactive 3D model with orbit and export controls
+                                        </q-item-label>
+                                    </q-item-section>
+                                    <q-item-section side>
+                                        <q-icon name="chevron_right" size="20px" color="dark" />
+                                    </q-item-section>
+                                </q-item>
+                                <q-tooltip v-if="!hasSplat(reconstruction)">
+                                    The 3D plan is not available for this reconstruction.
+                                </q-tooltip>
+                            </q-list>
+                        </section>
                     </div>
                 </q-expansion-item>
             </q-list>

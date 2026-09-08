@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
+import type { SplatGenerationSettings } from 'src/lib/buildings';
 
 export type BuildingStatus = 'ready' | 'processing';
 
@@ -13,7 +14,8 @@ export interface Building {
     size: string;
     duration: string;
     description: string;
-    environment: 'indoors' | 'outdoors';
+    environment: 'indoors' | 'outdoors' | null;
+    reconstructionSettings?: SplatGenerationSettings;
     buildingType: string;
     intendedUse: string;
     materials: string[];
@@ -137,7 +139,10 @@ export const useBuildingsStore = defineStore('buildings', () => {
             size: partial.size,
             duration: partial.duration,
             description: partial.description ?? '',
-            environment: partial.environment ?? 'indoors',
+            environment: partial.environment === undefined ? 'indoors' : partial.environment,
+            ...(partial.reconstructionSettings
+                ? { reconstructionSettings: partial.reconstructionSettings }
+                : {}),
             buildingType: partial.buildingType ?? '',
             intendedUse: partial.intendedUse ?? '',
             materials: partial.materials ?? [],

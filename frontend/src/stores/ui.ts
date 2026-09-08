@@ -15,10 +15,11 @@ export const useUiStore = defineStore('ui', () => {
      */
     const background = ref<BackgroundPageName>('home');
     const libraryTab = ref<'list' | 'map'>('list');
+    const librarySearch = ref<string | null>(null);
 
     function setBackground(page: BackgroundPageName) {
         background.value = page;
     }
 
-    return { background, libraryTab, setBackground };
+    return { background, libraryTab, librarySearch, setBackground };
 });
