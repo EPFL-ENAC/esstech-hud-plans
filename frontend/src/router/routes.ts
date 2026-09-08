@@ -27,7 +27,7 @@ const routes: RouteRecordRaw[] = [
             },
             {
                 path: '/buildings',
-                component: () => import('pages/BuildingsPage.vue'),
+                component: () => import('pages/BuildingsPageTemp.vue'),
             },
             {
                 path: '/buildings/new',
