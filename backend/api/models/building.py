@@ -78,6 +78,17 @@ class BuildingRead(BaseModel):
         )
 
 
+class BuildingLocationRead(BaseModel):
+    """The fields needed to place an owned building on a map."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    latitude: float
+    longitude: float
+
+
 class BuildingListItemRead(BuildingRead):
     """A building with its newest attempt, regardless of that attempt's status."""
 

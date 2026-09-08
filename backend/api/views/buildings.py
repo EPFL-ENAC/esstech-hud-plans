@@ -9,12 +9,17 @@ from api.models.building import (
     Building,
     BuildingCreate,
     BuildingListItemRead,
+    BuildingLocationRead,
     BuildingRead,
     BuildingUpdate,
 )
 from api.models.user import User
 from api.services.auth import require_user
-from api.services.buildings import BuildingService, SortOrder
+from api.services.buildings import (
+    BuildingService,
+    ReconstructionStatusFilter,
+    SortOrder,
+)
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -83,6 +88,18 @@ async def list_buildings(
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 100,
     sort_order: SortOrder = "desc",
+    reconstruction_status: Annotated[
+        ReconstructionStatusFilter | None,
+        Query(
+            description="Filter by whether any attempt is preparing, scheduled, or running."
+        ),
+    ] = None,
+    search: Annotated[
+        str | None,
+        Query(
+            description="Case-insensitive substring of the building name; blank means all names."
+        ),
+    ] = None,
 ) -> list[BuildingListItemRead]:
     try:
         return await buildings.list(
@@ -90,7 +107,20 @@ async def list_buildings(
             offset=offset,
             limit=limit,
             sort_order=sort_order,
+            reconstruction_status=reconstruction_status,
+            search=search,
         )
+    except (OSError, SQLAlchemyError) as exc:
+        raise _database_unavailable(exc) from exc
+
+
+@router.get("/locations", response_model=list[BuildingLocationRead])
+async def list_building_locations(
+    current_user: Annotated[User, Depends(require_user)],
+    buildings: Annotated[BuildingService, Depends(get_building_service)],
+) -> list[BuildingLocationRead]:
+    try:
+        return await buildings.list_locations(user_id=current_user.id)
     except (OSError, SQLAlchemyError) as exc:
         raise _database_unavailable(exc) from exc
 

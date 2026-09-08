@@ -20,6 +20,13 @@ export interface Building {
     updated_at: string;
 }
 
+export interface BuildingLocation {
+    id: string;
+    name: string;
+    latitude: number;
+    longitude: number;
+}
+
 export type ReconstructionStatus =
     | 'preparing'
     | 'scheduled'
@@ -136,22 +143,39 @@ export function getCurrentUser(): Promise<CurrentUser> {
     return requestJson('/user/me');
 }
 
+export function listBuildingLocations(): Promise<BuildingLocation[]> {
+    return requestJson('/buildings/locations');
+}
+
+export type ReconstructionStatusFilter = 'processing' | 'idle';
+
 export interface ListBuildingsOptions {
     offset?: number;
     limit?: number;
     sort_order?: 'asc' | 'desc';
+    reconstruction_status?: ReconstructionStatusFilter | null;
+    search?: string | null;
 }
 
 export function listBuildings({
     offset = 0,
     limit = 100,
     sort_order = 'desc',
+    reconstruction_status,
+    search,
 }: ListBuildingsOptions = {}): Promise<BuildingListItem[]> {
     const params = new URLSearchParams({
         offset: String(offset),
         limit: String(limit),
         sort_order,
     });
+    if (reconstruction_status != null) {
+        params.set('reconstruction_status', reconstruction_status);
+    }
+    const term = search?.trim() || null;
+    if (term !== null) {
+        params.set('search', term);
+    }
     return requestJson(`/buildings?${params}`);
 }
 
@@ -171,8 +195,22 @@ export function getBuilding(buildingId: string): Promise<Building> {
     return requestJson(`/buildings/${encodeURIComponent(buildingId)}`);
 }
 
-export function listReconstructions(buildingId: string): Promise<Reconstruction[]> {
-    return requestJson(`/buildings/${encodeURIComponent(buildingId)}/reconstructions`);
+export interface ListReconstructionsOptions {
+    offset?: number;
+    limit?: number;
+    sort_order?: 'asc' | 'desc';
+}
+
+export function listReconstructions(
+    buildingId: string,
+    { offset = 0, limit = 100, sort_order = 'desc' }: ListReconstructionsOptions = {},
+): Promise<Reconstruction[]> {
+    const params = new URLSearchParams({
+        offset: String(offset),
+        limit: String(limit),
+        sort_order,
+    });
+    return requestJson(`/buildings/${encodeURIComponent(buildingId)}/reconstructions?${params}`);
 }
 
 export async function getReconstructionVideo(

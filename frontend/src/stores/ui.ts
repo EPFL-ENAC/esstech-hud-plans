@@ -14,10 +14,11 @@ export const useUiStore = defineStore('ui', () => {
      * Library leaves the user on Home or Library.
      */
     const background = ref<BackgroundPageName>('home');
+    const libraryTab = ref<'list' | 'map'>('list');
 
     function setBackground(page: BackgroundPageName) {
         background.value = page;
     }
 
-    return { background, setBackground };
+    return { background, libraryTab, setBackground };
 });

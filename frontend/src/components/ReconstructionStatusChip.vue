@@ -1,7 +1,7 @@
 <template>
     <q-chip outline :color="presentation.color" :class="presentation.background">
         {{ label }}
-        <q-tooltip v-if="reconstruction">Latest reconstruction attempt</q-tooltip>
+        <q-tooltip v-if="reconstruction && tooltip">{{ tooltip }}</q-tooltip>
     </q-chip>
 </template>
 
@@ -9,7 +9,10 @@
 import { computed } from 'vue';
 import type { ReconstructionStatus, ReconstructionSummary } from 'src/lib/buildings';
 
-const props = defineProps<{ reconstruction: ReconstructionSummary | null }>();
+const props = withDefaults(
+    defineProps<{ reconstruction: ReconstructionSummary | null; tooltip?: string }>(),
+    { tooltip: 'Latest reconstruction attempt' },
+);
 
 const neutral = { color: 'grey-7', background: 'bg-grey-2' };
 const active = { color: 'primary', background: 'bg-secondary' };

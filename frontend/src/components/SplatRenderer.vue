@@ -29,6 +29,9 @@ onMounted(() => {
             let spark: SparkRenderer | null = null;
             let observer: ResizeObserver | null = null;
             let disposed = false;
+            let frameInProgress = false;
+            let needsSort = true;
+            let ready = false;
 
             function dispose(): void {
                 if (disposed) return;
@@ -36,6 +39,12 @@ onMounted(() => {
                 observer?.disconnect();
                 renderer?.setAnimationLoop(null);
                 controls?.dispose();
+                renderer?.domElement.remove();
+                // Keep the GPU alive until the current sort/readback has finished.
+                if (!frameInProgress) releaseResources();
+            }
+
+            function releaseResources(): void {
                 if (mesh?.isInitialized) mesh.dispose();
                 spark?.defaultView.dispose();
                 spark?.geometry.dispose();
@@ -43,7 +52,6 @@ onMounted(() => {
                 scene.clear();
                 renderer?.dispose();
                 renderer?.forceContextLoss();
-                renderer?.domElement.remove();
             }
             onCleanup(dispose);
 
@@ -69,7 +77,8 @@ onMounted(() => {
                     renderer.domElement.setAttribute('aria-label', 'Interactive splat viewer');
                     renderer.domElement.setAttribute('role', 'img');
                     host!.appendChild(renderer.domElement);
-                    spark = new SparkRenderer({ renderer });
+                    spark = new SparkRenderer({ renderer, autoUpdate: false });
+                    spark.defaultView.setAutoUpdate(false);
                     scene.add(spark, mesh);
                     controls = new OrbitControls(camera, renderer.domElement);
                     controls.enableDamping = true;
@@ -82,6 +91,7 @@ onMounted(() => {
                         renderer.setSize(width, height, false);
                         camera.aspect = width / height;
                         camera.updateProjectionMatrix();
+                        needsSort = true;
                     };
                     resize();
                     const radius = Math.max(sphere.radius, 0.01);
@@ -97,16 +107,31 @@ onMounted(() => {
                     observer = new ResizeObserver(resize);
                     observer.observe(host!);
 
-                    renderer.setAnimationLoop(() => {
+                    async function renderFrame(): Promise<void> {
+                        if (disposed || frameInProgress) return;
+                        frameInProgress = true;
                         try {
-                            controls?.update();
+                            const moved = controls?.update();
+                            if (needsSort || moved) {
+                                needsSort = false;
+                                await spark?.defaultView.prepare({ scene, camera });
+                            }
+                            if (disposed) return;
                             renderer?.render(scene, camera);
+                            if (!ready) {
+                                ready = true;
+                                emit('ready');
+                            }
                         } catch (error) {
+                            if (disposed) return;
                             dispose();
                             emit('error', error);
+                        } finally {
+                            frameInProgress = false;
+                            if (disposed) releaseResources();
                         }
-                    });
-                    emit('ready');
+                    }
+                    renderer.setAnimationLoop(() => void renderFrame());
                 } catch (error) {
                     if (disposed) return;
                     dispose();

@@ -49,6 +49,15 @@ const routes: RouteRecordRaw[] = [
                 },
             },
             {
+                path: 'building/:buildingId/reconstruction/:reconstructionId/3d-plan',
+                name: 'reconstruction-3d-plan',
+                meta: { drawer: true },
+                components: {
+                    default: () => import('components/BackgroundPage.vue'),
+                    detail: () => import('pages/ReconstructionPlanPage.vue'),
+                },
+            },
+            {
                 path: 'building/:id/plan/2d',
                 meta: { drawer: true },
                 components: {

@@ -5,18 +5,19 @@
         <div v-if="loading" role="status" class="row items-center q-gutter-sm">
             <q-spinner color="primary" size="24px" />
             <span>Loading video…</span>
-            <q-btn flat dense label="Cancel" @click="reset" />
+            <q-btn flat dense label="Cancel" @click="cancel" />
         </div>
 
         <q-banner v-else-if="errorMessage" rounded class="bg-red-1 text-negative" role="alert">
             {{ errorMessage }}
             <template #action>
-                <q-btn flat color="negative" label="Retry" @click="load" />
+                <q-btn flat color="negative" label="Retry" @click="retry" />
             </template>
         </q-banner>
 
         <video
             v-else-if="videoUrl"
+            ref="videoElement"
             :src="videoUrl"
             controls
             playsinline
@@ -33,66 +34,101 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue';
-import { ApiError, getReconstructionVideo } from 'src/lib/buildings';
+import { computed, onBeforeUnmount, ref, toRef, watch } from 'vue';
+import { ApiError } from 'src/lib/buildings';
+import { useReconstructionVideoQuery } from 'src/queries/reconstructions';
 
-const props = defineProps<{
-    buildingId: string;
-    reconstructionId: string;
-}>();
+const props = withDefaults(
+    defineProps<{
+        buildingId: string;
+        reconstructionId: string;
+        active?: boolean;
+    }>(),
+    { active: true },
+);
 
+const query = useReconstructionVideoQuery(
+    toRef(props, 'buildingId'),
+    toRef(props, 'reconstructionId'),
+);
+const videoElement = ref<HTMLVideoElement | null>(null);
 const videoUrl = ref<string | null>(null);
-const loading = ref(false);
-const errorMessage = ref('');
-let pendingRequest: AbortController | null = null;
+const playbackError = ref('');
+const errorDismissed = ref(false);
+const loading = query.isLoading;
+const errorMessage = computed(() => {
+    if (playbackError.value) return playbackError.value;
+    const error = query.error.value;
+    if (!error || errorDismissed.value) return '';
+    if (error instanceof ApiError && error.status === 404)
+        return 'The input video is not available.';
+    if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+        return 'Unable to access this video. Please sign in again.';
+    }
+    return 'Unable to load the video. Please try again.';
+});
 
-function reset(): void {
-    pendingRequest?.abort();
-    pendingRequest = null;
+function releaseVideo(): void {
+    videoElement.value?.pause();
     if (videoUrl.value) URL.revokeObjectURL(videoUrl.value);
     videoUrl.value = null;
-    loading.value = false;
-    errorMessage.value = '';
 }
 
-async function load(): Promise<void> {
-    reset();
-    const controller = new AbortController();
-    pendingRequest = controller;
-    loading.value = true;
+watch(
+    query.data,
+    (blob) => {
+        releaseVideo();
+        if (blob) videoUrl.value = URL.createObjectURL(blob);
+    },
+    { immediate: true },
+);
 
-    try {
-        const video = await getReconstructionVideo(
-            props.buildingId,
-            props.reconstructionId,
-            controller.signal,
-        );
-        if (!controller.signal.aborted) videoUrl.value = URL.createObjectURL(video);
-    } catch (error) {
-        if (controller.signal.aborted) return;
-        if (error instanceof ApiError && error.status === 404) {
-            errorMessage.value = 'The input video is not available.';
-        } else if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
-            errorMessage.value = 'Unable to access this video. Please sign in again.';
-        } else {
-            errorMessage.value = 'Unable to load the video. Please try again.';
-        }
-    } finally {
-        if (pendingRequest === controller) {
-            pendingRequest = null;
-            loading.value = false;
-        }
+async function load(): Promise<void> {
+    if (loading.value) return;
+    playbackError.value = '';
+    errorDismissed.value = false;
+    if (!videoUrl.value && query.data.value) {
+        videoUrl.value = URL.createObjectURL(query.data.value);
     }
+    // refresh reuses a fresh Blob or deduplicates an in-flight download.
+    // Only the scoped data watcher creates URLs when a download finishes.
+    await query.refresh();
+}
+
+async function retry(): Promise<void> {
+    playbackError.value = '';
+    errorDismissed.value = false;
+    await query.refetch();
+}
+
+function cancel(): void {
+    query.cancel();
+    playbackError.value = '';
+    errorDismissed.value = true;
 }
 
 function onPlaybackError(): void {
-    reset();
-    errorMessage.value =
+    releaseVideo();
+    playbackError.value =
         'This video could not be played. Its format may not be supported by your browser.';
 }
 
-watch(() => [props.buildingId, props.reconstructionId], reset);
-onBeforeUnmount(reset);
+watch(
+    () => props.active,
+    (active) => {
+        if (!active) videoElement.value?.pause();
+    },
+    { flush: 'sync' },
+);
+watch(
+    () => [props.buildingId, props.reconstructionId],
+    () => {
+        playbackError.value = '';
+        errorDismissed.value = false;
+    },
+);
+onBeforeUnmount(releaseVideo);
+defineExpose({ load });
 </script>
 
 <style scoped>

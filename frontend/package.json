@@ -22,6 +22,7 @@
         "@quasar/extras": "^1.16.4",
         "@sentry/vue": "^10.66.0",
         "@sparkjsdev/spark": "^0.1.10",
+        "maplibre-gl": "^6.8.0",
         "pinia": "^3.0.1",
         "quasar": "^2.16.0",
         "three": "^0.182.0",

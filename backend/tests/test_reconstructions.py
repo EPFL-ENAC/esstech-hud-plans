@@ -2,6 +2,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,6 +26,7 @@ from api.services.reconstructions import (
     ReconstructionSchedulingError,
     ReconstructionService,
     ReconstructionVideoStorageError,
+    SortOrder,
 )
 from api.views import buildings as building_views
 from api.views import reconstructions as reconstruction_views
@@ -432,9 +434,62 @@ def test_reconstruction_lifecycle_preserves_progress_and_partial_artifacts() -> 
 def test_reconstruction_list_validates_pagination() -> None:
     async def run() -> None:
         async with reconstruction_service() as (service, _, _, building, _):
-            for kwargs in ({"offset": -1}, {"limit": 0}, {"limit": 101}):
+            for offset, limit in ((-1, 100), (0, 0), (0, 101)):
                 with pytest.raises(ValueError):
-                    await service.list(building_id=building.id, **kwargs)
+                    await service.list(
+                        building_id=building.id, offset=offset, limit=limit
+                    )
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("sort_order", ["asc", "desc"])
+def test_reconstruction_list_sorting_and_pagination(sort_order: SortOrder) -> None:
+    async def run() -> None:
+        async with reconstruction_service() as (service, session, _, building, other):
+            timestamp = datetime(2026, 9, 8, tzinfo=UTC)
+            oldest = Reconstruction(
+                id=UUID(int=30),
+                building_id=building.id,
+                settings={},
+                created_at=timestamp - timedelta(days=1),
+            )
+            first_tie = Reconstruction(
+                id=UUID(int=10),
+                building_id=building.id,
+                settings={},
+                created_at=timestamp,
+            )
+            second_tie = Reconstruction(
+                id=UUID(int=20),
+                building_id=building.id,
+                settings={},
+                created_at=timestamp,
+            )
+            foreign = Reconstruction(
+                building_id=other.id,
+                settings={},
+                created_at=timestamp + timedelta(days=1),
+            )
+            session.add_all([second_tie, foreign, oldest, first_tie])
+            await session.commit()
+            expected = [oldest, first_tie, second_tie]
+            assert await service.list(building_id=building.id) == list(
+                reversed(expected)
+            )
+            if sort_order == "desc":
+                expected.reverse()
+            assert (
+                await service.list(building_id=building.id, sort_order=sort_order)
+                == expected
+            )
+            pages = [
+                await service.list(
+                    building_id=building.id, sort_order=sort_order, offset=i, limit=1
+                )
+                for i in range(4)
+            ]
+            assert pages == [[item] for item in expected] + [[]]
 
     asyncio.run(run())
 
@@ -531,6 +586,48 @@ def test_nested_reconstruction_routes_create_list_and_get(
     )
     assert fetched.status_code == 200
     assert fetched.json() == created
+
+
+def test_nested_reconstruction_routes_sorting(
+    reconstruction_api: tuple[TestClient, UUID],
+) -> None:
+    client, building_id = reconstruction_api
+    timestamp = datetime(2026, 9, 8, tzinfo=UTC)
+    ids = [UUID(int=30), UUID(int=10), UUID(int=20)]
+
+    async def insert() -> None:
+        async for session in client.app.dependency_overrides[get_session]():
+            session.add_all(
+                [
+                    Reconstruction(
+                        id=id_,
+                        building_id=building_id,
+                        settings=SplatGenerationWorkflowSettings().model_dump(
+                            mode="json"
+                        ),
+                        created_at=timestamp - timedelta(days=1)
+                        if index == 0
+                        else timestamp,
+                    )
+                    for index, id_ in enumerate(ids)
+                ]
+            )
+            await session.commit()
+
+    asyncio.run(insert())
+    url = f"/buildings/{building_id}/reconstructions"
+    ascending = [str(id_) for id_ in ids]
+    for suffix, expected in [
+        ("", ascending[::-1]),
+        ("?sort_order=desc", ascending[::-1]),
+        ("?sort_order=asc", ascending),
+    ]:
+        response = client.get(url + suffix)
+        assert response.status_code == 200
+        assert [row["id"] for row in response.json()] == expected
+    page = client.get(url + "?sort_order=asc&offset=1&limit=1")
+    assert [row["id"] for row in page.json()] == [ascending[1]]
+    assert client.get(url + "?sort_order=invalid").status_code == 422
 
 
 def _set_artifact_path(

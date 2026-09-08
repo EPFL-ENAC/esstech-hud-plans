@@ -6,15 +6,68 @@ import {
     onMounted,
     onScopeDispose,
     ref,
+    toValue,
     watch,
+    type MaybeRefOrGetter,
     type Ref,
 } from 'vue';
 import { getAuthSubject } from 'src/lib/auth';
-import { listBuildings } from 'src/lib/buildings';
+import {
+    getBuilding,
+    listBuildingLocations,
+    listBuildings,
+    type ReconstructionStatusFilter,
+} from 'src/lib/buildings';
 
 export const MY_BUILDINGS_PAGE_SIZE = 20;
 
-export function useMyBuildingsQuery(offset: Ref<number>) {
+export function useBuildingLocationsQuery() {
+    const subject = getAuthSubject();
+    const active = ref(true);
+    const visible = ref(document.visibilityState === 'visible');
+    const enabled = computed(() => subject !== null && active.value && visible.value);
+    const query = useQuery({
+        key: ['buildings', subject, 'locations'],
+        enabled,
+        query: listBuildingLocations,
+        staleTime: 30_000,
+        refetchOnWindowFocus: true,
+    });
+
+    function updateVisibility() {
+        visible.value = document.visibilityState === 'visible';
+    }
+
+    onMounted(() => document.addEventListener('visibilitychange', updateVisibility));
+    onActivated(() => {
+        active.value = true;
+        if (enabled.value) void query.refresh();
+    });
+    onDeactivated(() => {
+        active.value = false;
+    });
+    onScopeDispose(() => document.removeEventListener('visibilitychange', updateVisibility));
+
+    return query;
+}
+
+export function useBuildingQuery(buildingId: Ref<string>) {
+    const subject = getAuthSubject();
+
+    return useQuery({
+        key: () => ['buildings', subject, 'detail', buildingId.value],
+        enabled: () => subject !== null && buildingId.value !== '',
+        query: () => getBuilding(buildingId.value),
+        staleTime: 30_000,
+        refetchOnWindowFocus: true,
+    });
+}
+
+export function useMyBuildingsQuery(
+    offset: Ref<number>,
+    reconstructionStatus?: MaybeRefOrGetter<ReconstructionStatusFilter | null | undefined>,
+    search?: MaybeRefOrGetter<string | null | undefined>,
+) {
     const subject = getAuthSubject();
     const active = ref(true);
     const visible = ref(document.visibilityState === 'visible');
@@ -23,6 +76,8 @@ export function useMyBuildingsQuery(offset: Ref<number>) {
         offset: offset.value,
         limit: MY_BUILDINGS_PAGE_SIZE + 1,
         sort_order: 'desc' as const,
+        reconstruction_status: toValue(reconstructionStatus) ?? null,
+        search: toValue(search)?.trim() || null,
     }));
 
     const query = useQuery({

@@ -24,6 +24,7 @@ from api.models.workflows import SplatGenerationWorkflowSettings
 from api.services.reconstructions import (
     ReconstructionCreationError,
     ReconstructionService,
+    SortOrder,
 )
 from api.utils.responses import inline_file_response
 from api.views.buildings import get_current_building
@@ -192,12 +193,14 @@ async def list_reconstructions(
     ],
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 100,
+    sort_order: SortOrder = "desc",
 ) -> list[Reconstruction]:
     try:
         return await reconstructions.list(
             building_id=building.id,
             offset=offset,
             limit=limit,
+            sort_order=sort_order,
         )
     except (OSError, SQLAlchemyError) as exc:
         raise _database_unavailable(exc) from exc

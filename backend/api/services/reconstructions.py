@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Literal
 from uuid import UUID
 
 from api.lib.workflows import common as workflow_common
@@ -17,6 +18,8 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 logger = logging.getLogger(__name__)
+
+SortOrder = Literal["asc", "desc"]
 
 
 class ReconstructionNotFoundError(Exception):
@@ -65,16 +68,25 @@ class ReconstructionService:
         building_id: UUID,
         offset: int = 0,
         limit: int = 100,
+        sort_order: SortOrder = "desc",
     ) -> list[Reconstruction]:
         if offset < 0:
             raise ValueError("offset must be non-negative")
         if not 1 <= limit <= 100:
             raise ValueError("limit must be between 1 and 100")
+        if sort_order not in ("asc", "desc"):
+            raise ValueError("sort_order must be asc or desc")
+
+        ordering = (
+            (col(Reconstruction.created_at).asc(), col(Reconstruction.id).asc())
+            if sort_order == "asc"
+            else (col(Reconstruction.created_at).desc(), col(Reconstruction.id).desc())
+        )
 
         result = await self._session.exec(
             select(Reconstruction)
             .where(Reconstruction.building_id == building_id)
-            .order_by(col(Reconstruction.created_at), col(Reconstruction.id))
+            .order_by(*ordering)
             .offset(offset)
             .limit(limit)
         )
