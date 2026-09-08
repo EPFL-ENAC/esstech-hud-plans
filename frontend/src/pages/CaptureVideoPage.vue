@@ -42,6 +42,10 @@
             {{ handoffError }}
         </q-banner>
 
+        <p v-if="gettingLocation" role="status" class="text-grey-7">
+            Recording stopped. Waiting for location…
+        </p>
+
         <q-btn
             :label="viewfinder?.isRecording ? 'Stop Recording' : 'Start Recording'"
             color="primary"
@@ -61,12 +65,14 @@ import { useRouter } from 'vue-router';
 import PageHeader from 'src/components/PageHeader.vue';
 import CameraViewfinder from 'src/components/CameraViewfinder.vue';
 import { type RecordedVideo, toCapturedVideo } from 'src/lib/captured-video';
+import { getCaptureLocation } from 'src/lib/capture-location';
 import { useCaptureStore } from 'src/stores/capture';
 
 const viewfinder = useTemplateRef<InstanceType<typeof CameraViewfinder>>('viewfinder');
 const router = useRouter();
 const captureStore = useCaptureStore();
 const busy = ref(false);
+const gettingLocation = ref(false);
 const handoffError = ref('');
 let disposed = false;
 
@@ -93,7 +99,11 @@ async function toggleRecording(): Promise<void> {
             return;
         }
         if (disposed) return;
-        captureStore.setVideo(toCapturedVideo(recording));
+        // Finalize the video before a location permission prompt can open.
+        gettingLocation.value = true;
+        const location = await getCaptureLocation();
+        if (disposed) return;
+        captureStore.setVideo(toCapturedVideo(recording, location));
         const failure = await router.push('/capture/new');
         if (failure) {
             captureStore.clearVideo();
@@ -106,6 +116,7 @@ async function toggleRecording(): Promise<void> {
                 error instanceof Error ? error.message : 'Could not open New Capture.';
         }
     } finally {
+        gettingLocation.value = false;
         busy.value = false;
     }
 }

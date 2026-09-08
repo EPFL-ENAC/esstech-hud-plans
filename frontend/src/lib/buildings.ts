@@ -14,6 +14,7 @@ export interface Building {
     id: string;
     user_id: string;
     name: string;
+    address: string | null;
     latitude: number | null;
     longitude: number | null;
     created_at: string;
@@ -22,9 +23,18 @@ export interface Building {
 
 export interface BuildingCreate {
     name: string;
+    address?: string | null;
     latitude: number | null;
     longitude: number | null;
 }
+
+export type BuildingUpdate = {
+    name?: string;
+    address?: string | null;
+} & (
+    | { latitude?: never; longitude?: never }
+    | { latitude: number | null; longitude: number | null }
+);
 
 export type BuildingSelection =
     | { buildingId: string }
@@ -217,6 +227,14 @@ export function createBuilding(payload: BuildingCreate): Promise<Building> {
 
 export function getBuilding(buildingId: string): Promise<Building> {
     return requestJson(`/buildings/${encodeURIComponent(buildingId)}`);
+}
+
+export function updateBuilding(buildingId: string, payload: BuildingUpdate): Promise<Building> {
+    return requestJson(`/buildings/${encodeURIComponent(buildingId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    });
 }
 
 export interface ListReconstructionsOptions {

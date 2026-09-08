@@ -1,9 +1,5 @@
 <template>
     <section aria-labelledby="my-buildings-title" :aria-busy="isLoading">
-        <h2 id="my-buildings-title" class="text-h6 text-weight-bold q-mb-md q-px-md">
-            My Buildings
-        </h2>
-
         <q-banner v-if="state.error" class="bg-red-1 text-negative q-mx-md q-mb-md" role="alert">
             {{ data ? 'Could not refresh your buildings.' : 'Could not load your buildings.' }}
             <template #action>
@@ -70,7 +66,7 @@
         </template>
 
         <nav
-            v-if="data || offset > 0"
+            v-if="(data && data.length > 0) || offset > 0"
             aria-label="Building list pagination"
             class="row justify-center q-pa-md"
         >
@@ -92,28 +88,32 @@
 import { computed, ref, watch } from 'vue';
 import FloorPlanThumb from 'src/components/FloorPlanThumb.vue';
 import ReconstructionStatusChip from 'src/components/ReconstructionStatusChip.vue';
+import type { ReconstructionStatusFilter } from 'src/lib/buildings';
 import { MY_BUILDINGS_PAGE_SIZE, useMyBuildingsQuery } from 'src/queries/buildings';
 
-const props = defineProps<{ search?: string | null }>();
+const props = defineProps<{
+    search?: string | null;
+    reconstructionStatus?: ReconstructionStatusFilter | null;
+}>();
 const normalizedSearch = computed(() => props.search?.trim() || null);
 const offset = ref(0);
 watch(
-    normalizedSearch,
+    [normalizedSearch, () => props.reconstructionStatus],
     () => {
         offset.value = 0;
     },
     { flush: 'sync' },
 );
-const { data, state, asyncStatus, refetch } = useMyBuildingsQuery(
-    offset,
-    undefined,
-    normalizedSearch,
-);
+const {
+    data,
+    state,
+    refetch,
+    isForegroundLoading: isLoading,
+} = useMyBuildingsQuery(offset, () => props.reconstructionStatus, normalizedSearch);
 const emptyMessage = computed(() => {
     if (offset.value > 0) return 'No buildings on this page.';
     return normalizedSearch.value ? 'No buildings match your search.' : 'No buildings yet.';
 });
-const isLoading = computed(() => asyncStatus.value === 'loading');
 const buildings = computed(() => data.value?.slice(0, MY_BUILDINGS_PAGE_SIZE) ?? []);
 const hasNext = computed(() => (data.value?.length ?? 0) > MY_BUILDINGS_PAGE_SIZE);
 const page = computed({

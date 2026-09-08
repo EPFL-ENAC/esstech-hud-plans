@@ -1,5 +1,6 @@
 <template>
     <q-chip outline :color="presentation.color" :class="presentation.background">
+        <q-spinner v-if="isProcessing" size="1rem" class="q-mr-md" />
         {{ label }}
         <q-tooltip v-if="reconstruction && tooltip">{{ tooltip }}</q-tooltip>
     </q-chip>
@@ -26,6 +27,10 @@ const statuses = {
     cancelled: { label: 'Cancelled', ...neutral },
     crashed: { label: 'Crashed', ...failure },
 } satisfies Record<ReconstructionStatus, { label: string; color: string; background: string }>;
+
+const isProcessing = computed(() =>
+    ['preparing', 'scheduled', 'running'].includes(props.reconstruction?.status ?? ''),
+);
 
 const presentation = computed(() =>
     props.reconstruction

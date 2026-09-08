@@ -2,9 +2,14 @@ import asyncio
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from uuid import UUID
 
 import pytest
+from alembic.config import Config
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
+from alembic.script import ScriptDirectory
 from api.db import get_session
 from api.models.building import (
     Building,
@@ -30,7 +35,7 @@ from api.views import buildings as building_views
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import event
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -99,8 +104,64 @@ def test_building_create_validates_values(payload: dict[str, object]) -> None:
 def test_building_create_defaults_to_empty_optional_metadata() -> None:
     payload = BuildingCreate()
     assert payload.name == ""
+    assert payload.address is None
     assert payload.latitude is None
     assert payload.longitude is None
+
+
+def test_building_address_migration_preserves_existing_rows() -> None:
+    config = Config()
+    config.set_main_option(
+        "script_location", str(Path(__file__).resolve().parents[1] / "migrations")
+    )
+    scripts = ScriptDirectory.from_config(config)
+    migration = scripts.get_revision("c82a6f419d03")
+    assert migration is not None
+    engine = create_engine("sqlite://")
+    try:
+        with engine.begin() as connection:
+            with Operations.context(MigrationContext.configure(connection)):
+                for revision in reversed(
+                    list(
+                        scripts.walk_revisions(
+                            base="base", head=migration.down_revision
+                        )
+                    )
+                ):
+                    revision.module.upgrade()
+                connection.execute(
+                    text(
+                        "INSERT INTO buildings "
+                        "(id, user_id, name, latitude, longitude, created_at, updated_at) "
+                        "VALUES (:id, :user_id, 'Existing building', NULL, NULL, :now, :now)"
+                    ),
+                    {
+                        "id": USER_ID.hex,
+                        "user_id": USER_ID.hex,
+                        "now": datetime.now(UTC).isoformat(),
+                    },
+                )
+                migration.module.upgrade()
+                assert (
+                    connection.execute(text("SELECT address FROM buildings")).scalar()
+                    is None
+                )
+                connection.execute(text("UPDATE buildings SET address = 'New address'"))
+                assert (
+                    connection.execute(text("SELECT address FROM buildings")).scalar()
+                    == "New address"
+                )
+                migration.module.downgrade()
+                assert "address" not in {
+                    column["name"]
+                    for column in inspect(connection).get_columns("buildings")
+                }
+                assert (
+                    connection.execute(text("SELECT name FROM buildings")).scalar()
+                    == "Existing building"
+                )
+    finally:
+        engine.dispose()
 
 
 def test_building_update_rejects_null_name() -> None:
@@ -650,6 +711,41 @@ def test_building_routes_cover_crud(api_client: TestClient) -> None:
     assert delete_response.status_code == 204
     assert delete_response.content == b""
     assert api_client.get(f"/buildings/{building_id}").status_code == 404
+
+
+@pytest.mark.parametrize(
+    "metadata", [{}, {"address": None}, {"address": "Route de la Sorge 1"}]
+)
+def test_building_address_persists_and_can_be_cleared(
+    api_client: TestClient, metadata: dict[str, object]
+) -> None:
+    response = api_client.post("/buildings", json=metadata)
+    assert response.status_code == 201
+    building = response.json()
+    path = f"/buildings/{building['id']}"
+    assert building["address"] == metadata.get("address")
+    assert api_client.get(path).json()["address"] == metadata.get("address")
+    assert api_client.get("/buildings").json()[0]["address"] == metadata.get("address")
+
+    updated = api_client.patch(path, json={"address": "Avenue Piccard 12"})
+    assert updated.status_code == 200
+    assert updated.json()["address"] == "Avenue Piccard 12"
+    assert updated.json()["updated_at"] != building["updated_at"]
+    assert api_client.get(path).json()["address"] == "Avenue Piccard 12"
+    assert api_client.get("/buildings").json()[0]["address"] == "Avenue Piccard 12"
+
+    renamed = api_client.patch(path, json={"name": "New name"})
+    assert renamed.status_code == 200
+    assert renamed.json()["address"] == "Avenue Piccard 12"
+    unchanged = api_client.patch(path, json={"address": "Avenue Piccard 12"})
+    assert unchanged.json()["updated_at"] == renamed.json()["updated_at"]
+
+    cleared = api_client.patch(path, json={"address": None})
+    assert cleared.status_code == 200
+    assert cleared.json()["address"] is None
+    assert cleared.json()["name"] == "New name"
+    assert api_client.get(path).json()["address"] is None
+    assert api_client.get("/buildings").json()[0]["address"] is None
 
 
 def test_building_locations_route_filters_and_serializes(

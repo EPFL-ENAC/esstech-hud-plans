@@ -1,6 +1,15 @@
 <template>
     <section aria-labelledby="reconstructions-title" :aria-busy="isLoading" class="q-mb-lg">
         <h2 id="reconstructions-title" class="text-h6 text-weight-bold q-mb-md">Reconstructions</h2>
+        <q-btn
+            label="New reconstruction"
+            icon="add"
+            color="primary"
+            class="full-width q-mb-md"
+            unelevated
+            no-caps
+            :to="{ path: '/capture/new', query: { buildingId } }"
+        />
 
         <q-banner v-if="state.error" class="bg-red-1 text-negative q-mb-md" role="alert">
             {{ data ? 'Could not refresh reconstructions.' : 'Could not load reconstructions.' }}
@@ -46,7 +55,7 @@
                             :reconstruction-id="reconstruction.id"
                             :active="expandedId === reconstruction.id"
                         />
-                        <section class="q-mt-lg" aria-label="Associated Plan">
+                        <section class="q-my-lg" aria-label="Associated Plan">
                             <h3 class="text-h6 text-weight-bold q-mt-none q-mb-md">
                                 Associated Plan
                             </h3>
@@ -121,6 +130,15 @@
                                 </q-tooltip>
                             </q-list>
                         </section>
+                        <q-btn
+                            label="Delete Capture"
+                            outline
+                            color="negative"
+                            class="full-width"
+                            unelevated
+                            no-caps
+                            disable
+                        />
                     </div>
                 </q-expansion-item>
             </q-list>
@@ -157,11 +175,12 @@ import { RECONSTRUCTIONS_PAGE_SIZE, useReconstructionsQuery } from 'src/queries/
 const props = defineProps<{ buildingId: string }>();
 const offset = ref(0);
 const expandedId = ref<string | null>(null);
-const { data, state, asyncStatus, refetch } = useReconstructionsQuery(
-    toRef(props, 'buildingId'),
-    offset,
-);
-const isLoading = computed(() => asyncStatus.value === 'loading');
+const {
+    data,
+    state,
+    refetch,
+    isForegroundLoading: isLoading,
+} = useReconstructionsQuery(toRef(props, 'buildingId'), offset);
 const reconstructions = computed(() => data.value?.slice(0, RECONSTRUCTIONS_PAGE_SIZE) ?? []);
 const hasNext = computed(() => (data.value?.length ?? 0) > RECONSTRUCTIONS_PAGE_SIZE);
 const page = computed({

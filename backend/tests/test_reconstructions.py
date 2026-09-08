@@ -1272,7 +1272,12 @@ def test_building_from_reconstruction_creates_linked_owned_records(
 
     monkeypatch.setattr(splat_workflow, "schedule_splat_generation", fake_schedule)
     metadata = (
-        {"name": "New hall", "latitude": 46.52, "longitude": 6.57}
+        {
+            "name": "New hall",
+            "address": "Route de la Sorge 1",
+            "latitude": 46.52,
+            "longitude": 6.57,
+        }
         if custom_settings
         else {}
     )
@@ -1294,6 +1299,7 @@ def test_building_from_reconstruction_creates_linked_owned_records(
     reconstruction = response.json()["reconstruction"]
     assert building["user_id"] == str(USER_ID)
     assert building["name"] == metadata.get("name", "")
+    assert building["address"] == metadata.get("address")
     assert building["latitude"] == metadata.get("latitude")
     assert building["longitude"] == metadata.get("longitude")
     assert reconstruction["building_id"] == building["id"]

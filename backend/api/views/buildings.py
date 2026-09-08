@@ -125,7 +125,7 @@ async def create_building_from_reconstruction(
     building: Annotated[
         str,
         Form(
-            description="JSON-encoded BuildingCreate: name, latitude, longitude. "
+            description="JSON-encoded BuildingCreate: name, address, latitude, longitude. "
             "Use {} for an unnamed building without coordinates."
         ),
     ],

@@ -32,6 +32,7 @@
                 <h1 class="building-name text-h6 text-weight-bold q-mt-none">
                     {{ buildingName }}
                 </h1>
+                <p v-if="building.address" class="building-name">{{ building.address }}</p>
                 <div
                     v-if="building.latitude !== null && building.longitude !== null"
                     class="row wrap items-center q-gutter-sm"
@@ -44,38 +45,24 @@
                     </q-chip>
                 </div>
                 <p v-else class="text-grey-7">Coordinates not set</p>
+                <building-location-map
+                    class="q-my-md"
+                    :latitude="building.latitude"
+                    :longitude="building.longitude"
+                />
+
+                <q-btn
+                    label="Edit"
+                    icon="edit"
+                    color="primary"
+                    class="full-width q-mb-md"
+                    unelevated
+                    no-caps
+                    @click="$router.push(`/building/${buildingId}/data`)"
+                />
             </section>
 
-            <q-btn
-                label="New reconstruction"
-                icon="add"
-                color="primary"
-                class="full-width q-mb-md"
-                unelevated
-                no-caps
-                :to="{ path: '/capture/new', query: { buildingId } }"
-            />
-
             <building-reconstructions :key="buildingId" :building-id="buildingId" />
-
-            <q-btn
-                label="Create Building Data and Report"
-                color="primary"
-                class="full-width q-mb-md"
-                unelevated
-                no-caps
-                @click="$router.push(`/building/${buildingId}/data`)"
-            />
-
-            <q-btn
-                label="Delete Capture"
-                outline
-                color="negative"
-                class="full-width"
-                unelevated
-                no-caps
-                disable
-            />
         </template>
     </q-page>
 </template>
@@ -85,6 +72,7 @@ import { computed } from 'vue';
 import { useRoute } from 'vue-router';
 import PageHeader from 'src/components/PageHeader.vue';
 import BuildingReconstructions from 'src/components/BuildingReconstructions.vue';
+import BuildingLocationMap from 'src/components/BuildingLocationMap.vue';
 import { ApiError } from 'src/lib/buildings';
 import { useBuildingQuery } from 'src/queries/buildings';
 

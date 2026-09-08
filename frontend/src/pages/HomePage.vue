@@ -52,7 +52,17 @@
             </div>
         </section>
 
-        <my-buildings-list />
+        <section class="q-px-md q-pt-md q-mb-lg">
+            <h2 class="text-h6 text-weight-bold q-mb-md q-px-md">In Progress</h2>
+
+            <my-buildings-list :reconstruction-status="'processing'" />
+        </section>
+
+        <section class="q-px-md q-pt-md q-mb-lg">
+            <h2 class="text-h6 text-weight-bold q-mb-md q-px-md">Recent</h2>
+
+            <my-buildings-list :reconstruction-status="'idle'" />
+        </section>
     </q-page>
 </template>
 

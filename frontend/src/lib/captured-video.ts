@@ -1,3 +1,11 @@
+export interface CaptureLocation {
+    latitude: number;
+    longitude: number;
+    accuracyMeters: number;
+    /** Unix timestamp in milliseconds, supplied by the location reading. */
+    timestamp: number;
+}
+
 export interface RecordedVideo {
     blob: Blob;
     durationSeconds: number;
@@ -6,9 +14,13 @@ export interface RecordedVideo {
 export interface CapturedVideo {
     file: File;
     durationSeconds: number;
+    location: CaptureLocation | null;
 }
 
-export function toCapturedVideo(recording: RecordedVideo): CapturedVideo {
+export function toCapturedVideo(
+    recording: RecordedVideo,
+    location: CaptureLocation | null,
+): CapturedVideo {
     const mimeType = recording.blob.type.split(';')[0]?.trim().toLowerCase();
     const extensions: Record<string, string> = {
         'video/webm': 'webm',
@@ -25,5 +37,6 @@ export function toCapturedVideo(recording: RecordedVideo): CapturedVideo {
             type: recording.blob.type,
         }),
         durationSeconds: recording.durationSeconds,
+        location,
     };
 }

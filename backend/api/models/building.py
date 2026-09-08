@@ -24,6 +24,7 @@ class BuildingCreate(BaseModel):
     """Values accepted when creating a building."""
 
     name: str = ""
+    address: str | None = None
     latitude: float | None = PydanticField(default=None, ge=-90, le=90)
     longitude: float | None = PydanticField(default=None, ge=-180, le=180)
 
@@ -38,6 +39,7 @@ class BuildingUpdate(BaseModel):
     """Mutable building fields, with omission representing no change."""
 
     name: str | None = None
+    address: str | None = None
     latitude: float | None = PydanticField(default=None, ge=-90, le=90)
     longitude: float | None = PydanticField(default=None, ge=-180, le=180)
 
@@ -63,6 +65,7 @@ class BuildingRead(BaseModel):
     id: UUID
     user_id: UUID
     name: str
+    address: str | None
     latitude: float | None
     longitude: float | None
     created_at: datetime
@@ -145,6 +148,7 @@ class Building(SQLModel, table=True):  # type: ignore[call-arg]
         index=True,
     )
     name: str
+    address: str | None = None
     latitude: float | None = None
     longitude: float | None = None
     created_at: datetime = Field(

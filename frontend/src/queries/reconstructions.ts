@@ -42,6 +42,39 @@ export function useReconstructionsQuery(buildingId: Ref<string>, offset: Ref<num
         refetchOnWindowFocus: true,
     });
 
+    const isPolling = ref(false);
+    let pollingGeneration = 0;
+    const isForegroundLoading = computed(() => query.isLoading.value && !isPolling.value);
+
+    function resetPolling() {
+        pollingGeneration++;
+        isPolling.value = false;
+    }
+
+    watch([buildingId, options], resetPolling, { flush: 'sync' });
+
+    const refetch: typeof query.refetch = (throwOnError) => {
+        resetPolling();
+        return query.refetch(throwOnError);
+    };
+    const refresh: typeof query.refresh = (throwOnError) => {
+        resetPolling();
+        return query.refresh(throwOnError);
+    };
+
+    async function poll() {
+        if (query.isLoading.value) return;
+
+        const generation = ++pollingGeneration;
+        isPolling.value = true;
+        try {
+            await query.refetch();
+        } finally {
+            // A previous page's poll must not clear a newer poll's marker.
+            if (generation === pollingGeneration) isPolling.value = false;
+        }
+    }
+
     const shouldPoll = computed(
         () =>
             enabled.value &&
@@ -59,12 +92,12 @@ export function useReconstructionsQuery(buildingId: Ref<string>, offset: Ref<num
     }
     watch(
         shouldPoll,
-        (poll) => {
+        (shouldStartPolling) => {
             stopPolling();
-            if (poll) {
+            if (shouldStartPolling) {
                 pollingTimer = setInterval(() => {
                     if (shouldPoll.value && query.asyncStatus.value !== 'loading') {
-                        void query.refetch();
+                        void poll();
                     }
                 }, 5_000);
             }
@@ -78,7 +111,7 @@ export function useReconstructionsQuery(buildingId: Ref<string>, offset: Ref<num
     onMounted(() => document.addEventListener('visibilitychange', updateVisibility));
     onActivated(() => {
         active.value = true;
-        if (enabled.value) void query.refresh();
+        if (enabled.value) void refresh();
     });
     onDeactivated(() => {
         active.value = false;
@@ -88,7 +121,7 @@ export function useReconstructionsQuery(buildingId: Ref<string>, offset: Ref<num
         stopPolling();
         document.removeEventListener('visibilitychange', updateVisibility);
     });
-    return query;
+    return { ...query, isForegroundLoading, refetch, refresh };
 }
 
 export function useReconstructionVideoQuery(

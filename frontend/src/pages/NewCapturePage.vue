@@ -89,6 +89,7 @@ const {
 const navigationError = ref('');
 const submissionError = computed(() => navigationError.value || mutationError.value);
 
+const capturedVideo = shallowRef(useCaptureStore().takeVideo());
 const buildingSelection = ref<BuildingSelection>({ buildingId: '' });
 const hasValidBuilding = ref(false);
 watch(
@@ -98,7 +99,11 @@ watch(
             buildingId === undefined
                 ? {
                       buildingId: null,
-                      building: { name: 'Building 1', latitude: null, longitude: null },
+                      building: {
+                          name: 'Building 1',
+                          latitude: capturedVideo.value?.location?.latitude ?? null,
+                          longitude: capturedVideo.value?.location?.longitude ?? null,
+                      },
                   }
                 : { buildingId: typeof buildingId === 'string' ? buildingId : '' };
     },
@@ -111,7 +116,6 @@ const advancedSettings = ref(makeDefaultReconstructionSettings());
 const hasValidSettings = computed(
     () => preset.value !== 'advanced' || isValidReconstructionSettings(advancedSettings.value),
 );
-const capturedVideo = shallowRef(useCaptureStore().takeVideo());
 const videoFile = ref<File | null>(capturedVideo.value?.file ?? null);
 const fallbackDurationSeconds = computed(() =>
     capturedVideo.value && videoFile.value === capturedVideo.value.file

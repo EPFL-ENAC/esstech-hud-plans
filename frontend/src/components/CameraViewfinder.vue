@@ -223,7 +223,10 @@ function startRecording(): void {
                 failRecording('No video was recorded. Please record again.');
                 return;
             }
-            session.stop.resolve({ blob, durationSeconds: session.stop.durationSeconds });
+            session.stop.resolve({
+                blob,
+                durationSeconds: session.stop.durationSeconds,
+            });
             clearRecording();
         };
         recorder.start();
