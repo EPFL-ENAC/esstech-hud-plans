@@ -1,5 +1,5 @@
 <template>
-    <section aria-label="Camera viewfinder" :aria-busy="state === 'requesting'">
+    <section :aria-label="t('capture.camera.viewfinder')" :aria-busy="state === 'requesting'">
         <q-select
             v-if="cameras.length"
             :model-value="selectedCameraId"
@@ -7,8 +7,8 @@
             emit-value
             map-options
             outlined
-            label="Camera"
-            aria-label="Camera"
+            :label="t('capture.camera.label')"
+            :aria-label="t('capture.camera.label')"
             class="q-mb-md"
             :disable="state === 'requesting' || isRecording || isStopping"
             :loading="loadingCameras"
@@ -21,7 +21,7 @@
             <template #action>
                 <q-btn
                     flat
-                    label="Refresh cameras"
+                    :label="t('capture.camera.refresh')"
                     :disable="loadingCameras"
                     @click="refreshCameras"
                 />
@@ -35,7 +35,7 @@
             class="bg-red-1 text-negative q-mb-md"
             role="alert"
         >
-            Video recording is not supported by this browser. Try another browser.
+            {{ t('capture.camera.recordingUnsupported') }}
         </q-banner>
         <q-card flat bordered square class="camera-viewfinder bg-black text-white">
             <video
@@ -43,7 +43,7 @@
                 autoplay
                 muted
                 playsinline
-                aria-label="Live camera preview"
+                :aria-label="t('capture.camera.livePreview')"
                 class="camera-video"
             />
 
@@ -53,14 +53,14 @@
             >
                 <template v-if="state === 'requesting'">
                     <q-spinner color="primary" size="32px" class="q-mb-sm" />
-                    <span role="status">Waiting for camera access…</span>
+                    <span role="status">{{ t('capture.camera.waitingForAccess') }}</span>
                 </template>
                 <template v-else-if="state === 'error'">
                     <q-icon name="videocam_off" size="32px" class="q-mb-sm" />
                     <p role="alert">{{ errorMessage }}</p>
                     <q-btn
                         v-if="canRetry"
-                        label="Retry"
+                        :label="t('common.retry')"
                         color="primary"
                         unelevated
                         no-caps
@@ -71,13 +71,13 @@
                     <p role="status">
                         {{
                             needsPlaybackGesture
-                                ? 'Tap to start the camera preview.'
-                                : 'Camera paused.'
+                                ? t('capture.camera.tapToStart')
+                                : t('capture.camera.paused')
                         }}
                     </p>
                     <q-btn
                         v-if="needsPlaybackGesture"
-                        label="Start preview"
+                        :label="t('capture.camera.startPreview')"
                         color="primary"
                         unelevated
                         no-caps
@@ -101,6 +101,9 @@ import {
     ref,
 } from 'vue';
 import type { RecordedVideo } from 'src/lib/captured-video';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 type CameraState = 'requesting' | 'live' | 'paused' | 'error';
 
@@ -116,7 +119,13 @@ interface RecordingSession {
     } | null;
 }
 
-const cameras = ref<{ label: string; value: string }[]>([]);
+const cameraDevices = ref<MediaDeviceInfo[]>([]);
+const cameras = computed(() =>
+    cameraDevices.value.map((device, index) => ({
+        label: device.label.trim() || t('capture.camera.numbered', { number: index + 1 }),
+        value: device.deviceId,
+    })),
+);
 const selectedCameraId = ref<string | null>(null);
 const loadingCameras = ref(false);
 const cameraListError = ref('');
@@ -187,7 +196,7 @@ function startRecording(): void {
         !isVisible() ||
         !stream?.getVideoTracks().some((track) => track.readyState === 'live')
     ) {
-        const message = 'The camera is not ready to record.';
+        const message = t('capture.camera.notReady');
         recordingError.value = message;
         throw new Error(message);
     }
@@ -207,20 +216,20 @@ function startRecording(): void {
         };
         recorder.onerror = () => {
             if (recording === session) {
-                failRecording('Recording failed. Please start a new recording.');
+                failRecording(t('capture.camera.recordingFailed'));
             }
         };
         recorder.onstop = () => {
             if (recording !== session) return;
             if (!session.stop) {
-                failRecording('Recording was interrupted and discarded. Please record again.');
+                failRecording(t('capture.camera.recordingInterrupted'));
                 return;
             }
             const blob = new Blob(session.chunks, {
                 type: recorder.mimeType || session.chunks[0]?.type || '',
             });
             if (blob.size === 0 || session.stop.durationSeconds <= 0) {
-                failRecording('No video was recorded. Please record again.');
+                failRecording(t('capture.camera.emptyRecording'));
                 return;
             }
             session.stop.resolve({
@@ -233,7 +242,7 @@ function startRecording(): void {
         session.startedAt = performance.now();
         isRecording.value = true;
     } catch {
-        throw failRecording('Unable to start recording. Please try again.');
+        throw failRecording(t('capture.camera.startRecordingFailed'));
     }
 }
 
@@ -241,7 +250,7 @@ function stopRecording(): Promise<RecordedVideo> {
     const session = recording;
     if (session?.stop) return session.stop.promise;
     if (!session || !isRecording.value) {
-        recordingError.value = 'There is no active recording to stop.';
+        recordingError.value = t('capture.camera.noActiveRecording');
         return Promise.reject(new Error(recordingError.value));
     }
 
@@ -258,14 +267,14 @@ function stopRecording(): Promise<RecordedVideo> {
     try {
         session.recorder.stop();
     } catch {
-        failRecording('Unable to finish recording. Please record again.');
+        failRecording(t('capture.camera.finishRecordingFailed'));
     }
     return promise;
 }
 
 function releaseCamera(): void {
     if (recording) {
-        failRecording('Recording was interrupted and discarded. Please record again.');
+        failRecording(t('capture.camera.recordingInterrupted'));
     }
     if (state.value === 'live') state.value = 'paused';
     generation++;
@@ -293,12 +302,9 @@ async function refreshCameras(): Promise<void> {
     try {
         const devices = await navigator.mediaDevices.enumerateDevices();
         if (requestGeneration !== cameraListGeneration || !isVisible()) return;
-        cameras.value = devices
-            .filter((device) => device.kind === 'videoinput' && device.deviceId)
-            .map((device, index) => ({
-                label: device.label.trim() || `Camera ${index + 1}`,
-                value: device.deviceId,
-            }));
+        cameraDevices.value = devices.filter(
+            (device) => device.kind === 'videoinput' && device.deviceId,
+        );
         cameraListError.value = '';
         if (
             selectedCameraId.value &&
@@ -306,14 +312,12 @@ async function refreshCameras(): Promise<void> {
         ) {
             selectedCameraId.value = null;
             if (stream) {
-                showError(
-                    'The selected camera is no longer available. Choose another camera or try again.',
-                );
+                showError(t('capture.camera.selectedUnavailable'));
             }
         }
     } catch {
         if (requestGeneration === cameraListGeneration && isVisible()) {
-            cameraListError.value = 'Could not load available cameras.';
+            cameraListError.value = t('capture.camera.loadFailed');
         }
     } finally {
         if (requestGeneration === cameraListGeneration) loadingCameras.value = false;
@@ -350,15 +354,15 @@ function cameraErrorMessage(error: unknown): string {
     switch (error instanceof DOMException ? error.name : '') {
         case 'NotAllowedError':
         case 'SecurityError':
-            return 'Camera access was not allowed. Allow camera access in your browser or device settings, then try again.';
+            return t('capture.camera.accessDenied');
         case 'NotFoundError':
         case 'OverconstrainedError':
-            return 'No available camera was found. Connect a camera and try again.';
+            return t('capture.camera.notFound');
         case 'NotReadableError':
         case 'AbortError':
-            return 'The camera could not be opened. It may be in use by another app. Close other camera apps and try again.';
+            return t('capture.camera.openFailed');
         default:
-            return 'Unable to start the camera. Please try again.';
+            return t('capture.camera.startFailed');
     }
 }
 
@@ -379,7 +383,7 @@ async function playPreview(): Promise<void> {
             needsPlaybackGesture.value = true;
             state.value = 'paused';
         } else {
-            showError('The camera preview could not be played. Please try again.');
+            showError(t('capture.camera.previewFailed'));
         }
     } finally {
         if (playbackGeneration === generation) startingPreview.value = false;
@@ -389,17 +393,11 @@ async function playPreview(): Promise<void> {
 async function startCamera(): Promise<void> {
     if (!isVisible() || pendingRequest || stream) return;
     if (!window.isSecureContext) {
-        showError(
-            'Camera access requires HTTPS or localhost. Open this page over a secure connection.',
-            false,
-        );
+        showError(t('capture.camera.secureConnectionRequired'), false);
         return;
     }
     if (!navigator.mediaDevices?.getUserMedia) {
-        showError(
-            'Camera access is not supported by this browser. Try a browser with camera support.',
-            false,
-        );
+        showError(t('capture.camera.accessUnsupported'), false);
         return;
     }
 
@@ -448,7 +446,7 @@ async function startCamera(): Promise<void> {
 }
 
 function onTrackEnded(): void {
-    showError('The camera preview was interrupted. Reconnect or allow the camera, then try again.');
+    showError(t('capture.camera.previewInterrupted'));
     void refreshCameras();
 }
 

@@ -1,3 +1,4 @@
+import { i18n } from 'src/i18n/instance';
 import { baseUrl } from 'boot/api';
 import { authFetch } from 'src/lib/auth';
 
@@ -332,15 +333,13 @@ export function getReconstructionSubmissionErrorMessage(error: unknown): string 
         const detail = isRecord(error.body) ? error.body.detail : null;
         if (typeof detail === 'string') return detail;
         if (isRecord(detail) && typeof detail.message === 'string') return detail.message;
-        if (error.status === 422)
-            return 'Check the video and reconstruction settings, then try again.';
-        if (error.status === 401)
-            return 'Your session has expired. Sign in again to submit the capture.';
+        if (error.status === 422) return i18n.global.t('reconstructions.errors.invalidSettings');
+        if (error.status === 401) return i18n.global.t('reconstructions.errors.sessionExpired');
         if (error.status === 404)
-            return 'This building is no longer available. Choose another building or create a new one.';
-        return 'Could not submit the reconstruction. Please try again.';
+            return i18n.global.t('reconstructions.errors.buildingUnavailable');
+        return i18n.global.t('reconstructions.errors.submitFailed');
     }
-    return 'Could not reach the server. Check your connection and try again.';
+    return i18n.global.t('errors.connection');
 }
 
 export function getFailedReconstructionId(error: unknown): string | null {

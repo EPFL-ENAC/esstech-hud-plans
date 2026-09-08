@@ -1,3 +1,5 @@
+import { i18n } from 'src/i18n/instance';
+
 export interface CaptureLocation {
     latitude: number;
     longitude: number;
@@ -30,7 +32,7 @@ export function toCapturedVideo(
         'video/x-matroska': 'mkv',
     };
     const extension = mimeType ? extensions[mimeType] : undefined;
-    if (!extension) throw new Error('The recorded video format is not supported.');
+    if (!extension) throw new Error(i18n.global.t('capture.video.recordedFormatUnsupported'));
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     return {
         file: new File([recording.blob], `capture-${timestamp}.${extension}`, {

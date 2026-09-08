@@ -8,7 +8,7 @@
                 no-caps
                 color="primary"
                 icon="arrow_back"
-                label="Back"
+                :label="t('common.back')"
                 @click="router.back()"
             />
             <q-toolbar-title class="text-subtitle1 text-weight-medium">
@@ -21,6 +21,9 @@
 
 <script setup lang="ts">
 import { useRouter } from 'vue-router';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 withDefaults(
     defineProps<{

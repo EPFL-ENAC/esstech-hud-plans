@@ -1,6 +1,12 @@
 <template>
     <div class="q-gutter-y-md">
-        <q-file v-model="file" outlined clearable accept="video/*" label="Choose a video">
+        <q-file
+            v-model="file"
+            outlined
+            clearable
+            accept="video/*"
+            :label="t('capture.video.choose')"
+        >
             <template #prepend><q-icon name="movie" /></template>
         </q-file>
 
@@ -11,7 +17,7 @@
             controls
             playsinline
             preload="metadata"
-            aria-label="Selected video preview"
+            :aria-label="t('capture.video.preview')"
             class="video-preview"
             @loadedmetadata="onMetadataLoaded"
             @error="onPreviewError"
@@ -34,6 +40,9 @@ export type { VideoMetadata } from './VideoPicker.types';
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue';
 import type { VideoMetadata } from './VideoPicker.types';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 const props = defineProps<{
     fallbackDurationSeconds?: number | undefined;
@@ -85,21 +94,20 @@ function onMetadataLoaded(event: Event): void {
             : props.fallbackDurationSeconds;
     if (duration === undefined || !Number.isFinite(duration) || duration <= 0) {
         updateMetadata(null);
-        errorMessage.value = 'Unable to read the video duration. Please choose another video.';
+        errorMessage.value = t('capture.video.durationFailed');
         return;
     }
 
     updateMetadata({
         duration: formatDuration(duration),
-        size: `${(file.value.size / 1_000_000).toFixed(2)} MB`,
+        size: t('capture.video.size', { size: (file.value.size / 1_000_000).toFixed(2) }),
     });
 }
 
 function onPreviewError(event: Event): void {
     if (!currentVideo(event)) return;
     updateMetadata(null);
-    errorMessage.value =
-        'This video could not be played. Please choose a video supported by your browser.';
+    errorMessage.value = t('capture.video.playbackFailed');
 }
 
 watch(

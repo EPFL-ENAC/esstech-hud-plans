@@ -1,6 +1,6 @@
 <template>
     <q-page class="bg-white text-dark q-pa-md q-pb-xl">
-        <h1 class="text-h5 text-weight-bold q-mb-lg">How would you like to capture?</h1>
+        <h1 class="text-h5 text-weight-bold q-mb-lg">{{ t('capture.chooseMethod') }}</h1>
 
         <q-list class="q-gutter-y-md">
             <q-card
@@ -24,10 +24,10 @@
                         </q-avatar>
                     </q-item-section>
                     <q-item-section>
-                        <q-item-label class="text-subtitle1 text-weight-medium"
-                            >Capture video</q-item-label
-                        >
-                        <q-item-label caption>Use your camera</q-item-label>
+                        <q-item-label class="text-subtitle1 text-weight-medium">{{
+                            t('capture.captureVideo')
+                        }}</q-item-label>
+                        <q-item-label caption>{{ t('capture.useCamera') }}</q-item-label>
                     </q-item-section>
                     <q-item-section side>
                         <q-icon name="chevron_right" size="20px" color="dark" />
@@ -56,10 +56,10 @@
                         </q-avatar>
                     </q-item-section>
                     <q-item-section>
-                        <q-item-label class="text-subtitle1 text-weight-medium"
-                            >Upload from device</q-item-label
-                        >
-                        <q-item-label caption>Choose an existing video file</q-item-label>
+                        <q-item-label class="text-subtitle1 text-weight-medium">{{
+                            t('capture.upload')
+                        }}</q-item-label>
+                        <q-item-label caption>{{ t('capture.chooseExistingVideo') }}</q-item-label>
                     </q-item-section>
                     <q-item-section side>
                         <q-icon name="chevron_right" size="20px" color="dark" />
@@ -71,5 +71,7 @@
 </template>
 
 <script setup lang="ts">
-//
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 </script>

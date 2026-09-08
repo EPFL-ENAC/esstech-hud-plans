@@ -1,25 +1,6 @@
 export type RenderMode = 'default' | 'mip';
 export type AlphaMode = 'masked' | 'transparent';
 
-// Options with descriptions
-export const renderModeOptions = [
-    { value: 'default', label: 'Default', desc: 'Standard rasterization; fastest performance.' },
-    {
-        value: 'mip',
-        label: 'Mip',
-        desc: 'Anti-aliased rendering; reduces flickering on small details.',
-    },
-];
-
-export const alphaModeOptions = [
-    {
-        value: 'transparent',
-        label: 'Transparent',
-        desc: 'Uses alpha channel for semi-transparency (glass, smoke).',
-    },
-    { value: 'masked', label: 'Masked', desc: 'Binary visibility; treats alpha as a hard cutout.' },
-];
-
 export interface BrushTrainingConfig {
     // Core Training
     totalSteps: number;

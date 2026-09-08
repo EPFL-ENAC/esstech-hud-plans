@@ -3,7 +3,7 @@
         class="bg-white text-dark q-px-md"
         style="padding-top: 64px; display: flex; flex-direction: column; align-items: center"
     >
-        <page-header title="Processing" />
+        <page-header :title="t('reconstructions.status.running')" />
 
         <div class="column items-center text-center q-mt-lg">
             <q-circular-progress
@@ -20,12 +20,12 @@
             </q-circular-progress>
 
             <h1 class="text-h6 text-weight-bold q-mb-sm q-mt-lg">
-                Processing - {{ building?.name ?? 'Building' }}
+                {{ t('processing.title', { name: building?.name ?? t('buildings.title') }) }}
             </h1>
             <p class="text-body2 text-grey-6 q-mb-xl">{{ uploadedSize }} / {{ totalSize }}</p>
 
             <q-btn
-                label="Cancel Processing"
+                :label="t('processing.cancelButton')"
                 outline
                 color="negative"
                 class="full-width q-mb-md"
@@ -35,8 +35,7 @@
             />
 
             <q-banner rounded class="bg-secondary text-primary text-left q-pa-md">
-                Processing takes 10-60 min after upload. You'll receive a push notification when
-                your plan is ready.
+                {{ t('processing.notice') }}
             </q-banner>
         </div>
     </q-page>
@@ -48,6 +47,9 @@ import { useRoute, useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import { useBuildingsStore } from 'src/stores/buildings';
 import PageHeader from 'src/components/PageHeader.vue';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 const route = useRoute();
 const router = useRouter();
@@ -84,7 +86,7 @@ function startSimulation() {
             }
             $q.notify({
                 type: 'positive',
-                message: `${current.name} is ready.`,
+                message: t('processing.ready', { name: current.name }),
                 position: 'top',
             });
             void router.replace(`/building/${current.id}`);
@@ -93,17 +95,17 @@ function startSimulation() {
 }
 
 function confirmCancel() {
-    const name = building.value?.name ?? 'this capture';
+    const name = building.value?.name ?? t('processing.thisCapture');
     $q.dialog({
-        title: 'Cancel processing',
-        message: `Are you sure you want to cancel processing for ${name}? The uploaded video will be deleted.`,
+        title: t('processing.cancelTitle'),
+        message: t('processing.cancelConfirmation', { name }),
         cancel: true,
         persistent: true,
     }).onOk(() => {
         buildingsStore.remove(buildingId.value);
         $q.notify({
             type: 'warning',
-            message: 'Processing cancelled.',
+            message: t('processing.cancelled'),
             position: 'top',
         });
         void router.replace('/library');

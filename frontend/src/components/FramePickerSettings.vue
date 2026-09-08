@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { type FramePickerConfig, makeDefaultFramePickerConfig } from 'src/lib/splats/framePicker';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false });
 
@@ -18,27 +21,33 @@ const resetToDefaults = () => {
         <q-card-section>
             <div class="row items-center no-wrap">
                 <div class="col">
-                    <div class="text-h6 text-weight-light">Frame Selection</div>
+                    <div class="text-h6 text-weight-light">
+                        {{ t('settings.framePicker.title') }}
+                    </div>
                     <div class="text-caption text-grey">
-                        Filter and select the best frames based on quality and distance.
+                        {{ t('settings.framePicker.description') }}
                     </div>
                 </div>
-                <q-toggle v-model="config.enabled" label="Enabled" left-label />
+                <q-toggle
+                    v-model="config.enabled"
+                    :label="t('settings.framePicker.enabled')"
+                    left-label
+                />
             </div>
         </q-card-section>
 
         <q-separator />
 
         <q-card-section class="q-gutter-y-md" :class="{ 'opacity-50': !config.enabled }">
-            <div class="text-subtitle2 text-primary">Selection</div>
+            <div class="text-subtitle2 text-primary">{{ t('settings.framePicker.selection') }}</div>
             <div class="row q-col-gutter-md">
                 <div class="col-12 col-sm-6">
                     <q-input
                         v-model.number="config.min_fps"
                         type="number"
                         min="1"
-                        label="Minimum FPS"
-                        hint="Minimum selected-frame frequency"
+                        :label="t('settings.framePicker.minimumFps')"
+                        :hint="t('settings.framePicker.minimumFpsHint')"
                         outlined
                         :dense="!embedded"
                         :disable="!config.enabled"
@@ -48,8 +57,8 @@ const resetToDefaults = () => {
                     <q-input
                         v-model.number="config.distance_threshold"
                         type="number"
-                        label="Distance Threshold"
-                        hint="Minimum movement between frames"
+                        :label="t('settings.framePicker.distanceThreshold')"
+                        :hint="t('settings.framePicker.distanceHint')"
                         outlined
                         :dense="!embedded"
                         min="0"
@@ -61,10 +70,12 @@ const resetToDefaults = () => {
 
             <q-separator inset class="q-my-sm" />
 
-            <div class="text-subtitle2 text-primary">Motion Blur</div>
+            <div class="text-subtitle2 text-primary">
+                {{ t('settings.framePicker.motionBlur') }}
+            </div>
             <q-toggle
                 v-model="config.remove_outliers"
-                label="Remove sharpness outliers"
+                :label="t('settings.framePicker.removeOutliers')"
                 :disable="!config.enabled"
             />
 
@@ -74,8 +85,8 @@ const resetToDefaults = () => {
                 min="0"
                 max="1"
                 step="0.05"
-                label="Sharpness Outlier Ratio"
-                hint="Discard a frame when its sharpness falls below this fraction of its neighbors"
+                :label="t('settings.framePicker.sharpnessRatio')"
+                :hint="t('settings.framePicker.sharpnessHint')"
                 outlined
                 :dense="!embedded"
                 :disable="!config.enabled || !config.remove_outliers"
@@ -84,7 +95,13 @@ const resetToDefaults = () => {
 
         <q-separator />
 
-        <q-btn flat no-caps label="Reset to Defaults" color="grey-7" @click="resetToDefaults" />
+        <q-btn
+            flat
+            no-caps
+            :label="t('settings.framePicker.reset')"
+            color="grey-7"
+            @click="resetToDefaults"
+        />
     </q-card>
 </template>
 

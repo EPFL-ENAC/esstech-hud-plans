@@ -1,9 +1,9 @@
 <template>
     <section aria-labelledby="my-buildings-title" :aria-busy="isLoading">
         <q-banner v-if="state.error" class="bg-red-1 text-negative q-mx-md q-mb-md" role="alert">
-            {{ data ? 'Could not refresh your buildings.' : 'Could not load your buildings.' }}
+            {{ data ? t('buildings.list.refreshFailed') : t('buildings.list.loadFailed') }}
             <template #action>
-                <q-btn flat label="Retry" :disable="isLoading" @click="refetch()" />
+                <q-btn flat :label="t('common.retry')" :disable="isLoading" @click="refetch()" />
             </template>
         </q-banner>
 
@@ -22,7 +22,7 @@
         <template v-else-if="data">
             <div v-if="isLoading" class="q-px-md q-pb-sm text-grey-7" role="status">
                 <q-spinner color="primary" class="q-mr-sm" />
-                Refreshing buildings…
+                {{ t('buildings.list.refreshing') }}
             </div>
             <q-list v-if="buildings.length" separator class="my-buildings-list">
                 <q-item
@@ -44,10 +44,14 @@
                     </q-item-section>
                     <q-item-section>
                         <q-item-label class="building-name text-subtitle1 text-weight-medium">
-                            {{ building.name.trim() || 'Untitled building' }}
+                            {{ building.name.trim() || t('buildings.untitled') }}
                         </q-item-label>
                         <q-item-label caption>
-                            Created {{ formatCreatedAt(building.created_at) }}
+                            {{
+                                t('buildings.list.created', {
+                                    date: formatCreatedAt(building.created_at),
+                                })
+                            }}
                         </q-item-label>
                         <q-item-label>
                             <reconstruction-status-chip
@@ -67,7 +71,7 @@
 
         <nav
             v-if="(data && data.length > 0) || offset > 0"
-            aria-label="Building list pagination"
+            :aria-label="t('buildings.list.pagination')"
             class="row justify-center q-pa-md"
         >
             <q-pagination
@@ -90,6 +94,9 @@ import FloorPlanThumb from 'src/components/FloorPlanThumb.vue';
 import ReconstructionStatusChip from 'src/components/ReconstructionStatusChip.vue';
 import type { ReconstructionStatusFilter } from 'src/lib/buildings';
 import { MY_BUILDINGS_PAGE_SIZE, useMyBuildingsQuery } from 'src/queries/buildings';
+import { useI18n } from 'vue-i18n';
+
+const { t, locale } = useI18n();
 
 const props = defineProps<{
     search?: string | null;
@@ -111,8 +118,8 @@ const {
     isForegroundLoading: isLoading,
 } = useMyBuildingsQuery(offset, () => props.reconstructionStatus, normalizedSearch);
 const emptyMessage = computed(() => {
-    if (offset.value > 0) return 'No buildings on this page.';
-    return normalizedSearch.value ? 'No buildings match your search.' : 'No buildings yet.';
+    if (offset.value > 0) return t('buildings.list.emptyPage');
+    return normalizedSearch.value ? t('buildings.list.noMatches') : t('buildings.list.empty');
 });
 const buildings = computed(() => data.value?.slice(0, MY_BUILDINGS_PAGE_SIZE) ?? []);
 const hasNext = computed(() => (data.value?.length ?? 0) > MY_BUILDINGS_PAGE_SIZE);
@@ -122,14 +129,17 @@ const page = computed({
         offset.value = (value - 1) * MY_BUILDINGS_PAGE_SIZE;
     },
 });
-const dateFormatter = new Intl.DateTimeFormat(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-});
+const dateFormatter = computed(
+    () =>
+        new Intl.DateTimeFormat(locale.value, {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+        }),
+);
 
 function formatCreatedAt(value: string): string {
-    return dateFormatter.format(new Date(value));
+    return dateFormatter.value.format(new Date(value));
 }
 </script>
 

@@ -1,3 +1,4 @@
+import { i18n } from 'src/i18n/instance';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import type { SplatGenerationSettings } from 'src/lib/buildings';
@@ -125,7 +126,7 @@ export const useBuildingsStore = defineStore('buildings', () => {
             Pick<Building, 'name' | 'size' | 'duration'>,
     ): string {
         const id = `${Date.now()}`;
-        const recordedDate = new Date().toLocaleDateString('en-GB', {
+        const recordedDate = new Date().toLocaleDateString(i18n.global.locale.value, {
             day: '2-digit',
             month: '2-digit',
         });

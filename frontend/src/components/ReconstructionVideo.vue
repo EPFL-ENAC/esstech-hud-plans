@@ -1,17 +1,17 @@
 <template>
-    <section aria-label="Input video" class="q-gutter-y-sm">
-        <div class="text-subtitle2">Input video</div>
+    <section :aria-label="t('reconstructions.video.title')" class="q-gutter-y-sm">
+        <div class="text-subtitle2">{{ t('reconstructions.video.title') }}</div>
 
         <div v-if="loading" role="status" class="row items-center q-gutter-sm">
             <q-spinner color="primary" size="24px" />
-            <span>Loading video…</span>
-            <q-btn flat dense label="Cancel" @click="cancel" />
+            <span>{{ t('reconstructions.video.loading') }}</span>
+            <q-btn flat dense :label="t('common.cancel')" @click="cancel" />
         </div>
 
         <q-banner v-else-if="errorMessage" rounded class="bg-red-1 text-negative" role="alert">
             {{ errorMessage }}
             <template #action>
-                <q-btn flat color="negative" label="Retry" @click="retry" />
+                <q-btn flat color="negative" :label="t('common.retry')" @click="retry" />
             </template>
         </q-banner>
 
@@ -22,14 +22,21 @@
             controls
             playsinline
             preload="metadata"
-            aria-label="Reconstruction input video"
+            :aria-label="t('reconstructions.video.label')"
             class="reconstruction-video"
             @error="onPlaybackError"
         >
-            Your browser does not support video playback.
+            {{ t('reconstructions.video.unsupported') }}
         </video>
 
-        <q-btn v-else outline color="primary" icon="play_circle" label="Load video" @click="load" />
+        <q-btn
+            v-else
+            outline
+            color="primary"
+            icon="play_circle"
+            :label="t('reconstructions.video.load')"
+            @click="load"
+        />
     </section>
 </template>
 
@@ -37,6 +44,9 @@
 import { computed, onBeforeUnmount, ref, toRef, watch } from 'vue';
 import { ApiError } from 'src/lib/buildings';
 import { useReconstructionVideoQuery } from 'src/queries/reconstructions';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 const props = withDefaults(
     defineProps<{
@@ -61,11 +71,11 @@ const errorMessage = computed(() => {
     const error = query.error.value;
     if (!error || errorDismissed.value) return '';
     if (error instanceof ApiError && error.status === 404)
-        return 'The input video is not available.';
+        return t('reconstructions.video.unavailable');
     if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
-        return 'Unable to access this video. Please sign in again.';
+        return t('reconstructions.video.accessDenied');
     }
-    return 'Unable to load the video. Please try again.';
+    return t('reconstructions.video.loadFailed');
 });
 
 function releaseVideo(): void {
@@ -109,8 +119,7 @@ function cancel(): void {
 
 function onPlaybackError(): void {
     releaseVideo();
-    playbackError.value =
-        'This video could not be played. Its format may not be supported by your browser.';
+    playbackError.value = t('reconstructions.video.playbackFailed');
 }
 
 watch(

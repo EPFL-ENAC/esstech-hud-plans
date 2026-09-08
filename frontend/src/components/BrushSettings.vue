@@ -1,10 +1,34 @@
 <script setup lang="ts">
-import {
-    type BrushTrainingConfig,
-    makeDefaultBrushConfig,
-    renderModeOptions,
-    alphaModeOptions,
-} from '../lib/splats/brush';
+import { computed } from 'vue';
+import { type BrushTrainingConfig, makeDefaultBrushConfig } from '../lib/splats/brush';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
+
+const renderModeOptions = computed(() => [
+    {
+        value: 'default',
+        label: t('settings.brush.renderModes.default.label'),
+        desc: t('settings.brush.renderModes.default.description'),
+    },
+    {
+        value: 'mip',
+        label: t('settings.brush.renderModes.mip.label'),
+        desc: t('settings.brush.renderModes.mip.description'),
+    },
+]);
+const alphaModeOptions = computed(() => [
+    {
+        value: 'transparent',
+        label: t('settings.brush.alphaModes.transparent.label'),
+        desc: t('settings.brush.alphaModes.transparent.description'),
+    },
+    {
+        value: 'masked',
+        label: t('settings.brush.alphaModes.masked.label'),
+        desc: t('settings.brush.alphaModes.masked.description'),
+    },
+]);
 
 withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false });
 
@@ -20,9 +44,9 @@ const resetDefaults = () => {
 <template>
     <q-card flat :bordered="!embedded" :class="embedded ? 'embedded-settings' : 'q-pa-md q-mb-md'">
         <q-card-section>
-            <div class="text-h6 text-weight-light">Brush 3D Gaussian Splats Reconstruction</div>
+            <div class="text-h6 text-weight-light">{{ t('settings.brush.title') }}</div>
             <div class="text-caption text-grey">
-                Train a 3D Gaussian Splat model to reconstruct the scene.
+                {{ t('settings.brush.description') }}
             </div>
         </q-card-section>
 
@@ -30,13 +54,13 @@ const resetDefaults = () => {
 
         <q-card-section class="q-gutter-y-md">
             <!-- Training Core -->
-            <div class="text-subtitle2 text-primary">Core Training</div>
+            <div class="text-subtitle2 text-primary">{{ t('settings.brush.coreTraining') }}</div>
             <div class="row q-col-gutter-sm">
                 <div class="col-12 col-sm-6">
                     <q-input
                         v-model.number="config.totalSteps"
                         type="number"
-                        label="Total Steps"
+                        :label="t('settings.brush.totalSteps')"
                         outlined
                         :dense="!embedded"
                     />
@@ -45,7 +69,7 @@ const resetDefaults = () => {
                     <q-select
                         v-model="config.renderMode"
                         :options="renderModeOptions"
-                        label="Render Mode"
+                        :label="t('settings.brush.renderMode')"
                         emit-value
                         map-options
                         outlined
@@ -71,20 +95,20 @@ const resetDefaults = () => {
                 type="number"
                 outlined
                 :dense="!embedded"
-                label="SH Degree (Spherical Harmonics)"
+                :label="t('settings.brush.shDegree')"
                 class="q-mt-lg"
             />
 
             <!-- Refinement -->
             <q-separator />
-            <div class="text-subtitle2 text-primary">Refinement & Density</div>
+            <div class="text-subtitle2 text-primary">{{ t('settings.brush.refinement') }}</div>
 
             <div class="row q-col-gutter-sm">
                 <div class="col-12 col-sm-6">
                     <q-input
                         v-model.number="config.maxSplats"
                         type="number"
-                        label="Max Splats"
+                        :label="t('settings.brush.maxSplats')"
                         outlined
                         :dense="!embedded"
                     />
@@ -94,8 +118,8 @@ const resetDefaults = () => {
                         v-model.number="config.growthGradThreshold"
                         type="number"
                         step="0.001"
-                        label="Growth Gradient Threshold"
-                        hint="Lower = more aggressive densification"
+                        :label="t('settings.brush.growthThreshold')"
+                        :hint="t('settings.brush.growthHint')"
                         outlined
                         :dense="!embedded"
                     />
@@ -107,7 +131,7 @@ const resetDefaults = () => {
                     <q-input
                         v-model.number="config.refineEvery"
                         type="number"
-                        label="Refine Every (Steps)"
+                        :label="t('settings.brush.refineEvery')"
                         outlined
                         :dense="!embedded"
                     />
@@ -116,7 +140,7 @@ const resetDefaults = () => {
                     <q-input
                         v-model.number="config.growthStopIter"
                         type="number"
-                        label="Stop Growth At"
+                        :label="t('settings.brush.stopGrowth')"
                         outlined
                         :dense="!embedded"
                     />
@@ -124,12 +148,12 @@ const resetDefaults = () => {
             </div>
 
             <q-separator />
-            <div class="text-subtitle2 text-primary">Dataset & Performance</div>
+            <div class="text-subtitle2 text-primary">{{ t('settings.brush.dataset') }}</div>
 
             <q-select
                 v-model="config.alphaMode"
                 :options="alphaModeOptions"
-                label="Alpha Channel Mode"
+                :label="t('settings.brush.alphaMode')"
                 emit-value
                 map-options
                 outlined
@@ -150,7 +174,7 @@ const resetDefaults = () => {
                     <q-input
                         v-model.number="config.maxResolution"
                         type="number"
-                        label="Max Resolution"
+                        :label="t('settings.brush.maxResolution')"
                         outlined
                         :dense="!embedded"
                     />
@@ -159,7 +183,7 @@ const resetDefaults = () => {
                     <q-input
                         v-model.number="config.subsampleFrames"
                         type="number"
-                        label="Subsample Every Nth Frame"
+                        :label="t('settings.brush.subsampleFrames')"
                         outlined
                         :dense="!embedded"
                     />
@@ -167,13 +191,13 @@ const resetDefaults = () => {
             </div>
 
             <q-separator />
-            <div class="text-subtitle2 text-primary">Exports</div>
+            <div class="text-subtitle2 text-primary">{{ t('settings.brush.exports') }}</div>
 
             <q-input
                 v-model.number="config.exportEvery"
                 type="number"
                 min="1"
-                label="Export Every (Steps)"
+                :label="t('settings.brush.exportEvery')"
                 outlined
                 :dense="!embedded"
             />
@@ -181,7 +205,13 @@ const resetDefaults = () => {
 
         <q-separator />
 
-        <q-btn flat no-caps label="Reset Defaults" color="grey" @click="resetDefaults" />
+        <q-btn
+            flat
+            no-caps
+            :label="t('settings.brush.reset')"
+            color="grey"
+            @click="resetDefaults"
+        />
     </q-card>
 </template>
 

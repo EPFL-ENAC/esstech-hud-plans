@@ -18,10 +18,10 @@
                 indicator-color="transparent"
                 class="text-grey-7"
             >
-                <q-route-tab to="/home" icon="home" label="Home" />
-                <q-route-tab to="/capture" icon="photo_camera" label="Capture" />
-                <q-route-tab to="/library" icon="list" label="Library" />
-                <q-route-tab to="/more" icon="more_horiz" label="More" />
+                <q-route-tab to="/home" icon="home" :label="t('navigation.home')" />
+                <q-route-tab to="/capture" icon="photo_camera" :label="t('navigation.capture')" />
+                <q-route-tab to="/library" icon="list" :label="t('navigation.library')" />
+                <q-route-tab to="/more" icon="more_horiz" :label="t('navigation.more')" />
             </q-tabs>
         </q-footer>
 
@@ -29,31 +29,33 @@
              screens and up (show-if-above) and cannot be hidden; absent on
              mobile, where the footer tab bar is used instead. -->
         <q-drawer side="left" show-if-above :breakpoint="1024" bordered :width="navWidth">
-            <div class="q-pa-md text-subtitle2 text-weight-medium text-grey-8">Navigation</div>
+            <div class="q-pa-md text-subtitle2 text-weight-medium text-grey-8">
+                {{ t('navigation.title') }}
+            </div>
             <q-list padding>
                 <q-item clickable v-ripple :to="'/home'">
                     <q-item-section avatar>
                         <q-icon name="home" />
                     </q-item-section>
-                    <q-item-section>Home</q-item-section>
+                    <q-item-section>{{ t('navigation.home') }}</q-item-section>
                 </q-item>
                 <q-item clickable v-ripple :to="'/capture'">
                     <q-item-section avatar>
                         <q-icon name="photo_camera" />
                     </q-item-section>
-                    <q-item-section>Capture</q-item-section>
+                    <q-item-section>{{ t('navigation.capture') }}</q-item-section>
                 </q-item>
                 <q-item clickable v-ripple :to="'/library'">
                     <q-item-section avatar>
                         <q-icon name="list" />
                     </q-item-section>
-                    <q-item-section>Library</q-item-section>
+                    <q-item-section>{{ t('navigation.library') }}</q-item-section>
                 </q-item>
                 <q-item clickable v-ripple :to="'/more'">
                     <q-item-section avatar>
                         <q-icon name="more_horiz" />
                     </q-item-section>
-                    <q-item-section>More</q-item-section>
+                    <q-item-section>{{ t('navigation.more') }}</q-item-section>
                 </q-item>
             </q-list>
         </q-drawer>
@@ -85,6 +87,9 @@ import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue';
 import { useQuasar } from 'quasar';
 import { useRoute, useRouter } from 'vue-router';
 import { useUiStore, type BackgroundPageName } from 'src/stores/ui';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 const route = useRoute();
 const router = useRouter();

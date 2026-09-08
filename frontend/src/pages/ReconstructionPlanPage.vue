@@ -4,35 +4,34 @@
         style="padding-top: 64px"
         :aria-busy="isLoading || (showSplat && rendering)"
     >
-        <page-header title="3D Plan" />
+        <page-header :title="t('plans.threeDimensional')" />
         <h1 class="text-h6 text-weight-bold q-mt-none">
-            Reconstruction {{ reconstructionId.slice(0, 8) }}
+            {{ t('reconstructions.named', { id: reconstructionId.slice(0, 8) }) }}
         </h1>
 
         <q-banner v-if="error" class="bg-red-1 text-negative q-mb-md" role="alert">
             {{ errorMessage }}
             <template #action>
-                <q-btn flat label="Retry" :disable="isLoading" @click="refetch()" />
+                <q-btn flat :label="t('common.retry')" :disable="isLoading" @click="refetch()" />
             </template>
         </q-banner>
 
         <div v-if="isLoading" class="row items-center q-gutter-sm q-mb-md" role="status">
             <q-spinner color="primary" />
-            <span>{{ data ? 'Refreshing splat…' : 'Loading splat…' }}</span>
+            <span>{{ data ? t('plans.splat.refreshing') : t('plans.splat.loading') }}</span>
         </div>
 
         <template v-if="showSplat && data">
             <q-banner v-if="renderError" class="bg-red-1 text-negative q-mb-md" role="alert">
-                Unable to display this splat. The file may be invalid or 3D rendering unavailable in
-                your browser.
+                {{ t('plans.splat.displayFailed') }}
                 <template #action>
-                    <q-btn flat label="Retry" @click="retryRendering" />
+                    <q-btn flat :label="t('common.retry')" @click="retryRendering" />
                 </template>
             </q-banner>
             <template v-else>
                 <div v-if="rendering" class="row items-center q-gutter-sm q-mb-md" role="status">
                     <q-spinner color="primary" />
-                    <span>Preparing splat…</span>
+                    <span>{{ t('plans.splat.preparing') }}</span>
                 </div>
                 <q-card flat bordered class="overflow-hidden">
                     <SplatRenderer
@@ -43,7 +42,7 @@
                     />
                 </q-card>
                 <p class="text-caption text-grey-7 q-mt-sm">
-                    Drag to rotate · Scroll or pinch to zoom · Right-drag or use two fingers to pan
+                    {{ t('plans.splat.controls') }}
                 </p>
             </template>
         </template>
@@ -56,6 +55,9 @@ import { useRoute } from 'vue-router';
 import PageHeader from 'src/components/PageHeader.vue';
 import { ApiError } from 'src/lib/buildings';
 import { useReconstructionSplatQuery } from 'src/queries/reconstructions';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 const SplatRenderer = defineAsyncComponent(() => import('src/components/SplatRenderer.vue'));
 const route = useRoute();
@@ -79,14 +81,12 @@ const showSplat = computed(
 );
 const errorMessage = computed(() => {
     if (error.value instanceof ApiError) {
-        if (error.value.status === 404) return 'The splat is not available.';
+        if (error.value.status === 404) return t('plans.splat.unavailable');
         if (error.value.status === 401 || error.value.status === 403) {
-            return 'Unable to access this splat. Please sign in again.';
+            return t('plans.splat.accessDenied');
         }
     }
-    return data.value
-        ? 'Could not refresh this splat. Please try again.'
-        : 'Unable to load the splat. Please try again.';
+    return data.value ? t('plans.splat.refreshFailed') : t('plans.splat.loadFailed');
 });
 
 function retryRendering(): void {

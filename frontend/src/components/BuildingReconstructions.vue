@@ -1,8 +1,10 @@
 <template>
     <section aria-labelledby="reconstructions-title" :aria-busy="isLoading" class="q-mb-lg">
-        <h2 id="reconstructions-title" class="text-h6 text-weight-bold q-mb-md">Reconstructions</h2>
+        <h2 id="reconstructions-title" class="text-h6 text-weight-bold q-mb-md">
+            {{ t('reconstructions.title') }}
+        </h2>
         <q-btn
-            label="New reconstruction"
+            :label="t('reconstructions.new')"
             icon="add"
             color="primary"
             class="full-width q-mb-md"
@@ -12,18 +14,22 @@
         />
 
         <q-banner v-if="state.error" class="bg-red-1 text-negative q-mb-md" role="alert">
-            {{ data ? 'Could not refresh reconstructions.' : 'Could not load reconstructions.' }}
+            {{ data ? t('reconstructions.refreshFailed') : t('reconstructions.loadFailed') }}
             <template #action>
-                <q-btn flat label="Retry" :disable="isLoading" @click="refetch()" />
+                <q-btn flat :label="t('common.retry')" :disable="isLoading" @click="refetch()" />
             </template>
         </q-banner>
-        <div v-if="state.status === 'pending'" role="status" aria-label="Loading reconstructions">
+        <div
+            v-if="state.status === 'pending'"
+            role="status"
+            :aria-label="t('reconstructions.loading')"
+        >
             <q-skeleton v-for="index in 3" :key="index" height="72px" class="q-mb-sm" />
         </div>
         <template v-else-if="data">
             <div v-if="isLoading" class="text-grey-7 q-mb-sm" role="status">
                 <q-spinner color="primary" class="q-mr-sm" />
-                Refreshing reconstructions…
+                {{ t('reconstructions.refreshing') }}
             </div>
             <q-list v-if="reconstructions.length" bordered separator class="rounded-borders">
                 <q-expansion-item
@@ -36,7 +42,11 @@
                     <template #header>
                         <q-item-section>
                             <q-item-label class="text-subtitle1 text-weight-medium">
-                                Reconstruction {{ reconstruction.id.slice(0, 8) }}
+                                {{
+                                    t('reconstructions.named', {
+                                        id: reconstruction.id.slice(0, 8),
+                                    })
+                                }}
                             </q-item-label>
                             <q-item-label caption>
                                 {{ dateFormatter.format(new Date(reconstruction.created_at)) }}
@@ -44,7 +54,7 @@
                             <q-item-label>
                                 <reconstruction-status-chip
                                     :reconstruction="reconstruction"
-                                    tooltip="Reconstruction attempt"
+                                    :tooltip="t('reconstructions.attempt')"
                                 />
                             </q-item-label>
                         </q-item-section>
@@ -55,14 +65,14 @@
                             :reconstruction-id="reconstruction.id"
                             :active="expandedId === reconstruction.id"
                         />
-                        <section class="q-my-lg" aria-label="Associated Plan">
+                        <section class="q-my-lg" :aria-label="t('plans.associated')">
                             <h3 class="text-h6 text-weight-bold q-mt-none q-mb-md">
-                                Associated Plan
+                                {{ t('plans.associated') }}
                             </h3>
                             <q-list class="q-gutter-y-md">
                                 <q-item
                                     clickable
-                                    aria-label="2D Plan"
+                                    :aria-label="t('plans.twoDimensional')"
                                     :to="`/building/${buildingId}/plan/2d`"
                                 >
                                     <q-item-section avatar>
@@ -79,10 +89,10 @@
                                     </q-item-section>
                                     <q-item-section>
                                         <q-item-label class="text-subtitle1 text-weight-medium">
-                                            2D Plan
+                                            {{ t('plans.twoDimensional') }}
                                         </q-item-label>
                                         <q-item-label caption>
-                                            Top-down floor plan with measurements and annotations
+                                            {{ t('plans.twoDimensionalDescription') }}
                                         </q-item-label>
                                     </q-item-section>
                                     <q-item-section side>
@@ -91,7 +101,7 @@
                                 </q-item>
                                 <q-item
                                     clickable
-                                    aria-label="3D Plan"
+                                    :aria-label="t('plans.threeDimensional')"
                                     :disable="!hasSplat(reconstruction)"
                                     :to="{
                                         name: 'reconstruction-3d-plan',
@@ -115,10 +125,10 @@
                                     </q-item-section>
                                     <q-item-section>
                                         <q-item-label class="text-subtitle1 text-weight-medium">
-                                            3D Plan
+                                            {{ t('plans.threeDimensional') }}
                                         </q-item-label>
                                         <q-item-label caption>
-                                            Interactive 3D model with orbit and export controls
+                                            {{ t('plans.threeDimensionalDescription') }}
                                         </q-item-label>
                                     </q-item-section>
                                     <q-item-section side>
@@ -126,12 +136,12 @@
                                     </q-item-section>
                                 </q-item>
                                 <q-tooltip v-if="!hasSplat(reconstruction)">
-                                    The 3D plan is not available for this reconstruction.
+                                    {{ t('plans.unavailable') }}
                                 </q-tooltip>
                             </q-list>
                         </section>
                         <q-btn
-                            label="Delete Capture"
+                            :label="t('reconstructions.deleteCapture')"
                             outline
                             color="negative"
                             class="full-width"
@@ -143,12 +153,12 @@
                 </q-expansion-item>
             </q-list>
             <p v-else class="text-grey-7" role="status">
-                {{ offset === 0 ? 'No reconstructions yet.' : 'No reconstructions on this page.' }}
+                {{ offset === 0 ? t('reconstructions.empty') : t('reconstructions.emptyPage') }}
             </p>
         </template>
         <nav
             v-if="data || offset > 0"
-            aria-label="Reconstruction pagination"
+            :aria-label="t('reconstructions.pagination')"
             class="row justify-center q-pt-md"
         >
             <q-pagination
@@ -171,6 +181,9 @@ import ReconstructionStatusChip from 'src/components/ReconstructionStatusChip.vu
 import ReconstructionVideo from 'src/components/ReconstructionVideo.vue';
 import type { Reconstruction } from 'src/lib/buildings';
 import { RECONSTRUCTIONS_PAGE_SIZE, useReconstructionsQuery } from 'src/queries/reconstructions';
+import { useI18n } from 'vue-i18n';
+
+const { t, locale } = useI18n();
 
 const props = defineProps<{ buildingId: string }>();
 const offset = ref(0);
@@ -190,10 +203,13 @@ const page = computed({
         offset.value = (value - 1) * RECONSTRUCTIONS_PAGE_SIZE;
     },
 });
-const dateFormatter = new Intl.DateTimeFormat(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-});
+const dateFormatter = computed(
+    () =>
+        new Intl.DateTimeFormat(locale.value, {
+            dateStyle: 'medium',
+            timeStyle: 'short',
+        }),
+);
 
 function setExpanded(id: string, open: boolean) {
     if (open) expandedId.value = id;

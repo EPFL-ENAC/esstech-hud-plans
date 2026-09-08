@@ -4,31 +4,38 @@
         style="padding-top: 64px"
         :aria-busy="isLoading || isSaving"
     >
-        <page-header :title="`${buildingName} - Building Data`" />
+        <page-header :title="t('buildings.dataTitle', { name: buildingName })" />
 
         <q-banner v-if="state.error" class="bg-red-1 text-negative q-mb-md" role="alert">
             {{ loadErrorMessage }}
             <template #action>
-                <q-btn flat label="Retry" :disable="isLoading || isSaving" @click="refetch()" />
+                <q-btn
+                    flat
+                    :label="t('common.retry')"
+                    :disable="isLoading || isSaving"
+                    @click="refetch()"
+                />
             </template>
         </q-banner>
 
-        <div v-if="!draft && !state.error" role="status" aria-label="Loading building">
+        <div v-if="!draft && !state.error" role="status" :aria-label="t('buildings.loading')">
             <q-skeleton type="text" width="60%" class="q-mb-md" />
             <q-skeleton height="56px" class="q-mb-md" />
             <q-skeleton height="200px" square />
         </div>
 
         <q-form v-else-if="draft && !notFound" class="q-mb-lg" @submit="save">
-            <h2 class="text-subtitle1 text-weight-bold q-mb-md">Localization</h2>
+            <h2 class="text-subtitle1 text-weight-bold q-mb-md">
+                {{ t('buildings.localization') }}
+            </h2>
             <div v-if="isLoading" class="text-grey-7 q-mb-sm" role="status">
                 <q-spinner color="primary" class="q-mr-sm" />
-                Refreshing building…
+                {{ t('buildings.refreshing') }}
             </div>
             <building-details-editor v-model="draft" :disable="isSaving" />
             <q-btn
                 type="submit"
-                label="Save"
+                :label="t('common.save')"
                 color="primary"
                 class="full-width q-mt-md"
                 unelevated
@@ -42,12 +49,16 @@
         </q-form>
 
         <section class="q-mb-lg" aria-disabled="true">
-            <h2 class="text-subtitle1 text-weight-bold q-mb-md">Classification</h2>
+            <h2 class="text-subtitle1 text-weight-bold q-mb-md">
+                {{ t('buildings.classification') }}
+            </h2>
             <q-select
                 v-model="buildingType"
                 outlined
                 :options="buildingTypeOptions"
-                label="Building Type"
+                emit-value
+                map-options
+                :label="t('buildings.buildingType')"
                 class="q-mb-md"
                 disable
             />
@@ -81,14 +92,16 @@
                 v-model="intendedUse"
                 outlined
                 :options="intendedUseOptions"
-                label="Intended Use"
+                emit-value
+                map-options
+                :label="t('buildings.intendedUse')"
                 class="q-mb-md"
                 disable
             />
         </section>
 
         <q-btn
-            label="Generate building recommendations"
+            :label="t('buildings.generateRecommendations')"
             color="primary"
             class="full-width"
             unelevated
@@ -112,6 +125,9 @@ import {
 } from 'src/lib/buildings';
 import { useBuildingQuery } from 'src/queries/buildings';
 import { useUpdateBuildingMutation } from 'src/mutations/buildings';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 const $q = useQuasar();
 const route = useRoute();
@@ -128,18 +144,18 @@ const baseline = ref<BuildingCreate | null>(null);
 const isLoading = computed(() => asyncStatus.value === 'loading');
 const buildingName = computed(() =>
     building.value?.id === buildingId.value
-        ? building.value.name.trim() || 'Untitled building'
-        : 'Building',
+        ? building.value.name.trim() || t('buildings.untitled')
+        : t('buildings.title'),
 );
 const notFound = computed(
     () => state.value.error instanceof ApiError && state.value.error.status === 404,
 );
 const loadErrorMessage = computed(() =>
     notFound.value
-        ? 'Building not found.'
+        ? t('buildings.notFound')
         : draft.value
-          ? 'Could not refresh this building.'
-          : 'Could not load this building.',
+          ? t('buildings.refreshFailed')
+          : t('buildings.loadFailed'),
 );
 const isDirty = computed(
     () =>
@@ -199,7 +215,7 @@ async function save() {
         const saved = await mutateAsync(variables);
         if (generation !== routeGeneration) return;
         setSavedDetails(saved);
-        $q.notify({ type: 'positive', message: 'Building details saved.' });
+        $q.notify({ type: 'positive', message: t('buildings.saved') });
     } catch {
         // Mutation state displays the error; keep the draft available for retry.
     }
@@ -209,8 +225,18 @@ const buildingType = ref('');
 const intendedUse = ref('');
 const materials = ref(['Brick_1', 'Concrete_1']);
 
-const buildingTypeOptions = ['Residential', 'Commercial', 'Industrial', 'Public'];
-const intendedUseOptions = ['Office', 'Housing', 'Storage', 'Mixed'];
+const buildingTypeOptions = computed(() => [
+    { value: 'Residential', label: t('buildings.types.residential') },
+    { value: 'Commercial', label: t('buildings.types.commercial') },
+    { value: 'Industrial', label: t('buildings.types.industrial') },
+    { value: 'Public', label: t('buildings.types.public') },
+]);
+const intendedUseOptions = computed(() => [
+    { value: 'Office', label: t('buildings.uses.office') },
+    { value: 'Housing', label: t('buildings.uses.housing') },
+    { value: 'Storage', label: t('buildings.uses.storage') },
+    { value: 'Mixed', label: t('buildings.uses.mixed') },
+]);
 
 function swatchUrl(material: string) {
     // Procedural swatch for the prototype; replace with real texture URLs in production.

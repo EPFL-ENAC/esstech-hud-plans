@@ -4,7 +4,7 @@
             <q-page class="row items-center justify-center">
                 <div v-if="status === 'exchanging'" class="column items-center q-gutter-y-md">
                     <q-spinner size="lg" color="primary" />
-                    <div>Signing you in...</div>
+                    <div>{{ t('auth.signingIn') }}</div>
                 </div>
                 <div v-else class="text-negative">{{ status }}</div>
             </q-page>
@@ -17,6 +17,9 @@ import { ref, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { baseUrl, keycloakRedirectUri } from 'boot/api';
 import { setAccessToken } from 'src/lib/auth';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 const route = useRoute();
 const router = useRouter();
@@ -33,7 +36,7 @@ onMounted(async () => {
 
     const code = read('code');
     if (!code) {
-        status.value = 'Missing authorization code';
+        status.value = t('auth.missingCode');
         return;
     }
 
@@ -43,7 +46,7 @@ onMounted(async () => {
     sessionStorage.removeItem('oauth_state');
     const returnedState = read('state');
     if (!returnedState || !expectedState || returnedState !== expectedState) {
-        status.value = 'Invalid OAuth state. Please try signing in again.';
+        status.value = t('auth.invalidState');
         return;
     }
 
@@ -58,7 +61,7 @@ onMounted(async () => {
         });
         if (!response.ok) {
             const errorData = await response.json();
-            throw new Error(errorData.detail || 'Sign in failed');
+            throw new Error(errorData.detail || t('auth.signInFailed'));
         }
         const data = await response.json();
         setAccessToken(data.access_token);
@@ -68,7 +71,7 @@ onMounted(async () => {
     } catch (error) {
         // Show the error on the page (instead of silently returning to /login)
         // so an exchange failure is visible and diagnosable.
-        status.value = 'Error: ' + (error as Error).message;
+        status.value = t('common.error', { message: (error as Error).message });
     }
 });
 </script>

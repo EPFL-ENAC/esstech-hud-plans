@@ -5,17 +5,21 @@
             ref="mapContainer"
             class="full-width full-height"
             role="group"
-            :aria-label="`Building location: latitude ${latitude}, longitude ${longitude}`"
+            :aria-label="t('buildings.map.location', { latitude, longitude })"
         />
         <div
             v-if="!hasCoordinates || mapError"
             class="absolute-full column flex-center q-pa-md text-center text-grey-7"
             role="status"
         >
-            <span>{{
-                mapError || 'Enter valid latitude and longitude to preview the location.'
-            }}</span>
-            <q-btn v-if="mapError" flat label="Retry map" color="primary" @click="retryMap" />
+            <span>{{ mapError || t('buildings.map.coordinatesHint') }}</span>
+            <q-btn
+                v-if="mapError"
+                flat
+                :label="t('buildings.map.retry')"
+                color="primary"
+                @click="retryMap"
+            />
         </div>
     </div>
 </template>
@@ -26,6 +30,9 @@ import { Map as MapLibreMap, Marker, NavigationControl, setWorkerUrl } from 'map
 import mapWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { createBuildingsMapStyle } from 'src/lib/buildings-map';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 setWorkerUrl(mapWorkerUrl);
 
@@ -81,7 +88,7 @@ function syncMap() {
             });
             map.addControl(new NavigationControl({ showCompass: false }), 'top-right');
             map.on('error', () => {
-                mapError.value = 'Could not load the map. Your coordinates can still be saved.';
+                mapError.value = t('buildings.map.previewLoadFailed');
             });
             marker = new Marker().setLngLat(center).addTo(map);
         } else {
@@ -90,7 +97,7 @@ function syncMap() {
         }
         map.resize();
     } catch {
-        mapError.value = 'Could not display the map. Your browser must support WebGL.';
+        mapError.value = t('buildings.map.previewDisplayFailed');
         destroyMap();
     }
 }

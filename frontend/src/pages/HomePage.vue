@@ -1,7 +1,7 @@
 <template>
     <q-page class="bg-white text-dark q-pb-xl">
         <section class="q-px-md q-pt-md q-mb-lg">
-            <h2 class="text-h6 text-weight-bold q-mb-md">Quick Actions</h2>
+            <h2 class="text-h6 text-weight-bold q-mb-md">{{ t('home.quickActions') }}</h2>
             <div class="row q-col-gutter-md">
                 <div class="col-6">
                     <q-card
@@ -22,7 +22,9 @@
                             >
                                 <q-icon name="photo_camera" />
                             </q-avatar>
-                            <div class="text-subtitle1 text-weight-medium q-mt-sm">New Capture</div>
+                            <div class="text-subtitle1 text-weight-medium q-mt-sm">
+                                {{ t('capture.newCapture') }}
+                            </div>
                         </q-card-section>
                     </q-card>
                 </div>
@@ -45,7 +47,9 @@
                             >
                                 <q-icon name="list" />
                             </q-avatar>
-                            <div class="text-subtitle1 text-weight-medium q-mt-sm">Library</div>
+                            <div class="text-subtitle1 text-weight-medium q-mt-sm">
+                                {{ t('navigation.library') }}
+                            </div>
                         </q-card-section>
                     </q-card>
                 </div>
@@ -53,13 +57,13 @@
         </section>
 
         <section class="q-px-md q-pt-md q-mb-lg">
-            <h2 class="text-h6 text-weight-bold q-mb-md q-px-md">In Progress</h2>
+            <h2 class="text-h6 text-weight-bold q-mb-md q-px-md">{{ t('home.inProgress') }}</h2>
 
             <my-buildings-list :reconstruction-status="'processing'" />
         </section>
 
         <section class="q-px-md q-pt-md q-mb-lg">
-            <h2 class="text-h6 text-weight-bold q-mb-md q-px-md">Recent</h2>
+            <h2 class="text-h6 text-weight-bold q-mb-md q-px-md">{{ t('home.recent') }}</h2>
 
             <my-buildings-list :reconstruction-status="'idle'" />
         </section>
@@ -68,4 +72,7 @@
 
 <script setup lang="ts">
 import MyBuildingsList from 'src/components/MyBuildingsList.vue';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 </script>

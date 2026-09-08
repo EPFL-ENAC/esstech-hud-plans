@@ -1,6 +1,6 @@
 <template>
     <q-page class="bg-white text-dark q-px-md q-pb-xl" style="padding-top: 64px">
-        <page-header title="New Capture" />
+        <page-header :title="t('capture.newCapture')" />
 
         <video-picker
             v-model="videoFile"
@@ -20,16 +20,20 @@
             v-model="preset"
             outlined
             :options="presetOptions"
-            label="Preset"
+            emit-value
+            map-options
+            :label="t('capture.preset')"
             class="q-mb-xl"
         />
 
-        <section v-if="preset === 'advanced'" class="q-mb-xl" aria-label="Advanced settings">
+        <section
+            v-if="preset === 'advanced'"
+            class="q-mb-xl"
+            :aria-label="t('capture.advancedSettings')"
+        >
             <reconstruction-settings v-model="advancedSettings" />
             <p v-if="!hasValidSettings" class="text-negative q-mt-md" role="alert">
-                Check the settings: counts must be positive whole numbers, SH degree must be between
-                0 and 3, and sharpness ratio must be between 0 and 1. Stop growth may be zero;
-                distance threshold cannot be negative.
+                {{ t('capture.invalidSettings') }}
             </p>
         </section>
 
@@ -39,14 +43,14 @@
                 <q-btn
                     flat
                     no-caps
-                    label="View building"
+                    :label="t('buildings.view')"
                     @click="openBuilding(destinationBuildingId)"
                 />
             </template>
         </q-banner>
 
         <q-btn
-            label="Start Processing (10-60min)"
+            :label="t('capture.startProcessing')"
             color="primary"
             class="full-width"
             unelevated
@@ -76,6 +80,9 @@ import {
     makeDefaultReconstructionSettings,
     toSplatGenerationSettings,
 } from 'src/lib/reconstruction-settings';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 const router = useRouter();
 const route = useRoute();
@@ -100,7 +107,7 @@ watch(
                 ? {
                       buildingId: null,
                       building: {
-                          name: 'Building 1',
+                          name: t('buildings.defaultName', { number: 1 }),
                           latitude: capturedVideo.value?.location?.latitude ?? null,
                           longitude: capturedVideo.value?.location?.longitude ?? null,
                       },
@@ -111,7 +118,11 @@ watch(
 );
 
 const preset = ref<ReconstructionPreset>('indoors');
-const presetOptions: ReconstructionPreset[] = ['indoors', 'outdoors', 'advanced'];
+const presetOptions = computed(() => [
+    { value: 'indoors', label: t('capture.presets.indoors') },
+    { value: 'outdoors', label: t('capture.presets.outdoors') },
+    { value: 'advanced', label: t('capture.presets.advanced') },
+]);
 const advancedSettings = ref(makeDefaultReconstructionSettings());
 const hasValidSettings = computed(
     () => preset.value !== 'advanced' || isValidReconstructionSettings(advancedSettings.value),
@@ -160,7 +171,7 @@ async function startProcessing(): Promise<void> {
     if (destinationBuildingId.value === null) return;
     $q.notify({
         type: mutationError.value ? 'negative' : 'positive',
-        message: mutationError.value || 'Reconstruction submitted.',
+        message: mutationError.value || t('reconstructions.submitted'),
         position: 'top',
     });
     await openBuilding(destinationBuildingId.value);
@@ -170,12 +181,10 @@ async function openBuilding(buildingId: string): Promise<void> {
     try {
         const failure = await router.push(`/building/${encodeURIComponent(buildingId)}`);
         if (failure) {
-            navigationError.value =
-                'The building was saved, but the page could not be opened. Use View building to continue.';
+            navigationError.value = t('buildings.savedNavigationFailed');
         }
     } catch {
-        navigationError.value =
-            'The building was saved, but the page could not be opened. Use View building to continue.';
+        navigationError.value = t('buildings.savedNavigationFailed');
     }
 }
 </script>

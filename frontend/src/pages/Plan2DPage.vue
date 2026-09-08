@@ -3,7 +3,7 @@
         class="bg-white text-dark q-px-md"
         style="padding-top: 64px; display: flex; flex-direction: column"
     >
-        <page-header title="My Building - 2D Plan" />
+        <page-header :title="t('plans.building2dTitle')" />
 
         <div
             class="row justify-center q-gutter-x-xl q-py-sm q-mb-md"
@@ -48,13 +48,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import PageHeader from 'src/components/PageHeader.vue';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 const activeTool = ref('measure');
-const tools = [
-    { name: 'measure', label: 'Measure', icon: 'straighten' },
-    { name: 'slice', label: 'Slice', icon: 'content_cut' },
-    { name: 'note', label: 'Note', icon: 'notes' },
-];
+const tools = computed(() => [
+    { name: 'measure', label: t('plans.measure'), icon: 'straighten' },
+    { name: 'slice', label: t('plans.slice'), icon: 'content_cut' },
+    { name: 'note', label: t('plans.note'), icon: 'notes' },
+]);
 </script>

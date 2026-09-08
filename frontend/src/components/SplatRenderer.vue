@@ -3,6 +3,9 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SplatMesh, SparkRenderer } from '@sparkjsdev/spark';
 import { onMounted, useTemplateRef, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 const props = defineProps<{
     splatData: ArrayBuffer;
@@ -74,7 +77,7 @@ onMounted(() => {
                     renderer = new THREE.WebGLRenderer();
                     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
                     renderer.setClearColor(0x181818);
-                    renderer.domElement.setAttribute('aria-label', 'Interactive splat viewer');
+                    renderer.domElement.setAttribute('aria-label', t('plans.splat.viewer'));
                     renderer.domElement.setAttribute('role', 'img');
                     host!.appendChild(renderer.domElement);
                     spark = new SparkRenderer({ renderer, autoUpdate: false });

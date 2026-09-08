@@ -1,36 +1,32 @@
 <template>
-    <section class="q-px-md" aria-label="Building locations" :aria-busy="isLoading">
+    <section class="q-px-md" :aria-label="t('buildings.map.locations')" :aria-busy="isLoading">
         <q-banner v-if="state.error" class="bg-red-1 text-negative q-mb-md" role="alert">
-            {{
-                data
-                    ? 'Could not refresh building locations.'
-                    : 'Could not load building locations.'
-            }}
+            {{ data ? t('buildings.map.refreshFailed') : t('buildings.map.loadFailed') }}
             <template #action>
-                <q-btn flat label="Retry" :disable="isLoading" @click="refetch()" />
+                <q-btn flat :label="t('common.retry')" :disable="isLoading" @click="refetch()" />
             </template>
         </q-banner>
 
         <div v-if="state.status === 'pending'" class="q-py-xl text-center" role="status">
             <q-spinner color="primary" size="2em" class="q-mr-sm" />
-            Loading building locations…
+            {{ t('buildings.map.loading') }}
         </div>
         <p v-else-if="data?.length === 0" class="text-grey-7" role="status">
-            No buildings with coordinates yet
+            {{ t('buildings.map.empty') }}
         </p>
         <div v-else-if="isLoading && data" class="text-grey-7 q-mb-sm" role="status">
             <q-spinner color="primary" class="q-mr-sm" />
-            Refreshing building locations…
+            {{ t('buildings.map.refreshing') }}
         </div>
 
         <q-banner v-if="mapError" class="bg-red-1 text-negative q-mb-md" role="alert">
             {{ mapError }}
             <template #action>
-                <q-btn flat label="Retry map" @click="retryMap" />
+                <q-btn flat :label="t('buildings.map.retry')" @click="retryMap" />
             </template>
         </q-banner>
         <q-card v-show="data && data.length > 0" flat bordered square class="overflow-hidden">
-            <div ref="mapContainer" class="buildings-map" aria-label="Map of your buildings" />
+            <div ref="mapContainer" class="buildings-map" :aria-label="t('buildings.map.label')" />
         </q-card>
     </section>
 </template>
@@ -60,6 +56,9 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import type { BuildingLocation } from 'src/lib/buildings';
 import { createBuildingsMapStyle } from 'src/lib/buildings-map';
 import { useBuildingLocationsQuery } from 'src/queries/buildings';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 // Let Vite bundle the worker and its imports for both development and production.
 setWorkerUrl(mapWorkerUrl);
@@ -77,7 +76,7 @@ let active = true;
 let fitted = false;
 
 function buildingName(building: BuildingLocation): string {
-    return building.name.trim() || 'Untitled building';
+    return building.name.trim() || t('buildings.untitled');
 }
 
 function popupContent(buildings: BuildingLocation[]): HTMLElement {
@@ -130,7 +129,7 @@ function updateMarkers(locations: BuildingLocation[]) {
         button.setAttribute(
             'aria-label',
             buildings.length > 1
-                ? `${buildings.length} buildings at this location`
+                ? t('buildings.map.buildingsAtLocation', buildings.length)
                 : buildingName(building),
         );
         const marker = new Marker({ element: button })
@@ -170,11 +169,10 @@ function syncMap() {
             });
             map.addControl(new NavigationControl({ showCompass: false }), 'top-right');
             map.on('error', () => {
-                mapError.value =
-                    'Some map tiles could not load. You can still select building markers.';
+                mapError.value = t('buildings.map.tilesFailed');
             });
         } catch {
-            mapError.value = 'Could not initialize the map. Your browser must support WebGL.';
+            mapError.value = t('buildings.map.initializeFailed');
             destroyMap();
             return;
         }

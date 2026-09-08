@@ -1,7 +1,12 @@
 <template>
     <div class="q-gutter-y-md">
-        <q-input v-model="name" outlined label="Building name (optional)" :disable="disable" />
-        <q-input v-model="address" outlined label="Address (optional)" :disable="disable" />
+        <q-input v-model="name" outlined :label="t('buildings.fields.name')" :disable="disable" />
+        <q-input
+            v-model="address"
+            outlined
+            :label="t('buildings.fields.address')"
+            :disable="disable"
+        />
         <div>
             <div class="row q-col-gutter-md">
                 <q-input
@@ -13,7 +18,7 @@
                     min="-90"
                     max="90"
                     step="any"
-                    label="Latitude (optional)"
+                    :label="t('buildings.fields.latitude')"
                     :disable="disable"
                 />
                 <q-input
@@ -25,17 +30,16 @@
                     min="-180"
                     max="180"
                     step="any"
-                    label="Longitude (optional)"
+                    :label="t('buildings.fields.longitude')"
                     :disable="disable"
                 />
             </div>
         </div>
         <p v-if="!isValidBuildingCreate(details)" class="text-negative q-mb-none" role="alert">
-            Provide both coordinates or leave both empty. Latitude must be between −90 and 90, and
-            longitude between −180 and 180.
+            {{ t('buildings.fields.invalidCoordinates') }}
         </p>
         <p v-else class="text-caption text-grey-7 q-mb-none">
-            Provide both coordinates or leave both empty.
+            {{ t('buildings.fields.coordinatesHint') }}
         </p>
         <building-location-map :latitude="details.latitude" :longitude="details.longitude" />
     </div>
@@ -45,6 +49,9 @@
 import { computed } from 'vue';
 import BuildingLocationMap from 'src/components/BuildingLocationMap.vue';
 import { type BuildingCreate, isValidBuildingCreate } from 'src/lib/buildings';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 withDefaults(defineProps<{ disable?: boolean }>(), { disable: false });
 const details = defineModel<BuildingCreate>({ required: true });

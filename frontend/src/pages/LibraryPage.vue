@@ -1,11 +1,11 @@
 <template>
     <q-page class="bg-white text-dark q-pb-xl" style="padding-top: 64px">
-        <page-header :back="false" title="Library">
+        <page-header :back="false" :title="t('navigation.library')">
             <q-btn
                 flat
                 no-caps
                 color="primary"
-                label="New Capture"
+                :label="t('capture.newCapture')"
                 @click="$router.push('/capture')"
             />
         </page-header>
@@ -18,8 +18,8 @@
             bordered
             class="q-px-md q-mb-md"
         >
-            <q-tab name="list" label="List" />
-            <q-tab name="map" label="Map" />
+            <q-tab name="list" :label="t('common.list')" />
+            <q-tab name="map" :label="t('common.map')" />
         </q-tabs>
 
         <q-input
@@ -29,8 +29,8 @@
             clearable
             outlined
             rounded
-            placeholder="Search buildings"
-            aria-label="Search buildings"
+            :placeholder="t('buildings.search')"
+            :aria-label="t('buildings.search')"
             class="q-mx-md q-mb-md"
         >
             <template #prepend>
@@ -51,6 +51,9 @@ import { storeToRefs } from 'pinia';
 import MyBuildingsList from 'src/components/MyBuildingsList.vue';
 import PageHeader from 'src/components/PageHeader.vue';
 import { useUiStore } from 'src/stores/ui';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 const MyBuildingsMap = defineAsyncComponent(() => import('src/components/MyBuildingsMap.vue'));
 const { libraryTab: tab, librarySearch: search } = storeToRefs(useUiStore());

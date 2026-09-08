@@ -1,3 +1,4 @@
+import { useI18n } from 'vue-i18n';
 import { useMutation, useQueryCache } from '@pinia/colada';
 import { computed } from 'vue';
 import { getAuthSubject } from 'src/lib/auth';
@@ -9,6 +10,7 @@ export interface UpdateBuildingVariables {
 }
 
 export function useUpdateBuildingMutation() {
+    const { t } = useI18n();
     const queryCache = useQueryCache();
     const subject = getAuthSubject();
     const mutation = useMutation<Building, UpdateBuildingVariables, unknown>({
@@ -31,12 +33,12 @@ export function useUpdateBuildingMutation() {
         const error = mutation.error.value;
         if (error === null) return '';
         if (error instanceof ApiError) {
-            if (error.status === 404) return 'This building is no longer available.';
-            if (error.status === 401) return 'Your session has expired. Sign in again to save.';
-            if (error.status === 422) return 'Check the building details, then try again.';
-            return 'Could not save the building. Please try again.';
+            if (error.status === 404) return t('buildings.errors.unavailable');
+            if (error.status === 401) return t('buildings.errors.sessionExpired');
+            if (error.status === 422) return t('buildings.errors.invalidDetails');
+            return t('buildings.errors.saveFailed');
         }
-        return 'Could not reach the server. Check your connection and try again.';
+        return t('errors.connection');
     });
 
     return { ...mutation, errorMessage };

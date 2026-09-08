@@ -3,7 +3,7 @@
         class="bg-white text-dark q-px-md"
         style="padding-top: 64px; display: flex; flex-direction: column"
     >
-        <page-header title="My Building - 3D Plan" />
+        <page-header :title="t('plans.building3dTitle')" />
 
         <q-card
             flat
@@ -36,7 +36,7 @@
         </q-card>
 
         <q-btn
-            label="Export to interactive 2D plan view"
+            :label="t('plans.export2d')"
             color="primary"
             class="full-width q-mt-md"
             unelevated
@@ -47,5 +47,7 @@
 
 <script setup lang="ts">
 import PageHeader from 'src/components/PageHeader.vue';
-//
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 </script>

@@ -4,16 +4,16 @@
         style="padding-top: 64px"
         :aria-busy="isLoading"
     >
-        <page-header :title="building && !notFound ? buildingName : 'Building'" />
+        <page-header :title="building && !notFound ? buildingName : t('buildings.title')" />
 
         <q-banner v-if="state.error" class="bg-red-1 text-negative q-mb-md" role="alert">
             {{ errorMessage }}
             <template #action>
-                <q-btn flat label="Retry" :disable="isLoading" @click="refetch()" />
+                <q-btn flat :label="t('common.retry')" :disable="isLoading" @click="refetch()" />
             </template>
         </q-banner>
 
-        <div v-if="state.status === 'pending'" role="status" aria-label="Loading building">
+        <div v-if="state.status === 'pending'" role="status" :aria-label="t('buildings.loading')">
             <q-skeleton type="text" width="60%" class="q-mb-md" />
             <div class="row q-gutter-sm q-mb-lg">
                 <q-skeleton type="QChip" />
@@ -25,7 +25,7 @@
         <template v-else-if="building && !notFound">
             <div v-if="isLoading" class="text-grey-7 q-mb-sm" role="status">
                 <q-spinner color="primary" class="q-mr-sm" />
-                Refreshing building…
+                {{ t('buildings.refreshing') }}
             </div>
 
             <section class="q-mb-lg">
@@ -38,13 +38,13 @@
                     class="row wrap items-center q-gutter-sm"
                 >
                     <q-chip outline color="primary" class="bg-teal-1">
-                        Latitude: {{ building.latitude.toFixed(6) }}
+                        {{ t('buildings.latitude', { latitude: building.latitude.toFixed(6) }) }}
                     </q-chip>
                     <q-chip outline color="primary" class="bg-teal-1">
-                        Longitude: {{ building.longitude.toFixed(6) }}
+                        {{ t('buildings.longitude', { longitude: building.longitude.toFixed(6) }) }}
                     </q-chip>
                 </div>
-                <p v-else class="text-grey-7">Coordinates not set</p>
+                <p v-else class="text-grey-7">{{ t('buildings.coordinatesNotSet') }}</p>
                 <building-location-map
                     class="q-my-md"
                     :latitude="building.latitude"
@@ -52,7 +52,7 @@
                 />
 
                 <q-btn
-                    label="Edit"
+                    :label="t('common.edit')"
                     icon="edit"
                     color="primary"
                     class="full-width q-mb-md"
@@ -75,21 +75,24 @@ import BuildingReconstructions from 'src/components/BuildingReconstructions.vue'
 import BuildingLocationMap from 'src/components/BuildingLocationMap.vue';
 import { ApiError } from 'src/lib/buildings';
 import { useBuildingQuery } from 'src/queries/buildings';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 const route = useRoute();
 const buildingId = computed(() => (typeof route.params.id === 'string' ? route.params.id : ''));
 const { data: building, state, asyncStatus, refetch } = useBuildingQuery(buildingId);
-const buildingName = computed(() => building.value?.name.trim() || 'Untitled building');
+const buildingName = computed(() => building.value?.name.trim() || t('buildings.untitled'));
 const isLoading = computed(() => asyncStatus.value === 'loading');
 const notFound = computed(
     () => state.value.error instanceof ApiError && state.value.error.status === 404,
 );
 const errorMessage = computed(() =>
     notFound.value
-        ? 'Building not found.'
+        ? t('buildings.notFound')
         : building.value
-          ? 'Could not refresh this building.'
-          : 'Could not load this building.',
+          ? t('buildings.refreshFailed')
+          : t('buildings.loadFailed'),
 );
 </script>
 

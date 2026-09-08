@@ -9,10 +9,10 @@
             :error="!hasResolvedBuilding"
             :error-message="
                 isLoading
-                    ? 'Loading the selected building…'
-                    : 'Choose an available building or Create new.'
+                    ? t('buildings.picker.loadingSelected')
+                    : t('buildings.picker.unavailable')
             "
-            label="Building"
+            :label="t('buildings.title')"
         >
             <template #option="scope">
                 <q-item v-bind="scope.itemProps">
@@ -28,9 +28,14 @@
         </q-select>
 
         <q-banner v-if="state.error" class="bg-red-1 text-negative" role="alert">
-            Could not load your buildings.
+            {{ t('buildings.list.loadFailed') }}
             <template #action>
-                <q-btn flat label="Retry" :disable="isLoading || disable" @click="refetch()" />
+                <q-btn
+                    flat
+                    :label="t('common.retry')"
+                    :disable="isLoading || disable"
+                    @click="refetch()"
+                />
             </template>
         </q-banner>
 
@@ -51,6 +56,9 @@ import {
     isValidBuildingCreate,
 } from 'src/lib/buildings';
 import { useAllBuildingsQuery } from 'src/queries/buildings';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 interface SelectOption {
     label: string;
@@ -62,11 +70,10 @@ const selection = defineModel<BuildingSelection>({ required: true });
 const emit = defineEmits<{ valid: [value: boolean] }>();
 const { data: buildings, state, asyncStatus, refetch } = useAllBuildingsQuery();
 const isLoading = computed(() => asyncStatus.value === 'loading');
-const createNewOption: SelectOption = { label: 'Create new', value: null };
 const options = computed<SelectOption[]>(() => [
-    createNewOption,
+    { label: t('buildings.picker.createNew'), value: null },
     ...(buildings.value ?? []).map((building) => ({
-        label: building.name.trim() || 'Untitled building',
+        label: building.name.trim() || t('buildings.untitled'),
         value: building.id,
     })),
 ]);
@@ -89,7 +96,7 @@ const newBuilding = computed({
 const selectedOption = computed<SelectOption>({
     get: () =>
         options.value.find((option) => option.value === selection.value.buildingId) ?? {
-            label: 'Select a building',
+            label: t('buildings.picker.select'),
             value: selection.value.buildingId,
         },
     set: (option) => {

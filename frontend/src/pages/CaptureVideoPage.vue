@@ -1,11 +1,11 @@
 <template>
     <q-page class="bg-white text-dark q-px-md q-pb-xl" style="padding-top: 64px">
-        <page-header title="Capture video" />
+        <page-header :title="t('capture.captureVideo')" />
 
         <camera-viewfinder ref="viewfinder" class="q-mb-md" />
 
         <section class="q-mb-lg">
-            <h2 class="text-h6 text-weight-bold q-mb-lg">Tips for best results</h2>
+            <h2 class="text-h6 text-weight-bold q-mb-lg">{{ t('capture.tipsTitle') }}</h2>
             <q-list class="q-gutter-y-md">
                 <q-card
                     v-for="tip in tips"
@@ -43,11 +43,13 @@
         </q-banner>
 
         <p v-if="gettingLocation" role="status" class="text-grey-7">
-            Recording stopped. Waiting for location…
+            {{ t('capture.waitingForLocation') }}
         </p>
 
         <q-btn
-            :label="viewfinder?.isRecording ? 'Stop Recording' : 'Start Recording'"
+            :label="
+                viewfinder?.isRecording ? t('capture.stopRecording') : t('capture.startRecording')
+            "
             color="primary"
             class="full-width"
             unelevated
@@ -60,13 +62,16 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, ref, useTemplateRef } from 'vue';
+import { computed, onBeforeUnmount, ref, useTemplateRef } from 'vue';
 import { useRouter } from 'vue-router';
 import PageHeader from 'src/components/PageHeader.vue';
 import CameraViewfinder from 'src/components/CameraViewfinder.vue';
 import { type RecordedVideo, toCapturedVideo } from 'src/lib/captured-video';
 import { getCaptureLocation } from 'src/lib/capture-location';
 import { useCaptureStore } from 'src/stores/capture';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 const viewfinder = useTemplateRef<InstanceType<typeof CameraViewfinder>>('viewfinder');
 const router = useRouter();
@@ -107,13 +112,12 @@ async function toggleRecording(): Promise<void> {
         const failure = await router.push('/capture/new');
         if (failure) {
             captureStore.clearVideo();
-            if (!disposed) handoffError.value = 'Could not open New Capture. Please record again.';
+            if (!disposed) handoffError.value = t('capture.handoffFailed');
         }
     } catch (error) {
         captureStore.clearVideo();
         if (!disposed) {
-            handoffError.value =
-                error instanceof Error ? error.message : 'Could not open New Capture.';
+            handoffError.value = error instanceof Error ? error.message : t('capture.openFailed');
         }
     } finally {
         gettingLocation.value = false;
@@ -125,10 +129,10 @@ onBeforeUnmount(() => {
     disposed = true;
 });
 
-const tips = ref([
-    { icon: 'photo_camera', title: 'Use wide-angle lens', meta: 'Set to 0.5x or widest available' },
-    { icon: 'timer', title: 'Use wide-angle lens', meta: 'Set to 0.5x or widest available' },
-    { icon: 'swap_vert', title: 'Use wide-angle lens', meta: 'Set to 0.5x or widest available' },
-    { icon: 'fullscreen', title: 'Use wide-angle lens', meta: 'Set to 0.5x or widest available' },
+const tips = computed(() => [
+    { icon: 'photo_camera', title: t('capture.wideAngleTip'), meta: t('capture.wideAngleHint') },
+    { icon: 'timer', title: t('capture.wideAngleTip'), meta: t('capture.wideAngleHint') },
+    { icon: 'swap_vert', title: t('capture.wideAngleTip'), meta: t('capture.wideAngleHint') },
+    { icon: 'fullscreen', title: t('capture.wideAngleTip'), meta: t('capture.wideAngleHint') },
 ]);
 </script>
