@@ -9,10 +9,14 @@ from fastapi_cache.backends.inmemory import InMemoryBackend
 from pydantic import BaseModel
 
 from api.config import config
+from api.db import dispose_engine
 from api.logging_config import setup_logging
 from api.views.admin import router as admin_router
 from api.views.auth import router as auth_router
+from api.views.buildings import router as buildings_router
+from api.views.reconstructions import router as reconstructions_router
 from api.views.splats import router as splats_router
+from api.views.users import router as users_router
 from api.views.workflows import router as workflows_router
 
 # from api.views.files import router as files_router
@@ -24,7 +28,10 @@ setup_logging()
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     FastAPICache.init(InMemoryBackend(), prefix="fastapi-cache")
-    yield
+    try:
+        yield
+    finally:
+        await dispose_engine()
 
 
 app = FastAPI(root_path=config.PATH_PREFIX, lifespan=lifespan)
@@ -42,6 +49,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Accept-Ranges", "Content-Range"],
 )
 
 
@@ -81,6 +89,24 @@ app.include_router(
     workflows_router,
     prefix="/workflows",
     tags=["Workflows"],
+)
+
+app.include_router(
+    buildings_router,
+    prefix="/buildings",
+    tags=["Buildings"],
+)
+
+app.include_router(
+    users_router,
+    prefix="/user",
+    tags=["Users"],
+)
+
+app.include_router(
+    reconstructions_router,
+    prefix="/buildings/{building_id}/reconstructions",
+    tags=["Reconstructions"],
 )
 
 app.include_router(

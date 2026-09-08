@@ -14,6 +14,13 @@ class Config(BaseSettings):
     DB_USER: str
     DB_PASSWORD: str
 
+    @property
+    def DB_URL(self) -> str:
+        return (
+            f"postgresql+asyncpg://{self.DB_USER}:{self.DB_PASSWORD}"
+            f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+        )
+
     PREFECT_HOST: str = "localhost"
     PREFECT_PORT: int = 4200
 

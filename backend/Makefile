@@ -20,8 +20,20 @@ install-external-softwares-linux:
 run:
 	uv run dotenv -f "$(env_path)" run uvicorn api.main:app --reload
 
+run-workflows:
+	uv run dotenv -f "$(env_path)" run python -m api.lib.workflows
+
 test:
 	uv run dotenv -f "$(env_path)" run pytest
+
+db-upgrade:
+	uv run dotenv -f "$(env_path)" run alembic upgrade head
+
+db-downgrade:
+	uv run dotenv -f "$(env_path)" run alembic downgrade -1
+
+db-revision:
+	uv run dotenv -f "$(env_path)" run alembic revision --autogenerate -m "$(name)"
 
 lint:
 	uv run pre-commit run --all-files

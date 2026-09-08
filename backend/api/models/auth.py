@@ -3,14 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 
-@dataclass
-class User:
-    """Authenticated user parsed from a Keycloak access token."""
+@dataclass(frozen=True)
+class AuthenticatedUser:
+    """Identity and authorization claims from a verified Keycloak token."""
 
-    sub: str = ""
-    username: str = ""
-    email: str = ""
-    name: str = ""
+    sub: str
+    username: str | None = None
+    email: str | None = None
+    name: str | None = None
     roles: list[str] = field(default_factory=list)
     client_roles: list[str] = field(default_factory=list)
 
