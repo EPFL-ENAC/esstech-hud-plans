@@ -35,6 +35,9 @@ export type { VideoMetadata } from './VideoPicker.types';
 import { onBeforeUnmount, ref, watch } from 'vue';
 import type { VideoMetadata } from './VideoPicker.types';
 
+const props = defineProps<{
+    fallbackDurationSeconds?: number | undefined;
+}>();
 const file = defineModel<File | null>({ default: null });
 const emit = defineEmits<{
     metadata: [value: VideoMetadata | null];
@@ -76,14 +79,18 @@ function onMetadataLoaded(event: Event): void {
     const video = currentVideo(event);
     if (!video || !file.value || errorMessage.value) return;
 
-    if (!Number.isFinite(video.duration) || video.duration <= 0) {
+    const duration =
+        Number.isFinite(video.duration) && video.duration > 0
+            ? video.duration
+            : props.fallbackDurationSeconds;
+    if (duration === undefined || !Number.isFinite(duration) || duration <= 0) {
         updateMetadata(null);
         errorMessage.value = 'Unable to read the video duration. Please choose another video.';
         return;
     }
 
     updateMetadata({
-        duration: formatDuration(video.duration),
+        duration: formatDuration(duration),
         size: `${(file.value.size / 1_000_000).toFixed(2)} MB`,
     });
 }

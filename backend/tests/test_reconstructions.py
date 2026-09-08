@@ -1239,3 +1239,247 @@ def test_reconstruction_flow_hooks_publish_terminal_states(
         ("cancelled", "state message"),
         ("crashed", "state message"),
     ]
+
+
+def _submit_building_from_reconstruction(
+    client: TestClient,
+    *,
+    building: dict[str, object] | None = None,
+    settings: dict[str, object] | None = None,
+):
+    return client.post(
+        "/buildings/from-reconstruction",
+        files={"file": ("scan.mp4", b"video bytes", "video/mp4")},
+        data={
+            "building": json.dumps(building or {}),
+            "settings": json.dumps(settings or {}),
+        },
+    )
+
+
+@pytest.mark.parametrize("custom_settings", [False, True])
+def test_building_from_reconstruction_creates_linked_owned_records(
+    reconstruction_api: tuple[TestClient, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+    custom_settings: bool,
+) -> None:
+    client, _ = reconstruction_api
+    captured: dict[str, object] = {}
+
+    async def fake_schedule(**kwargs: object) -> UUID:
+        captured.update(kwargs)
+        return WORKFLOW_ID
+
+    monkeypatch.setattr(splat_workflow, "schedule_splat_generation", fake_schedule)
+    metadata = (
+        {"name": "New hall", "latitude": 46.52, "longitude": 6.57}
+        if custom_settings
+        else {}
+    )
+    settings = SplatGenerationWorkflowSettings.model_validate(
+        {
+            "ffmpeg": {"fps": 4},
+            "frame_picker": {"distance_threshold": 0.5},
+            "colmap": {"quality": "high"},
+            "brush": {"total_steps": 20000},
+        }
+        if custom_settings
+        else {}
+    )
+    response = _submit_building_from_reconstruction(
+        client, building=metadata, settings=settings.model_dump(mode="json")
+    )
+    assert response.status_code == 202
+    building = response.json()["building"]
+    reconstruction = response.json()["reconstruction"]
+    assert building["user_id"] == str(USER_ID)
+    assert building["name"] == metadata.get("name", "")
+    assert building["latitude"] == metadata.get("latitude")
+    assert building["longitude"] == metadata.get("longitude")
+    assert reconstruction["building_id"] == building["id"]
+    assert reconstruction["status"] == "scheduled"
+    assert reconstruction["prefect_workflow_id"] == str(WORKFLOW_ID)
+    assert reconstruction["settings"] == settings.model_dump(mode="json")
+    assert Path(reconstruction["input_video_path"]).read_bytes() == b"video bytes"
+    assert captured["owner_id"] == USER_ID
+    assert captured["reconstruction_id"] == UUID(reconstruction["id"])
+    assert captured["settings"] == settings
+    assert client.get(f"/buildings/{building['id']}").json() == building
+    assert client.get(f"/buildings/{building['id']}/reconstructions").json() == [
+        reconstruction
+    ]
+    client.app.dependency_overrides[require_user] = lambda: User(
+        id=OTHER_USER_ID, keycloak_sub="subject-2"
+    )
+    assert client.get(f"/buildings/{building['id']}").status_code == 404
+    assert (
+        client.get(
+            f"/buildings/{building['id']}/reconstructions/{reconstruction['id']}"
+        ).status_code
+        == 404
+    )
+
+
+@pytest.mark.parametrize(
+    ("building", "settings", "media_type", "expected_status"),
+    [
+        ("not json", "{}", "video/mp4", 422),
+        ("null", "{}", "video/mp4", 422),
+        ('{"latitude": 46}', "{}", "video/mp4", 422),
+        ('{"latitude": 91, "longitude": 0}', "{}", "video/mp4", 422),
+        ("{}", "not json", "video/mp4", 422),
+        ("{}", "null", "video/mp4", 422),
+        ("{}", '{"ffmpeg": {"fps": 0}}', "video/mp4", 422),
+        ("{}", "{}", "text/plain", 400),
+        ("{}", "{}", "application/octet-stream", 400),
+    ],
+)
+def test_building_from_reconstruction_validates_before_creating_records(
+    reconstruction_api: tuple[TestClient, UUID],
+    building: str,
+    settings: str,
+    media_type: str,
+    expected_status: int,
+    tmp_path: Path,
+) -> None:
+    client, _ = reconstruction_api
+    before = client.get("/buildings").json()
+    response = client.post(
+        "/buildings/from-reconstruction",
+        files={"file": ("scan.mp4", b"video bytes", media_type)},
+        data={"building": building, "settings": settings},
+    )
+    assert response.status_code == expected_status
+    assert client.get("/buildings").json() == before
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("missing", ["file", "building", "settings"])
+def test_building_from_reconstruction_requires_all_fields(
+    reconstruction_api: tuple[TestClient, UUID], missing: str
+) -> None:
+    client, _ = reconstruction_api
+    before = client.get("/buildings").json()
+    data = {"building": "{}", "settings": "{}"}
+    data.pop(missing, None)
+    files = {} if missing == "file" else {"file": ("scan.mp4", b"video", "video/mp4")}
+    response = client.post("/buildings/from-reconstruction", data=data, files=files)
+    assert response.status_code == 422
+    assert client.get("/buildings").json() == before
+
+
+def test_building_from_reconstruction_requires_authentication(
+    reconstruction_api: tuple[TestClient, UUID],
+) -> None:
+    client, _ = reconstruction_api
+    before = client.get("/buildings").json()
+    original = client.app.dependency_overrides.pop(require_user)
+    try:
+        assert _submit_building_from_reconstruction(client).status_code == 401
+    finally:
+        client.app.dependency_overrides[require_user] = original
+    assert client.get("/buildings").json() == before
+
+
+@pytest.mark.parametrize("failed_model", [Building, Reconstruction])
+def test_building_from_reconstruction_handles_database_insert_failure(
+    reconstruction_api: tuple[TestClient, UUID],
+    failed_model: type[Building] | type[Reconstruction],
+    tmp_path: Path,
+) -> None:
+    from sqlalchemy import event
+
+    client, _ = reconstruction_api
+    before = client.get("/buildings").json()
+
+    def fail_insert(*args: object) -> None:
+        raise OperationalError("INSERT", {}, RuntimeError("offline"))
+
+    event.listen(failed_model, "before_insert", fail_insert)
+    try:
+        response = _submit_building_from_reconstruction(client)
+    finally:
+        event.remove(failed_model, "before_insert", fail_insert)
+    assert response.status_code == 503
+    if failed_model is Building:
+        assert response.json() == {"detail": "Building database is unavailable"}
+        assert client.get("/buildings").json() == before
+    else:
+        detail = response.json()["detail"]
+        assert detail["message"] == "Reconstruction database is unavailable"
+        assert "reconstruction_id" not in detail
+        assert len(client.get("/buildings").json()) == len(before) + 1
+        assert client.get(f"/buildings/{detail['building_id']}").status_code == 200
+        assert (
+            client.get(f"/buildings/{detail['building_id']}/reconstructions").json()
+            == []
+        )
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("failure", ["storage", "scheduling"])
+def test_building_from_reconstruction_retains_records_after_submission_failure(
+    reconstruction_api: tuple[TestClient, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    failure: str,
+) -> None:
+    client, _ = reconstruction_api
+
+    async def fail_upload(*args: object, **kwargs: object) -> object:
+        reconstruction_id = kwargs["artifact_id"]
+        assert isinstance(reconstruction_id, UUID)
+        partial = tmp_path / reconstruction_id.hex / "video" / "input.mp4"
+        partial.parent.mkdir(parents=True)
+        partial.write_bytes(b"partial")
+        raise OSError("disk full")
+
+    async def fail_schedule(**kwargs: object) -> UUID:
+        raise RuntimeError("Prefect unavailable")
+
+    if failure == "storage":
+        monkeypatch.setattr(
+            splat_workflow.SplatGenerationArtifact, "from_uploaded_file", fail_upload
+        )
+    else:
+        monkeypatch.setattr(splat_workflow, "schedule_splat_generation", fail_schedule)
+    response = _submit_building_from_reconstruction(client)
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    building_id = detail["building_id"]
+    reconstruction_id = detail["reconstruction_id"]
+    assert client.get(f"/buildings/{building_id}").status_code == 200
+    reconstructions = client.get(f"/buildings/{building_id}/reconstructions").json()
+    assert len(reconstructions) == 1
+    reconstruction = reconstructions[0]
+    assert reconstruction["id"] == reconstruction_id
+    assert reconstruction["building_id"] == building_id
+    assert reconstruction["status"] == "failed"
+    if failure == "storage":
+        assert detail["message"] == "Failed to store reconstruction video"
+        assert reconstruction["input_video_path"] is None
+        assert not (tmp_path / UUID(reconstruction_id).hex).exists()
+    else:
+        assert detail["message"] == "Failed to schedule reconstruction workflow"
+        assert Path(reconstruction["input_video_path"]).read_bytes() == b"video bytes"
+
+
+def test_building_from_reconstruction_openapi_contract(
+    reconstruction_api: tuple[TestClient, UUID],
+) -> None:
+    client, _ = reconstruction_api
+    schema = client.get("/openapi.json").json()
+    operation = schema["paths"]["/buildings/from-reconstruction"]["post"]
+    body = operation["requestBody"]["content"]["multipart/form-data"]["schema"]
+    body_schema = schema["components"]["schemas"][body["$ref"].split("/")[-1]]
+    assert set(body_schema["required"]) == {"file", "building", "settings"}
+    assert body_schema["properties"]["file"]["format"] == "binary"
+    for field in ("building", "settings"):
+        assert body_schema["properties"][field]["type"] == "string"
+        assert "JSON-encoded" in body_schema["properties"][field]["description"]
+    assert {"202", "400", "401", "422", "503"} <= set(operation["responses"])
+    success = schema["components"]["schemas"]["BuildingFromReconstructionRead"]
+    assert set(success["required"]) == {"building", "reconstruction"}
+    assert operation["responses"]["503"]["content"]["application/json"]["schema"][
+        "$ref"
+    ].endswith("/BuildingFromReconstructionError")

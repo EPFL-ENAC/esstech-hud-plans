@@ -4,7 +4,11 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from api.models.reconstruction import Reconstruction, ReconstructionSummary
+from api.models.reconstruction import (
+    Reconstruction,
+    ReconstructionRead,
+    ReconstructionSummary,
+)
 from api.models.user import utc_now
 from pydantic import BaseModel, ConfigDict, model_validator
 from pydantic import Field as PydanticField
@@ -76,6 +80,25 @@ class BuildingRead(BaseModel):
                 else None
             ),
         )
+
+
+class BuildingFromReconstructionRead(BaseModel):
+    """New building and its first submitted reconstruction."""
+
+    building: BuildingRead
+    reconstruction: ReconstructionRead
+
+
+class BuildingFromReconstructionErrorDetail(BaseModel):
+    """Submission failure after the new building has been committed."""
+
+    message: str
+    building_id: UUID
+    reconstruction_id: UUID | None = None
+
+
+class BuildingFromReconstructionError(BaseModel):
+    detail: str | BuildingFromReconstructionErrorDetail
 
 
 class BuildingLocationRead(BaseModel):

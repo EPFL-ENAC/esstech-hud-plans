@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
-from api.db import get_session
 from api.lib.workflows import common as workflow_common
 from api.lib.workflows.common import (
     WorkflowNotFoundError,
@@ -20,7 +19,6 @@ from api.models.reconstruction import (
     ReconstructionRead,
     ReconstructionStatus,
 )
-from api.models.workflows import SplatGenerationWorkflowSettings
 from api.services.reconstructions import (
     ReconstructionCreationError,
     ReconstructionService,
@@ -28,24 +26,18 @@ from api.services.reconstructions import (
 )
 from api.utils.responses import inline_file_response
 from api.views.buildings import get_current_building
+from api.views.reconstruction_submission import (
+    get_reconstruction_service,
+    validate_reconstruction_submission,
+)
 from fastapi import Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.routing import APIRouter
-from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
-from sqlmodel.ext.asyncio.session import AsyncSession
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-def get_reconstruction_service(
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> ReconstructionService:
-    """Build a request-scoped reconstruction service."""
-
-    return ReconstructionService(session)
 
 
 def _database_unavailable(exc: Exception) -> HTTPException:
@@ -145,26 +137,7 @@ async def create_reconstruction(
         Depends(get_reconstruction_service),
     ],
 ) -> Reconstruction:
-    if not file.filename:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File must have a filename",
-        )
-    if file.content_type is None or not file.content_type.startswith("video/"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Uploaded file must be a video",
-        )
-
-    try:
-        workflow_settings = SplatGenerationWorkflowSettings.model_validate_json(
-            settings
-        )
-    except ValidationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=exc.errors(include_url=False),
-        ) from exc
+    workflow_settings = validate_reconstruction_submission(file, settings)
 
     try:
         return await reconstructions.create_from_video(

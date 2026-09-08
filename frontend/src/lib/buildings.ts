@@ -20,6 +20,34 @@ export interface Building {
     updated_at: string;
 }
 
+export interface BuildingCreate {
+    name: string;
+    latitude: number | null;
+    longitude: number | null;
+}
+
+export type BuildingSelection =
+    | { buildingId: string }
+    | { buildingId: null; building: BuildingCreate };
+
+export function isValidBuildingCreate(building: BuildingCreate): boolean {
+    const { latitude, longitude } = building;
+    if (latitude === null || longitude === null) return latitude === longitude;
+    return (
+        Number.isFinite(latitude) &&
+        latitude >= -90 &&
+        latitude <= 90 &&
+        Number.isFinite(longitude) &&
+        longitude >= -180 &&
+        longitude <= 180
+    );
+}
+
+export interface BuildingFromReconstruction {
+    building: Building;
+    reconstruction: Reconstruction;
+}
+
 export interface BuildingLocation {
     id: string;
     name: string;
@@ -179,11 +207,7 @@ export function listBuildings({
     return requestJson(`/buildings?${params}`);
 }
 
-export function createBuilding(payload: {
-    name: string;
-    latitude: number | null;
-    longitude: number | null;
-}): Promise<Building> {
+export function createBuilding(payload: BuildingCreate): Promise<Building> {
     return requestJson('/buildings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -262,6 +286,43 @@ export function createReconstruction(
         method: 'POST',
         body: formData,
     });
+}
+
+export function createBuildingFromReconstruction(
+    building: BuildingCreate,
+    submission: ReconstructionSubmission,
+): Promise<BuildingFromReconstruction> {
+    const formData = new FormData();
+    formData.append('file', submission.video);
+    formData.append('building', JSON.stringify(building));
+    formData.append('settings', JSON.stringify(submission.settings));
+    return requestJson('/buildings/from-reconstruction', {
+        method: 'POST',
+        body: formData,
+    });
+}
+
+export function getFailedBuildingId(error: unknown): string | null {
+    if (!(error instanceof ApiError) || !isRecord(error.body)) return null;
+    const detail = error.body.detail;
+    if (!isRecord(detail) || typeof detail.building_id !== 'string') return null;
+    return detail.building_id;
+}
+
+export function getReconstructionSubmissionErrorMessage(error: unknown): string {
+    if (error instanceof ApiError) {
+        const detail = isRecord(error.body) ? error.body.detail : null;
+        if (typeof detail === 'string') return detail;
+        if (isRecord(detail) && typeof detail.message === 'string') return detail.message;
+        if (error.status === 422)
+            return 'Check the video and reconstruction settings, then try again.';
+        if (error.status === 401)
+            return 'Your session has expired. Sign in again to submit the capture.';
+        if (error.status === 404)
+            return 'This building is no longer available. Choose another building or create a new one.';
+        return 'Could not submit the reconstruction. Please try again.';
+    }
+    return 'Could not reach the server. Check your connection and try again.';
 }
 
 export function getFailedReconstructionId(error: unknown): string | null {

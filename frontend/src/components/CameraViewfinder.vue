@@ -10,7 +10,7 @@
             label="Camera"
             aria-label="Camera"
             class="q-mb-md"
-            :disable="state === 'requesting'"
+            :disable="state === 'requesting' || isRecording || isStopping"
             :loading="loadingCameras"
             @update:model-value="selectCamera"
         >
@@ -26,6 +26,16 @@
                     @click="refreshCameras"
                 />
             </template>
+        </q-banner>
+        <q-banner v-if="recordingError" class="bg-red-1 text-negative q-mb-md" role="alert">
+            {{ recordingError }}
+        </q-banner>
+        <q-banner
+            v-else-if="!recordingSupported"
+            class="bg-red-1 text-negative q-mb-md"
+            role="alert"
+        >
+            Video recording is not supported by this browser. Try another browser.
         </q-banner>
         <q-card flat bordered square class="camera-viewfinder bg-black text-white">
             <video
@@ -81,9 +91,30 @@
 </template>
 
 <script setup lang="ts">
-import { onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue';
+import {
+    computed,
+    onActivated,
+    onBeforeUnmount,
+    onDeactivated,
+    onMounted,
+    readonly,
+    ref,
+} from 'vue';
+import type { RecordedVideo } from 'src/lib/captured-video';
 
 type CameraState = 'requesting' | 'live' | 'paused' | 'error';
+
+interface RecordingSession {
+    recorder: MediaRecorder;
+    chunks: Blob[];
+    startedAt: number;
+    stop: {
+        promise: Promise<RecordedVideo>;
+        resolve: (video: RecordedVideo) => void;
+        reject: (error: Error) => void;
+        durationSeconds: number;
+    } | null;
+}
 
 const cameras = ref<{ label: string; value: string }[]>([]);
 const selectedCameraId = ref<string | null>(null);
@@ -95,7 +126,20 @@ const errorMessage = ref('');
 const canRetry = ref(true);
 const needsPlaybackGesture = ref(false);
 const startingPreview = ref(false);
+const recordingSupported = typeof MediaRecorder !== 'undefined';
+const recordingError = ref('');
+const isRecording = ref(false);
+const isStopping = ref(false);
+const canStartRecording = computed(
+    () =>
+        state.value === 'live' &&
+        recordingSupported &&
+        !isRecording.value &&
+        !isStopping.value &&
+        stream?.getVideoTracks().some((track) => track.readyState === 'live') === true,
+);
 
+let recording: RecordingSession | null = null;
 let stream: MediaStream | null = null;
 let active = false;
 let disposed = false;
@@ -110,7 +154,117 @@ function isVisible(): boolean {
     return active && !disposed && !pageHidden && document.visibilityState === 'visible';
 }
 
+function clearRecording(): void {
+    const session = recording;
+    recording = null;
+    isRecording.value = false;
+    isStopping.value = false;
+    if (!session) return;
+    session.recorder.ondataavailable = null;
+    session.recorder.onstop = null;
+    session.recorder.onerror = null;
+    session.chunks.length = 0;
+    if (session.recorder.state !== 'inactive') {
+        try {
+            session.recorder.stop();
+        } catch {
+            // Cleanup must still release the camera if the recorder has failed.
+        }
+    }
+}
+
+function failRecording(message: string): Error {
+    const error = new Error(message);
+    recordingError.value = message;
+    recording?.stop?.reject(error);
+    clearRecording();
+    return error;
+}
+
+function startRecording(): void {
+    if (
+        !canStartRecording.value ||
+        !isVisible() ||
+        !stream?.getVideoTracks().some((track) => track.readyState === 'live')
+    ) {
+        const message = 'The camera is not ready to record.';
+        recordingError.value = message;
+        throw new Error(message);
+    }
+
+    recordingError.value = '';
+    try {
+        const recorder = new MediaRecorder(stream);
+        const session: RecordingSession = {
+            recorder,
+            chunks: [],
+            startedAt: performance.now(),
+            stop: null,
+        };
+        recording = session;
+        recorder.ondataavailable = (event) => {
+            if (recording === session && event.data.size > 0) session.chunks.push(event.data);
+        };
+        recorder.onerror = () => {
+            if (recording === session) {
+                failRecording('Recording failed. Please start a new recording.');
+            }
+        };
+        recorder.onstop = () => {
+            if (recording !== session) return;
+            if (!session.stop) {
+                failRecording('Recording was interrupted and discarded. Please record again.');
+                return;
+            }
+            const blob = new Blob(session.chunks, {
+                type: recorder.mimeType || session.chunks[0]?.type || '',
+            });
+            if (blob.size === 0 || session.stop.durationSeconds <= 0) {
+                failRecording('No video was recorded. Please record again.');
+                return;
+            }
+            session.stop.resolve({ blob, durationSeconds: session.stop.durationSeconds });
+            clearRecording();
+        };
+        recorder.start();
+        session.startedAt = performance.now();
+        isRecording.value = true;
+    } catch {
+        throw failRecording('Unable to start recording. Please try again.');
+    }
+}
+
+function stopRecording(): Promise<RecordedVideo> {
+    const session = recording;
+    if (session?.stop) return session.stop.promise;
+    if (!session || !isRecording.value) {
+        recordingError.value = 'There is no active recording to stop.';
+        return Promise.reject(new Error(recordingError.value));
+    }
+
+    const durationSeconds = (performance.now() - session.startedAt) / 1000;
+    let resolveVideo!: (video: RecordedVideo) => void;
+    let rejectVideo!: (error: Error) => void;
+    const promise = new Promise<RecordedVideo>((resolve, reject) => {
+        resolveVideo = resolve;
+        rejectVideo = reject;
+    });
+    session.stop = { promise, resolve: resolveVideo, reject: rejectVideo, durationSeconds };
+    isRecording.value = false;
+    isStopping.value = true;
+    try {
+        session.recorder.stop();
+    } catch {
+        failRecording('Unable to finish recording. Please record again.');
+    }
+    return promise;
+}
+
 function releaseCamera(): void {
+    if (recording) {
+        failRecording('Recording was interrupted and discarded. Please record again.');
+    }
+    if (state.value === 'live') state.value = 'paused';
     generation++;
     cameraListGeneration++;
     loadingCameras.value = false;
@@ -164,7 +318,14 @@ async function refreshCameras(): Promise<void> {
 }
 
 async function selectCamera(deviceId: string): Promise<void> {
-    if (deviceId === selectedCameraId.value || pendingRequest || !isVisible()) return;
+    if (
+        deviceId === selectedCameraId.value ||
+        pendingRequest ||
+        isRecording.value ||
+        isStopping.value ||
+        !isVisible()
+    )
+        return;
     selectedCameraId.value = deviceId;
     releaseCamera();
     await startCamera();
@@ -335,6 +496,14 @@ onBeforeUnmount(() => {
     window.removeEventListener('pagehide', onPageHide);
     window.removeEventListener('pageshow', onPageShow);
     releaseCamera();
+});
+
+defineExpose({
+    startRecording,
+    stopRecording,
+    canStartRecording,
+    isRecording: readonly(isRecording),
+    isStopping: readonly(isStopping),
 });
 </script>
 
