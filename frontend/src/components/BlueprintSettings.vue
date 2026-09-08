@@ -4,7 +4,7 @@ import { type BlueprintConfig, makeDefaultBlueprintConfig } from '../lib/splats/
 
 const config = defineModel<BlueprintConfig>({
     required: true,
-    default: makeDefaultBlueprintConfig(),
+    default: () => makeDefaultBlueprintConfig(),
 });
 
 const resetToDefaults = () => {

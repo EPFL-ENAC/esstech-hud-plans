@@ -7,7 +7,7 @@ import {
 
 const config = defineModel<FrameExtractionConfig>({
     required: true,
-    default: makeDefaultFrameExtractionConfig(),
+    default: () => makeDefaultFrameExtractionConfig(),
 });
 
 const handleModeChange = (val: 'fixed' | 'smart') => {

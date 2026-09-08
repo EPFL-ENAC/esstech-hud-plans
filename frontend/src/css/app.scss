@@ -1,1 +1,17 @@
-// app global css in SCSS form
+@use 'quasar.variables.scss' as *;
+
+.avatar-icon {
+    border: 1px solid $secondary;
+    border-radius: 8px;
+}
+
+/* Card used as a navigation link. Darkens on hover to give the same
+ * feedback as hovered list items (Quasar's q-item hover highlight). */
+.link-card {
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+
+.link-card:hover {
+    background-color: rgba(0, 0, 0, 0.09);
+}
