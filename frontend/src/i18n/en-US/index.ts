@@ -156,6 +156,10 @@ export default {
             address: 'Address (optional)',
             latitude: 'Latitude (optional)',
             longitude: 'Longitude (optional)',
+            useCurrentLocation: 'Use my current location',
+            geolocationUnavailable: 'Geolocation is not supported by this browser.',
+            geolocationDenied: 'Location access was denied. Allow location access and try again.',
+            geolocationFailed: 'Could not get your location. Please try again.',
             invalidCoordinates:
                 'Provide both coordinates or leave both empty. Latitude must be between −90 and 90, and longitude between −180 and 180.',
             coordinatesHint: 'Provide both coordinates or leave both empty.',

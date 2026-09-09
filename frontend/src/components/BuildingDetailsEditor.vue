@@ -34,6 +34,16 @@
                     :disable="disable"
                 />
             </div>
+            <q-btn
+                class="full-width q-mt-md"
+                color="primary"
+                outline
+                icon="my_location"
+                :label="t('buildings.fields.useCurrentLocation')"
+                :loading="locating"
+                :disable="disable"
+                @click="useCurrentLocation"
+            />
         </div>
         <p v-if="!isValidBuildingCreate(details)" class="text-negative q-mb-none" role="alert">
             {{ t('buildings.fields.invalidCoordinates') }}
@@ -41,12 +51,13 @@
         <p v-else class="text-caption text-grey-7 q-mb-none">
             {{ t('buildings.fields.coordinatesHint') }}
         </p>
+        <p v-if="locationError" class="text-negative q-mb-none" role="alert">{{ locationError }}</p>
         <building-location-map :latitude="details.latitude" :longitude="details.longitude" />
     </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import BuildingLocationMap from 'src/components/BuildingLocationMap.vue';
 import { type BuildingCreate, isValidBuildingCreate } from 'src/lib/buildings';
 import { useI18n } from 'vue-i18n';
@@ -83,4 +94,34 @@ function coordinateModel(field: 'latitude' | 'longitude') {
 
 const latitude = coordinateModel('latitude');
 const longitude = coordinateModel('longitude');
+
+const locating = ref(false);
+const locationError = ref<string | null>(null);
+
+function useCurrentLocation() {
+    if (!navigator.geolocation) {
+        locationError.value = t('buildings.fields.geolocationUnavailable');
+        return;
+    }
+    locating.value = true;
+    locationError.value = null;
+    navigator.geolocation.getCurrentPosition(
+        (position) => {
+            details.value = {
+                ...details.value,
+                latitude: Number(position.coords.latitude.toFixed(6)),
+                longitude: Number(position.coords.longitude.toFixed(6)),
+            };
+            locating.value = false;
+        },
+        (error) => {
+            locationError.value =
+                error.code === error.PERMISSION_DENIED
+                    ? t('buildings.fields.geolocationDenied')
+                    : t('buildings.fields.geolocationFailed');
+            locating.value = false;
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+    );
+}
 </script>
