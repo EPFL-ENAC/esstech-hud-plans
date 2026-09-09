@@ -46,6 +46,17 @@
                 </p>
             </template>
         </template>
+        <template v-if="showSplat && data">
+            <q-btn
+                :label="t('plans.splat.downloadPly')"
+                color="primary"
+                icon="file_download"
+                class="full-width q-mt-md"
+                unelevated
+                no-caps
+                @click="downloadPly(data)"
+            />
+        </template>
     </q-page>
 </template>
 
@@ -101,4 +112,14 @@ function onRenderError(): void {
 }
 
 watch([buildingId, reconstructionId, data], retryRendering);
+
+function downloadPly(splatData: ArrayBuffer): void {
+    const blob = new Blob([splatData]);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `reconstruction-${reconstructionId.value.slice(0, 8)}.ply`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
 </script>

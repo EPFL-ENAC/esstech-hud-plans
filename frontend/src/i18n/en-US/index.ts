@@ -278,6 +278,7 @@ export default {
             controls:
                 'Drag to rotate · Scroll or pinch to zoom · Right-drag or use two fingers to pan',
             viewer: 'Interactive splat viewer',
+            downloadPly: 'Download 3D reconstruction (.ply)',
         },
     },
     settings: {
