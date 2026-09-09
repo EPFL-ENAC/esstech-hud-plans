@@ -3,11 +3,9 @@ import os
 from datetime import datetime
 
 import pandas as pd
+from api.config import config
 
-backend_root = os.path.abspath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
-)
-splats_dir = os.path.join(backend_root, "data", "splats")
+splats_dir = str(config.DATA_PATH / "splats")
 
 
 def parse_timestamp(ts: str | None) -> datetime | None:

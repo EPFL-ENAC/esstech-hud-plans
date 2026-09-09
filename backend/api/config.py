@@ -1,5 +1,6 @@
 import os
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings
 
@@ -29,6 +30,17 @@ class Config(BaseSettings):
     KEYCLOAK_CLIENT_ID: str = "esstech-poh"
     KEYCLOAK_CLIENT_SECRET: str = ""
 
+    # Root directory for workflow data, absolute or relative to backend directory
+    # When USE_SCITAS is true, set DATA_DIR to the same value as SCITAS_MOUNT_EXPORT_PATH
+    DATA_DIR: str = "data"
+
+    @property
+    def DATA_PATH(self) -> Path:
+        path = Path(self.DATA_DIR)
+        return (
+            path if path.is_absolute() else Path(__file__).resolve().parents[1] / path
+        )
+
     @property
     def PREFECT_API_URL(self) -> str:
         return f"http://{self.PREFECT_HOST}:{self.PREFECT_PORT}/api"
@@ -49,6 +61,9 @@ class Config(BaseSettings):
     SCITAS_ACCOUNT: str = "enac-it-poh"
     SCITAS_SSH_USERNAME: str = "enac-it-poh"
     SCITAS_SSH_KEY_PATH: str = "~/.ssh/id_ed25519"
+    SCITAS_PARTITION_DEFAULT: str = "l40s"
+    SCITAS_PARTITION_COLMAP: str = "l40s"  # could be mig24gb but less availability
+    SCITAS_PARTITION_BRUSH: str = "l40s"
     SCITAS_SBATCH_ARGS_COLMAP: str = ""
     SCITAS_SBATCH_ARGS_BRUSH: str = ""
 

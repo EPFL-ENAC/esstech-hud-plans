@@ -55,7 +55,7 @@ colmap_command = f"xvfb-run -a {colmap_path}" if IS_DOCKER else colmap_path
 
 brush_command = os.path.join(commands_prefix, "brush")
 
-output_prefix = os.path.join(backend_root, "data", "splats")
+output_prefix = str(config.DATA_PATH / "splats")
 
 
 class BasePipeline(ABC):

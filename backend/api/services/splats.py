@@ -5,6 +5,7 @@ import uuid
 from concurrent.futures import Future, ProcessPoolExecutor
 from dataclasses import dataclass
 
+from api.config import config
 from api.lib.restart_brush_pipeline import RestartBrushPipeline
 from api.lib.splat_pipeline import SplatPipeline
 from api.logging_config import setup_logging
@@ -107,10 +108,7 @@ class GenerationManager:
 
     def get_status(self, generation_id: str) -> dict:
         # read the file "status.json" in the workspace of the generation run
-        backend_root = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", ".."
-        )
-        file = os.path.join(backend_root, f"data/splats/{generation_id}/status.json")
+        file = os.path.join(config.DATA_PATH, f"splats/{generation_id}/status.json")
 
         if not os.path.exists(file):
             return {
@@ -158,11 +156,8 @@ class GenerationManager:
             }
 
     def get_blueprints(self, generation_id: str) -> dict[str, str | None]:
-        backend_root = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", ".."
-        )
         blueprint_prefix = os.path.join(
-            backend_root, f"data/splats/{generation_id}/blueprint"
+            config.DATA_PATH, f"splats/{generation_id}/blueprint"
         )
 
         views: dict[str, str | None] = {
@@ -264,10 +259,7 @@ class GenerationManager:
         )
 
     def _make_generation_folder_path(self, generation_id: str) -> str:
-        backend_root = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", ".."
-        )
-        return os.path.join(backend_root, f"data/splats/{generation_id}")
+        return os.path.join(config.DATA_PATH, f"splats/{generation_id}")
 
     def _save_status(self, generation_id: str, data: dict) -> bool:
         file = os.path.join(

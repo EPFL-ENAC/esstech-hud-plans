@@ -5,7 +5,7 @@
         <video-picker
             v-model="videoFile"
             :fallback-duration-seconds="fallbackDurationSeconds"
-            class="q-mb-md"
+            class="q-mb-lg"
             @metadata="videoMetadata = $event"
         />
 

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Literal, Self
 from uuid import UUID
 
+from api.config import config
 from prefect import get_client
 from prefect.client.schemas.filters import (
     LogFilter,
@@ -20,7 +21,7 @@ from prefect.types import DateTime
 from pydantic import TypeAdapter
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-WORKFLOW_DATA_DIRECTORY = BACKEND_ROOT / "data" / "workflows"
+WORKFLOW_DATA_DIRECTORY = config.DATA_PATH / "workflows"
 LOG_PAGE_SIZE = 200
 LOG_STREAM_TERMINAL_DRAIN_SECONDS = 3
 

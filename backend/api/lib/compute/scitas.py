@@ -141,6 +141,16 @@ def _get_slurm_job_id(job_name: str) -> str | None:
     return None
 
 
+def _get_partition_for_tool(tool: StepName) -> str:
+    """Return the Slurm partition to use for a given tool."""
+    if tool == "brush":
+        return config.SCITAS_PARTITION_BRUSH
+    elif tool == "colmap":
+        return config.SCITAS_PARTITION_COLMAP
+    else:
+        return config.SCITAS_PARTITION_DEFAULT
+
+
 class Scitas(RemoteCompute):
     @staticmethod
     def get_log_file_path(job_name: str) -> str:
@@ -254,7 +264,7 @@ class Scitas(RemoteCompute):
 
         batch_script = f"""#!/bin/bash
 #SBATCH --job-name={job_name}
-{account_line}#SBATCH --partition={"l40s" if tool == "brush" else "mig24gb"}
+{account_line}#SBATCH --partition={_get_partition_for_tool(tool)}
 #SBATCH --gpus={n_gpu}
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=5

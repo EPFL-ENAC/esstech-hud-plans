@@ -3,6 +3,7 @@ import mimetypes
 import os
 import shutil
 
+from api.config import config
 from api.lib.compute.video_frame import VideoFrame
 from api.models.splats import (
     BlueprintConfig,
@@ -27,7 +28,7 @@ router = APIRouter(dependencies=[Depends(require_user)])
 
 manager = GenerationManager()
 
-data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data")
+data_dir = str(config.DATA_PATH)
 upload_dir = os.path.join(data_dir, "uploads")
 
 

@@ -145,7 +145,6 @@ class ScitasCommandExecutionEnvironment(CommandExecutionEnvironment):
         job_finished = False
 
         try:
-            Scitas.copy_data_to_scratch(str(workspace), remote_workspace)
             launchers = {
                 "ffmpeg": ["ffmpeg"],
                 "colmap": ["xvfb-run", "-a", "colmap"],
@@ -169,7 +168,6 @@ class ScitasCommandExecutionEnvironment(CommandExecutionEnvironment):
                     logger.exception("Failed to cancel Scitas job %s", job_name)
             raise
 
-        Scitas.copy_data_from_scratch(remote_workspace, str(workspace))
         if result.return_code != 0:
             raise CommandExecutionError(command, return_code=result.return_code)
 
