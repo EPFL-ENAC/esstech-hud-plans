@@ -1,19 +1,20 @@
 <template>
-    <q-page
-        class="bg-white text-dark q-px-md q-pb-xl"
-        style="padding-top: 64px"
-        :aria-busy="isLoading"
-    >
+    <q-page class="bg-white text-dark q-pb-xl" style="padding-top: 64px" :aria-busy="isLoading">
         <page-header :title="building && !notFound ? buildingName : t('buildings.title')" />
 
-        <q-banner v-if="state.error" class="bg-red-1 text-negative q-mb-md" role="alert">
+        <q-banner v-if="state.error" class="bg-red-1 text-negative q-px-md q-mb-md" role="alert">
             {{ errorMessage }}
             <template #action>
                 <q-btn flat :label="t('common.retry')" :disable="isLoading" @click="refetch()" />
             </template>
         </q-banner>
 
-        <div v-if="state.status === 'pending'" role="status" :aria-label="t('buildings.loading')">
+        <div
+            v-if="state.status === 'pending'"
+            class="q-px-md"
+            role="status"
+            :aria-label="t('buildings.loading')"
+        >
             <q-skeleton type="text" width="60%" class="q-mb-md" />
             <div class="row q-gutter-sm q-mb-lg">
                 <q-skeleton type="QChip" />
@@ -23,12 +24,12 @@
         </div>
 
         <template v-else-if="building && !notFound">
-            <div v-if="isLoading" class="text-grey-7 q-mb-sm" role="status">
+            <div v-if="isLoading" class="q-px-md text-grey-7 q-mb-sm" role="status">
                 <q-spinner color="primary" class="q-mr-sm" />
                 {{ t('buildings.refreshing') }}
             </div>
 
-            <section class="q-mb-lg">
+            <section class="q-mb-lg q-px-md">
                 <h1 class="building-name text-h6 text-weight-bold q-mt-none">
                     {{ buildingName }}
                 </h1>

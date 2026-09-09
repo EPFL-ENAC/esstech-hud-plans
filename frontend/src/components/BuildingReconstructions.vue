@@ -1,19 +1,21 @@
 <template>
     <section aria-labelledby="reconstructions-title" :aria-busy="isLoading" class="q-mb-lg">
-        <h2 id="reconstructions-title" class="text-h6 text-weight-bold q-mb-md">
+        <h2 id="reconstructions-title" class="q-px-md text-h6 text-weight-bold q-mb-md">
             {{ t('reconstructions.title') }}
         </h2>
-        <q-btn
-            :label="t('reconstructions.new')"
-            icon="add"
-            color="primary"
-            class="full-width q-mb-md"
-            unelevated
-            no-caps
-            :to="{ path: '/capture/new', query: { buildingId } }"
-        />
+        <div class="q-px-md q-mb-md">
+            <q-btn
+                :label="t('reconstructions.new')"
+                icon="add"
+                color="primary"
+                class="full-width"
+                unelevated
+                no-caps
+                :to="{ path: '/capture/new', query: { buildingId } }"
+            />
+        </div>
 
-        <q-banner v-if="state.error" class="bg-red-1 text-negative q-mb-md" role="alert">
+        <q-banner v-if="state.error" class="bg-red-1 text-negative q-px-md q-mb-md" role="alert">
             {{ data ? t('reconstructions.refreshFailed') : t('reconstructions.loadFailed') }}
             <template #action>
                 <q-btn flat :label="t('common.retry')" :disable="isLoading" @click="refetch()" />
@@ -22,16 +24,17 @@
         <div
             v-if="state.status === 'pending'"
             role="status"
+            class="q-px-md"
             :aria-label="t('reconstructions.loading')"
         >
             <q-skeleton v-for="index in 3" :key="index" height="72px" class="q-mb-sm" />
         </div>
         <template v-else-if="data">
-            <div v-if="isLoading" class="text-grey-7 q-mb-sm" role="status">
+            <div v-if="isLoading" class="q-px-md text-grey-7 q-mb-sm" role="status">
                 <q-spinner color="primary" class="q-mr-sm" />
                 {{ t('reconstructions.refreshing') }}
             </div>
-            <q-list v-if="reconstructions.length" bordered separator class="rounded-borders">
+            <q-list v-if="reconstructions.length" separator class="reconstructions-list">
                 <q-expansion-item
                     v-for="reconstruction in reconstructions"
                     :key="reconstruction.id"
@@ -201,7 +204,7 @@
                     </div>
                 </q-expansion-item>
             </q-list>
-            <p v-else class="text-grey-7" role="status">
+            <p v-else class="q-px-md text-grey-7" role="status">
                 {{ offset === 0 ? t('reconstructions.empty') : t('reconstructions.emptyPage') }}
             </p>
         </template>
@@ -274,3 +277,10 @@ watch(reconstructions, (rows) => {
     if (!rows.some(({ id }) => id === expandedId.value)) expandedId.value = null;
 });
 </script>
+
+<style scoped>
+.reconstructions-list {
+    border-top: 1px solid rgba(0, 0, 0, 0.12);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+}
+</style>

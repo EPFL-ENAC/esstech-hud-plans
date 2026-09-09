@@ -56,13 +56,13 @@
             </div>
         </section>
 
-        <section class="q-px-md q-pt-md q-mb-lg">
+        <section class="q-pt-md q-mb-lg">
             <h2 class="text-h6 text-weight-bold q-mb-md q-px-md">{{ t('home.inProgress') }}</h2>
 
             <my-buildings-list :reconstruction-status="'processing'" />
         </section>
 
-        <section class="q-px-md q-pt-md q-mb-lg">
+        <section class="q-pt-md q-mb-lg">
             <h2 class="text-h6 text-weight-bold q-mb-md q-px-md">{{ t('home.recent') }}</h2>
 
             <my-buildings-list :reconstruction-status="'idle'" />

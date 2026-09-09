@@ -1,6 +1,6 @@
 <template>
     <q-page-sticky expand position="top" class="page-header-sticky">
-        <q-toolbar class="page-header">
+        <q-toolbar class="page-header q-px-md">
             <q-btn
                 v-if="back"
                 flat
