@@ -73,7 +73,8 @@
                                 <q-item
                                     clickable
                                     :aria-label="t('plans.twoDimensional')"
-                                    :to="`/building/${buildingId}/plan/2d`"
+                                    :disable="!hasSplat(reconstruction)"
+                                    :to="`/building/${buildingId}/plan/2d?reconstruction=${reconstruction.id}`"
                                 >
                                     <q-item-section avatar>
                                         <q-avatar

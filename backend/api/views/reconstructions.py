@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
+from api.lib.compute.colmap_geometric_data import colmap_compute_geometric_data
 from api.lib.workflows import common as workflow_common
 from api.lib.workflows.common import (
     WorkflowNotFoundError,
@@ -31,7 +32,7 @@ from api.views.reconstruction_submission import (
     validate_reconstruction_submission,
 )
 from fastapi import Depends, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.routing import APIRouter
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -99,6 +100,40 @@ def get_reconstruction_video(
         ),
         media_type=media_type,
     )
+
+
+@router.get(
+    "/{reconstruction_id}/blueprint-geometry",
+    status_code=status.HTTP_200_OK,
+)
+def get_reconstruction_blueprint_geometry(
+    reconstruction: CurrentReconstruction,
+) -> JSONResponse:
+    """Geometric info for the blueprint top-down view, computed from COLMAP output."""
+    if (
+        reconstruction.status != ReconstructionStatus.COMPLETED
+        or not reconstruction.splat_path
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Reconstruction blueprint geometry not found",
+        )
+
+    sparse_dir = (
+        workflow_common.WORKFLOW_DATA_DIRECTORY.resolve()
+        / reconstruction.id.hex
+        / "colmap"
+        / "sparse"
+        / "0"
+    )
+    if not sparse_dir.is_dir():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="COLMAP sparse reconstruction not found",
+        )
+
+    geometric_data = colmap_compute_geometric_data(str(sparse_dir))
+    return JSONResponse(content=geometric_data.model_dump(mode="json"))
 
 
 @router.get("/{reconstruction_id}/splat", response_class=FileResponse)

@@ -2,16 +2,18 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SplatMesh } from '@sparkjsdev/spark';
-import { computed, onMounted, ref, useTemplateRef, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue';
 import { useAsyncResultCollection } from 'unwrapped/vue';
 import { AsyncResult } from 'unwrapped/core';
-import { BlueprintGeometry, fetchBlueprintGeometryJSON } from 'src/lib/maths/blueprintGeometry';
+import type { BlueprintGeometryResponse } from 'src/lib/maths/blueprintGeometry';
+import { BlueprintGeometry } from 'src/lib/maths/blueprintGeometry';
 import {
     autoDetectFloorOffset,
     type BlueprintSplatProcessingParams,
     generateBlueprintMesh,
 } from 'src/lib/maths/blueprintMesh';
 import { baseUrl } from 'boot/api';
+import type { BlueprintParams } from 'src/lib/blueprintParams';
 import { authFetch } from 'src/lib/auth';
 import { Notify } from 'quasar';
 
@@ -22,8 +24,16 @@ const SECTION_HEIGTHT_FACTOR_RANGE = 5;
 
 const props = defineProps<{
     splatData: ArrayBuffer;
-    generationId: string;
+    fetchGeometry: () => AsyncResult<BlueprintGeometryResponse>;
+    /** Initial parameters. When set, parameters are not loaded from the backend. */
+    params?: BlueprintParams;
+    generationId?: string;
+    showParams?: boolean;
+    /** Fill the available space instead of a fixed square viewer size. */
+    fill?: boolean;
 }>();
+
+const canSaveParams = computed(() => props.showParams !== false && props.generationId);
 
 const container = useTemplateRef<HTMLDivElement>('container');
 let controls: OrbitControls | null = null;
@@ -52,7 +62,7 @@ const sectionZFactorStart = computed(() => -sectionZFactor.value.max);
 const sectionZFactorEnd = computed(() => -sectionZFactor.value.min);
 const densityThreshold = ref(1.0);
 const splatSizeMultiplier = ref(1.0);
-const opacityMultiplier = ref(0.2);
+const opacityMultiplier = ref(0.1);
 const opacityPower = ref(0.0);
 const contrast = ref(2.0);
 
@@ -69,6 +79,44 @@ const canvasFilter = computed(() => {
     const brightness = 100;
     return `contrast(${100 * contrast.value}%) brightness(${brightness}%)`;
 });
+
+const canvasSizeStyle = computed(() => {
+    if (props.fill) {
+        return { filter: canvasFilter.value, width: '100%', height: '100%' };
+    }
+    return {
+        filter: canvasFilter.value,
+        width: `${viewerSize.value}px`,
+        height: `${viewerSize.value}px`,
+        maxWidth: '95vw',
+    };
+});
+
+let resizeObserver: ResizeObserver | null = null;
+
+function updateRendererToElementSize(): void {
+    if (!renderer || !container.value) return;
+    const width = container.value.clientWidth;
+    const height = container.value.clientHeight;
+    if (width === 0 || height === 0) return;
+
+    renderer.setSize(width, height);
+    if (camera && geometryData) {
+        const frustumSize = geometryData.radius * 4;
+        const aspect = width / height;
+        camera.left = -frustumSize / 2;
+        camera.right = frustumSize / 2;
+        if (aspect >= 1) {
+            camera.top = frustumSize / 2;
+            camera.bottom = -frustumSize / 2;
+        } else {
+            camera.top = frustumSize / 2 / aspect;
+            camera.bottom = -frustumSize / 2 / aspect;
+        }
+        camera.updateProjectionMatrix();
+    }
+    updateScaleOverlay();
+}
 
 let paramsSaveTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -121,6 +169,7 @@ async function saveBlueprintParams(): Promise<void> {
 }
 
 function scheduleParamsSave(): void {
+    if (!canSaveParams.value) return;
     if (paramsSaveTimeout) {
         clearTimeout(paramsSaveTimeout);
     }
@@ -151,6 +200,11 @@ function exportImage(): void {
 
 const collection = useAsyncResultCollection();
 
+onBeforeUnmount(() => {
+    resizeObserver?.disconnect();
+    resizeObserver = null;
+});
+
 onMounted(() => {
     collection.value.add(
         'setup',
@@ -159,12 +213,18 @@ onMounted(() => {
                 return;
             }
 
-            const response = yield* AsyncResult.fromValuePromise(
-                authFetch(`${baseUrl}/splats/blueprint-params/${props.generationId}`),
-            );
-            const params = response.ok ? yield* AsyncResult.fromValuePromise(response.json()) : {};
-            if (!response.ok) {
-                console.error('Failed to load blueprint parameters:', response.statusText);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            let params: Record<string, any> = {};
+            if (props.params) {
+                params = props.params;
+            } else if (canSaveParams.value) {
+                const response = yield* AsyncResult.fromValuePromise(
+                    authFetch(`${baseUrl}/splats/blueprint-params/${props.generationId}`),
+                );
+                params = response.ok ? yield* AsyncResult.fromValuePromise(response.json()) : {};
+                if (!response.ok) {
+                    console.error('Failed to load blueprint parameters:', response.statusText);
+                }
             }
             if (params.viewerSize) viewerSize.value = params.viewerSize;
             if (params.sceneZRotation !== undefined && params.sceneZRotation !== null)
@@ -187,7 +247,7 @@ onMounted(() => {
             if (params.opacityMultiplier) opacityMultiplier.value = params.opacityMultiplier;
             if (params.contrast) contrast.value = params.contrast;
 
-            const geometryJSON = yield* fetchBlueprintGeometryJSON(props.generationId);
+            const geometryJSON = yield* props.fetchGeometry();
             geometryData = new BlueprintGeometry(geometryJSON);
 
             scene = new THREE.Scene();
@@ -241,6 +301,12 @@ onMounted(() => {
             renderer.setClearColor(0xffffff, 1);
             container.value.appendChild(renderer.domElement);
 
+            if (props.fill) {
+                updateRendererToElementSize();
+                resizeObserver = new ResizeObserver(() => updateRendererToElementSize());
+                resizeObserver.observe(container.value);
+            }
+
             controls = new OrbitControls(camera, renderer.domElement);
             controls.target.copy(initialCameraTarget.value);
             controls.enableRotate = true;
@@ -266,6 +332,7 @@ onMounted(() => {
 });
 
 watch(viewerSize, (newSize) => {
+    if (props.fill) return;
     if (renderer) {
         renderer.setSize(newSize, newSize);
     }
@@ -385,9 +452,9 @@ watch(sceneZRotation, (tilt) => {
 </script>
 
 <template>
-    <div class="viewer-container q-pa-md">
+    <div class="viewer-container" :class="{ 'q-pa-md': showParams !== false, 'viewer-fill': fill }">
         <!-- Main Control Toolbar -->
-        <q-card class="toolbar-card q-mb-lg">
+        <q-card v-if="showParams !== false" class="toolbar-card q-mb-lg">
             <q-card-section class="q-py-md">
                 <div class="toolbar-grid">
                     <!-- Section 1: Viewer Settings -->
@@ -619,16 +686,8 @@ watch(sceneZRotation, (tilt) => {
         </q-card>
 
         <!-- Canvas Container -->
-        <div
-            ref="container"
-            class="canvas-container shadow-4"
-            :style="{
-                filter: canvasFilter,
-                width: `${viewerSize}px`,
-                height: `${viewerSize}px`,
-                maxWidth: '95vw',
-            }"
-        >
+        <div ref="container" class="canvas-container shadow-4" :style="canvasSizeStyle">
+            >
             <div class="scale-overlay" aria-label="Scale: 1 meter">
                 <div class="scale-bar" :style="{ width: `${scaleBarWidthPx}px` }" />
                 <div class="scale-text">1 m</div>
@@ -672,6 +731,21 @@ watch(sceneZRotation, (tilt) => {
     display: flex;
     flex-direction: column;
     align-items: center;
+}
+
+.viewer-fill {
+    /* Fill the wrapper exactly. The wrapper gets its height from flex, but
+     percentage heights do not resolve against it, so use absolute position. */
+    position: absolute;
+    inset: 0;
+    align-items: stretch;
+}
+
+/* Take the canvas out of the layout flow so the wrapper height does not
+   depend on the canvas size itself. */
+.viewer-fill .canvas-container {
+    position: absolute;
+    inset: 0;
 }
 
 .toolbar-card {

@@ -2,7 +2,7 @@ install:
 	uvx pre-commit install --install-hooks
 	cd backend && make install
 	cd frontend && npm install
-	touch .env
+	test -f .env || cp .env.example .env
 
 lint:
 	uvx pre-commit run --all-files

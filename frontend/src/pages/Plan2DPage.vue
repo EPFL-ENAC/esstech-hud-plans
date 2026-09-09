@@ -1,7 +1,8 @@
 <template>
     <q-page
-        class="bg-white text-dark q-px-md"
+        class="bg-white text-dark q-px-md q-py-md"
         style="padding-top: 64px; display: flex; flex-direction: column"
+        :aria-busy="isLoading"
     >
         <page-header :title="t('plans.building2dTitle')" />
 
@@ -23,36 +24,65 @@
             </q-btn>
         </div>
 
-        <q-card
-            flat
-            bordered
-            square
-            class="bg-grey-3 flex flex-center"
-            style="flex: 1; min-height: 320px; overflow: hidden"
-        >
-            <svg viewBox="0 0 320 320" style="width: 90%; max-width: 360px; height: auto">
-                <g fill="none" stroke="var(--q-primary)" stroke-width="4" stroke-linecap="square">
-                    <path
-                        d="M40 40 h240 v40 h-80 v40 h-40 v-40 h-120 v120 h120 v-60 h40 v60 h120 v-160 h-80"
-                    />
-                    <path d="M40 200 h120 v80 h-120 z" />
-                    <path d="M200 240 h120 v40 h-120 z" />
-                    <path d="M160 80 v40" />
-                    <path d="M200 80 v40" />
-                    <path d="M80 200 v80" />
-                    <path d="M240 240 v40" />
-                </g>
-            </svg>
-        </q-card>
+        <q-banner v-if="error" class="bg-red-1 text-negative q-mb-md" role="alert">
+            {{ t('plans.splat.unavailable') }}
+            <template #action>
+                <q-btn flat :label="t('common.retry')" :disable="isLoading" @click="refetch()" />
+            </template>
+        </q-banner>
+
+        <div v-if="isLoading" class="row items-center q-gutter-sm q-mb-md" role="status">
+            <q-spinner color="primary" />
+            <span>{{ data ? t('plans.splat.refreshing') : t('plans.splat.loading') }}</span>
+        </div>
+
+        <template v-if="showSplat && data">
+            <div class="viewer-wrapper">
+                <interactive-blueprint-viewer
+                    :splat-data="data"
+                    :fetch-geometry="
+                        () => fetchReconstructionBlueprintGeometryJSON(buildingId, reconstructionId)
+                    "
+                    :params="DEFAULT_BLUEPRINT_PARAMS"
+                    fill
+                />
+            </div>
+        </template>
     </q-page>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, defineAsyncComponent, ref } from 'vue';
+import { useRoute } from 'vue-router';
 import PageHeader from 'src/components/PageHeader.vue';
+import { ApiError } from 'src/lib/buildings';
+import { useReconstructionSplatQuery } from 'src/queries/reconstructions';
+import { fetchReconstructionBlueprintGeometryJSON } from 'src/lib/maths/blueprintGeometry';
+import { DEFAULT_BLUEPRINT_PARAMS } from 'src/lib/blueprintParams';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
+
+const InteractiveBlueprintViewer = defineAsyncComponent(
+    () => import('src/components/InteractiveBlueprintViewer.vue'),
+);
+
+const route = useRoute();
+const buildingId = computed(() => (typeof route.params.id === 'string' ? route.params.id : ''));
+const reconstructionId = computed(() =>
+    typeof route.query.reconstruction === 'string' ? route.query.reconstruction : '',
+);
+const { data, error, isLoading, refetch } = useReconstructionSplatQuery(
+    buildingId,
+    reconstructionId,
+);
+
+const showSplat = computed(
+    () =>
+        data.value !== undefined &&
+        reconstructionId.value !== '' &&
+        !(error.value instanceof ApiError && [401, 403, 404].includes(error.value.status)),
+);
 
 const activeTool = ref('measure');
 const tools = computed(() => [
@@ -61,3 +91,12 @@ const tools = computed(() => [
     { name: 'note', label: t('plans.note'), icon: 'notes' },
 ]);
 </script>
+
+<style scoped>
+.viewer-wrapper {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+</style>

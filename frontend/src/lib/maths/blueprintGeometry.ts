@@ -71,10 +71,23 @@ export class BlueprintGeometry {
 }
 
 export function fetchBlueprintGeometryJSON(id: string): AsyncResult<BlueprintGeometryResponse> {
+    return fetchBlueprintGeometryJSONFromUrl(
+        `${baseUrl}/splats/blueprint-geometry/${encodeURIComponent(id)}`,
+    );
+}
+
+export function fetchReconstructionBlueprintGeometryJSON(
+    buildingId: string,
+    reconstructionId: string,
+): AsyncResult<BlueprintGeometryResponse> {
+    return fetchBlueprintGeometryJSONFromUrl(
+        `${baseUrl}/buildings/${encodeURIComponent(buildingId)}/reconstructions/${encodeURIComponent(reconstructionId)}/blueprint-geometry`,
+    );
+}
+
+function fetchBlueprintGeometryJSONFromUrl(url: string): AsyncResult<BlueprintGeometryResponse> {
     return AsyncResult.run(function* () {
-        const response = yield* AsyncResult.fromValuePromise(
-            authFetch(`${baseUrl}/splats/blueprint-geometry/${id}`),
-        );
+        const response = yield* AsyncResult.fromValuePromise(authFetch(url));
         if (!response.ok) {
             return yield* AsyncResult.errTag(
                 'fetch_blueprint_geometry_failed',

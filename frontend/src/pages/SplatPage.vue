@@ -5,6 +5,7 @@ import { makeAsyncResultLoader, useReactiveChain } from 'unwrapped/vue';
 import type { ErrorBase } from 'unwrapped/core';
 import SplatRenderer from '../components/SplatRenderer.vue';
 import InteractiveBlueprintViewer from '../components/InteractiveBlueprintViewer.vue';
+import { fetchBlueprintGeometryJSON } from '../lib/maths/blueprintGeometry';
 import GenerationFeedbackForm from '../components/GenerationFeedbackForm.vue';
 import {
     type SplatPipelineSettings,
@@ -77,6 +78,7 @@ function downloadPly(splatData: ArrayBuffer): void {
                 <h3 class="q-my-md">Interactive Blueprint</h3>
                 <interactive-blueprint-viewer
                     :splat-data="value"
+                    :fetch-geometry="() => fetchBlueprintGeometryJSON(generationId)"
                     :generation-id="generationId"
                     class="q-mb-lg"
                 />

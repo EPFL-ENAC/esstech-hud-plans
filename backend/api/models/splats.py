@@ -110,7 +110,7 @@ class InteractiveBlueprintParams(BaseModel):
     sectionZFactor: SectionZFactor | None = None
     densityThreshold: float = 1.0
     splatSizeMultiplier: float = 1.0
-    opacityMultiplier: float = 0.2
+    opacityMultiplier: float = 0.1
     contrast: float = 2.0
 
 
