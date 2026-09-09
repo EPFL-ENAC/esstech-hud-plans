@@ -69,8 +69,33 @@ onMounted(() => {
                     }
                     mesh.quaternion.set(1, 0, 0, 0);
                     mesh.updateMatrixWorld(true);
-                    const bounds = mesh.getBoundingBox().applyMatrix4(mesh.matrixWorld);
-                    if (bounds.isEmpty()) throw new Error('The splat contains no points');
+                    // getBoundingBox() takes the min/max over every splat, so a
+                    // single splat with a non-finite center poisons the whole box.
+                    // Compute the bounds only from finite splat centers instead.
+                    const min = new THREE.Vector3(
+                        Number.POSITIVE_INFINITY,
+                        Number.POSITIVE_INFINITY,
+                        Number.POSITIVE_INFINITY,
+                    );
+                    const max = new THREE.Vector3(
+                        Number.NEGATIVE_INFINITY,
+                        Number.NEGATIVE_INFINITY,
+                        Number.NEGATIVE_INFINITY,
+                    );
+                    mesh.packedSplats.forEachSplat((_, center) => {
+                        if (
+                            Number.isFinite(center.x) &&
+                            Number.isFinite(center.y) &&
+                            Number.isFinite(center.z)
+                        ) {
+                            min.min(center);
+                            max.max(center);
+                        }
+                    });
+                    if (min.x > max.x || min.y > max.y || min.z > max.z) {
+                        throw new Error('The splat contains no points');
+                    }
+                    const bounds = new THREE.Box3(min, max).applyMatrix4(mesh.matrixWorld);
                     const sphere = bounds.getBoundingSphere(new THREE.Sphere());
                     if (!Number.isFinite(sphere.radius)) throw new Error('Invalid splat bounds');
 
