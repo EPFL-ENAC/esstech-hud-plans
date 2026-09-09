@@ -248,6 +248,29 @@ export function listReconstructions(
     return requestJson(`/buildings/${encodeURIComponent(buildingId)}/reconstructions?${params}`);
 }
 
+export function getReconstructionStep(
+    buildingId: string,
+    reconstructionId: string,
+    signal?: AbortSignal | null,
+): Promise<string | null> {
+    const init: RequestInit = {};
+    if (signal !== undefined) init.signal = signal;
+    return requestJson(
+        `/buildings/${encodeURIComponent(buildingId)}/reconstructions/${encodeURIComponent(reconstructionId)}/current-step`,
+        init,
+    );
+}
+
+export function cancelReconstruction(
+    buildingId: string,
+    reconstructionId: string,
+): Promise<Reconstruction> {
+    return requestJson(
+        `/buildings/${encodeURIComponent(buildingId)}/reconstructions/${encodeURIComponent(reconstructionId)}/cancel`,
+        { method: 'POST' },
+    );
+}
+
 export async function getReconstructionVideo(
     buildingId: string,
     reconstructionId: string,

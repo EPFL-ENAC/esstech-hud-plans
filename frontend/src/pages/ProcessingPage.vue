@@ -8,21 +8,16 @@
         <div class="column items-center text-center q-mt-lg">
             <q-circular-progress
                 show-value
-                :value="building?.progress ?? 0"
+                :value="percentage"
                 size="140px"
                 :thickness="0.08"
                 color="primary"
                 track-color="grey-3"
             >
-                <span class="text-h4 text-primary text-weight-medium">
-                    {{ building?.progress ?? 0 }}%
-                </span>
+                <span class="text-h4 text-primary text-weight-medium"> {{ percentage }}% </span>
             </q-circular-progress>
 
-            <h1 class="text-h6 text-weight-bold q-mb-sm q-mt-lg">
-                {{ t('processing.title', { name: building?.name ?? t('buildings.title') }) }}
-            </h1>
-            <p class="text-body2 text-grey-6 q-mb-xl">{{ uploadedSize }} / {{ totalSize }}</p>
+            <h1 class="text-h6 text-weight-bold q-mb-sm q-mt-lg">{{ chipMessage }}</h1>
 
             <q-btn
                 :label="t('processing.cancelButton')"
@@ -42,11 +37,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from 'vue';
+import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
-import { useBuildingsStore } from 'src/stores/buildings';
 import PageHeader from 'src/components/PageHeader.vue';
+import type { ReconstructionSummary } from 'src/lib/buildings';
+import { cancelReconstruction } from 'src/lib/buildings';
+import {
+    RECONSTRUCTIONS_PAGE_SIZE,
+    useReconstructionsQuery,
+    useReconstructionStepQuery,
+} from 'src/queries/reconstructions';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
@@ -54,68 +55,75 @@ const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const $q = useQuasar();
-const buildingsStore = useBuildingsStore();
 
 const buildingId = computed(() => route.params.id as string);
-const building = computed(() => buildingsStore.getById(buildingId.value));
+const offset = ref(0);
+const { data } = useReconstructionsQuery(buildingId, offset);
 
-const totalSize = computed(() => building.value?.size ?? '0mb');
-const totalMb = computed(() => parseInt(totalSize.value, 10) || 0);
-const uploadedSize = computed(() => {
-    const progress = building.value?.progress ?? 0;
-    return `${Math.round((progress / 100) * totalMb.value)}mb`;
+// Same source as the status chips in the reconstruction list.
+const reconstructions = computed(() => data.value?.slice(0, RECONSTRUCTIONS_PAGE_SIZE) ?? []);
+function isProcessing(reconstruction: ReconstructionSummary): boolean {
+    return ['preparing', 'scheduled', 'running'].includes(reconstruction.status);
+}
+const reconstruction = computed(
+    () => reconstructions.value.find(isProcessing) ?? reconstructions.value[0],
+);
+
+const percentage = computed(() => Math.round((reconstruction.value?.progress ?? 0) * 100));
+const reconstructionId = computed(() => reconstruction.value?.id ?? '');
+const { data: currentStep } = useReconstructionStepQuery(buildingId, reconstructionId);
+const currentStepDisplay = computed(() => {
+    const step = currentStep.value;
+    if (!step) return null;
+    const words = step.split('-').join(' ');
+    return words.charAt(0).toUpperCase() + words.slice(1);
+});
+const chipMessage = computed(() => {
+    const reconstructionValue = reconstruction.value;
+    if (!reconstructionValue) {
+        return t('reconstructions.noReconstruction');
+    }
+    if (reconstructionValue.status === 'running') {
+        const step = currentStepDisplay.value;
+        if (step) return step;
+        return t('reconstructions.processingProgress', { progress: percentage.value });
+    }
+    return t(`reconstructions.status.${reconstructionValue.status}`);
 });
 
-let intervalId: ReturnType<typeof setInterval> | null = null;
-
-function startSimulation() {
-    if (!building.value) return;
-
-    intervalId = setInterval(() => {
-        const current = building.value;
-        if (!current) return;
-
-        const next = Math.min(current.progress + Math.floor(Math.random() * 4) + 1, 100);
-        buildingsStore.updateProgress(current.id, next);
-
-        if (next >= 100) {
-            buildingsStore.setStatus(current.id, 'ready');
-            if (intervalId) {
-                clearInterval(intervalId);
-                intervalId = null;
-            }
-            $q.notify({
-                type: 'positive',
-                message: t('processing.ready', { name: current.name }),
-                position: 'top',
-            });
-            void router.replace(`/building/${current.id}`);
-        }
-    }, 1200);
-}
-
 function confirmCancel() {
-    const name = building.value?.name ?? t('processing.thisCapture');
     $q.dialog({
         title: t('processing.cancelTitle'),
-        message: t('processing.cancelConfirmation', { name }),
+        message: t('processing.cancelConfirmation', {
+            name: t('reconstructions.named', {
+                id: reconstruction.value?.id.slice(0, 8) ?? '',
+            }),
+        }),
         cancel: true,
         persistent: true,
     }).onOk(() => {
-        buildingsStore.remove(buildingId.value);
-        $q.notify({
-            type: 'warning',
-            message: t('processing.cancelled'),
-            position: 'top',
-        });
-        void router.replace('/library');
+        void confirmCancelProcessing();
     });
 }
 
-onMounted(startSimulation);
-onUnmounted(() => {
-    if (intervalId) {
-        clearInterval(intervalId);
+async function confirmCancelProcessing() {
+    const reconstructionId = reconstruction.value?.id;
+    if (!reconstructionId) return;
+
+    try {
+        await cancelReconstruction(buildingId.value, reconstructionId);
+        $q.notify({
+            type: 'positive',
+            message: t('processing.cancelled'),
+            position: 'top',
+        });
+        void router.replace(`/building/${buildingId.value}`);
+    } catch {
+        $q.notify({
+            type: 'negative',
+            message: t('processing.cancelFailed'),
+            position: 'top',
+        });
     }
-});
+}
 </script>

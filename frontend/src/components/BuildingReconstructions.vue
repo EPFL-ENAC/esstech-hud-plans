@@ -65,7 +65,54 @@
                             :reconstruction-id="reconstruction.id"
                             :active="expandedId === reconstruction.id"
                         />
-                        <section class="q-my-lg" :aria-label="t('plans.associated')">
+                        <section
+                            v-if="isProcessing(reconstruction)"
+                            class="q-my-lg"
+                            :aria-label="t('processing.details')"
+                        >
+                            <h3 class="text-h6 text-weight-bold q-mt-none q-mb-md">
+                                {{ t('processing.details') }}
+                            </h3>
+                            <q-list class="q-gutter-y-md">
+                                <q-item
+                                    clickable
+                                    :aria-label="t('processing.details')"
+                                    :to="`/capture/processing/${buildingId}`"
+                                >
+                                    <q-item-section avatar>
+                                        <q-avatar
+                                            square
+                                            size="48px"
+                                            font-size="31px"
+                                            color="white"
+                                            text-color="primary"
+                                            class="avatar-icon"
+                                        >
+                                            <q-icon name="tune" />
+                                        </q-avatar>
+                                    </q-item-section>
+                                    <q-item-section>
+                                        <q-item-label class="text-subtitle1 text-weight-medium">
+                                            {{ t('processing.details') }}
+                                        </q-item-label>
+                                        <q-item-label caption>
+                                            {{ t('processing.detailsDescription') }}
+                                        </q-item-label>
+                                    </q-item-section>
+                                    <q-item-section side>
+                                        <q-icon name="chevron_right" size="20px" color="dark" />
+                                    </q-item-section>
+                                </q-item>
+                            </q-list>
+                        </section>
+                        <section
+                            v-else-if="
+                                reconstruction.status !== 'cancelled' &&
+                                reconstruction.status !== 'failed'
+                            "
+                            class="q-my-lg"
+                            :aria-label="t('plans.associated')"
+                        >
                             <h3 class="text-h6 text-weight-bold q-mt-none q-mb-md">
                                 {{ t('plans.associated') }}
                             </h3>
@@ -141,6 +188,7 @@
                                 </q-tooltip>
                             </q-list>
                         </section>
+                        <div v-else class="q-my-lg" aria-hidden="true" />
                         <q-btn
                             :label="t('reconstructions.deleteCapture')"
                             outline
@@ -218,6 +266,9 @@ function setExpanded(id: string, open: boolean) {
 }
 function hasSplat(reconstruction: Reconstruction): boolean {
     return reconstruction.status === 'completed' && reconstruction.splat_path !== null;
+}
+function isProcessing(reconstruction: Reconstruction): boolean {
+    return ['preparing', 'scheduled', 'running'].includes(reconstruction.status);
 }
 watch(reconstructions, (rows) => {
     if (!rows.some(({ id }) => id === expandedId.value)) expandedId.value = null;

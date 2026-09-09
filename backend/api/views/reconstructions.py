@@ -11,6 +11,8 @@ from api.lib.compute.colmap_geometric_data import colmap_compute_geometric_data
 from api.lib.workflows import common as workflow_common
 from api.lib.workflows.common import (
     WorkflowNotFoundError,
+    cancel_workflow,
+    current_workflow_step,
     get_owned_workflow_run,
     stream_workflow_logs,
 )
@@ -22,6 +24,7 @@ from api.models.reconstruction import (
 )
 from api.services.reconstructions import (
     ReconstructionCreationError,
+    ReconstructionNotFoundError,
     ReconstructionService,
     SortOrder,
 )
@@ -219,6 +222,83 @@ async def get_reconstruction(
     reconstruction: Annotated[Reconstruction, Depends(get_current_reconstruction)],
 ) -> Reconstruction:
     return reconstruction
+
+
+@router.post(
+    "/{reconstruction_id}/cancel",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=ReconstructionRead,
+)
+async def cancel_reconstruction(
+    reconstruction: Annotated[Reconstruction, Depends(get_current_reconstruction)],
+    building: Annotated[Building, Depends(get_current_building)],
+    reconstructions: Annotated[
+        ReconstructionService,
+        Depends(get_reconstruction_service),
+    ],
+) -> Reconstruction:
+    if reconstruction.status not in (
+        ReconstructionStatus.PREPARING,
+        ReconstructionStatus.SCHEDULED,
+        ReconstructionStatus.RUNNING,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Reconstruction is not processing (current status: {reconstruction.status})",
+        )
+
+    workflow_id = reconstruction.prefect_workflow_id
+    if workflow_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Reconstruction has no Prefect workflow",
+        )
+
+    try:
+        await cancel_workflow(workflow_id)
+    except WorkflowNotFoundError:
+        # The workflow run no longer exists.
+        pass
+
+    # The on_cancellation hook only runs in a worker or engine process that
+    # observes the run, so mark the reconstruction as cancelled here.
+    try:
+        return await reconstructions.mark_cancelled(
+            reconstruction.id,
+            error_message="Cancellation requested",
+        )
+    except ReconstructionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Reconstruction not found",
+        ) from exc
+    except (OSError, SQLAlchemyError) as exc:
+        raise _database_unavailable(exc) from exc
+
+
+@router.get("/{reconstruction_id}/current-step", response_model=str | None)
+async def get_reconstruction_current_step(
+    reconstruction: Annotated[Reconstruction, Depends(get_current_reconstruction)],
+) -> str | None:
+    if (
+        reconstruction.status
+        not in (
+            ReconstructionStatus.PREPARING,
+            ReconstructionStatus.SCHEDULED,
+            ReconstructionStatus.RUNNING,
+        )
+        or reconstruction.prefect_workflow_id is None
+    ):
+        return None
+
+    try:
+        return await current_workflow_step(reconstruction.prefect_workflow_id)
+    except Exception:
+        logger.exception(
+            "Failed to read current workflow step for reconstruction %s",
+            reconstruction.id,
+        )
+        return None
 
 
 @router.get("/{reconstruction_id}/logs", response_class=StreamingResponse)

@@ -1,4 +1,5 @@
 import json
+import re
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from datetime import datetime
@@ -12,8 +13,16 @@ from prefect.client.schemas.filters import (
     LogFilter,
     LogFilterFlowRunId,
     LogFilterTimestamp,
+    TaskRunFilter,
+    TaskRunFilterFlowRunId,
 )
-from prefect.client.schemas.objects import TERMINAL_STATES, FlowRun, Log
+from prefect.client.schemas.objects import (
+    TERMINAL_STATES,
+    FlowRun,
+    Log,
+    State,
+    StateType,
+)
 from prefect.client.schemas.sorting import LogSort
 from prefect.events.subscribers import FlowRunSubscriber
 from prefect.exceptions import ObjectNotFound
@@ -93,6 +102,55 @@ async def get_owned_workflow_run(workflow_id: UUID, owner_id: UUID) -> FlowRun:
         raise WorkflowNotFoundError
 
     return flow_run
+
+
+async def cancel_workflow(workflow_id: UUID) -> None:
+    try:
+        async with get_client() as client:
+            flow_run = await client.read_flow_run(workflow_id)
+            if flow_run.state_type in TERMINAL_STATES:
+                return
+            await client.set_flow_run_state(
+                workflow_id,
+                State(type=StateType.CANCELLING, name="Cancelling"),
+            )
+    except ObjectNotFound as exc:
+        raise WorkflowNotFoundError from exc
+
+
+STEP_NAME_PATTERN = re.compile(r"^(.+)-[a-z0-9]{3}$")
+
+
+def _task_step_name(task_run_name: str) -> str:
+    """Strip the generated run-name suffix from a Prefect task run name."""
+
+    match = STEP_NAME_PATTERN.match(task_run_name)
+    return match.group(1) if match else task_run_name
+
+
+async def current_workflow_step(workflow_id: UUID) -> str | None:
+    """Name of the current or most recent Prefect task run of a workflow run."""
+
+    try:
+        async with get_client() as client:
+            task_runs = await client.read_task_runs(
+                task_run_filter=TaskRunFilter(
+                    flow_run_id=TaskRunFilterFlowRunId(any_=[workflow_id]),
+                ),
+            )
+    except ObjectNotFound:
+        return None
+    if not task_runs:
+        return None
+
+    running = [
+        task_run for task_run in task_runs if task_run.state_type == StateType.RUNNING
+    ]
+    if running:
+        latest = max(running, key=lambda run: run.updated or run.created)
+    else:
+        latest = max(task_runs, key=lambda run: run.updated or run.created)
+    return _task_step_name(latest.name)
 
 
 async def _read_all_log_pages(log_filter: LogFilter) -> tuple[Log, ...]:

@@ -242,6 +242,8 @@ export default {
         },
     },
     processing: {
+        details: 'Processing Details',
+        detailsDescription: 'Live progress, size and processing controls',
         title: 'Processing - {name}',
         cancelButton: 'Cancel Processing',
         notice: "Processing takes 10-60 min after upload. You'll receive a push notification when your plan is ready.",
@@ -251,6 +253,7 @@ export default {
         cancelConfirmation:
             'Are you sure you want to cancel processing for {name}? The uploaded video will be deleted.',
         cancelled: 'Processing cancelled.',
+        cancelFailed: 'Could not cancel processing. Please try again.',
     },
     plans: {
         associated: 'Associated Plan',

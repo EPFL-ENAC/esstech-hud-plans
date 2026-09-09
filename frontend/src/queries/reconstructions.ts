@@ -12,6 +12,7 @@ import {
 import { getAuthSubject } from 'src/lib/auth';
 import {
     getReconstructionSplat,
+    getReconstructionStep,
     getReconstructionVideo,
     listReconstructions,
 } from 'src/lib/buildings';
@@ -122,6 +123,45 @@ export function useReconstructionsQuery(buildingId: Ref<string>, offset: Ref<num
         document.removeEventListener('visibilitychange', updateVisibility);
     });
     return { ...query, isForegroundLoading, refetch, refresh };
+}
+
+export function useReconstructionStepQuery(buildingId: Ref<string>, reconstructionId: Ref<string>) {
+    const enabled = computed(() => buildingId.value !== '' && reconstructionId.value !== '');
+    const query = useQuery({
+        key: () => [
+            ...reconstructionKey(getAuthSubject(), buildingId.value),
+            'splat',
+            reconstructionId.value,
+            'step',
+        ],
+        enabled,
+        query: ({ signal }) =>
+            getReconstructionStep(buildingId.value, reconstructionId.value, signal),
+        staleTime: 0,
+    });
+
+    let pollingTimer: ReturnType<typeof setInterval> | undefined;
+    function stopPolling() {
+        clearInterval(pollingTimer);
+        pollingTimer = undefined;
+    }
+    watch(
+        enabled,
+        (shouldStartPolling) => {
+            stopPolling();
+            if (shouldStartPolling) {
+                pollingTimer = setInterval(() => {
+                    if (enabled.value && query.asyncStatus.value !== 'loading') {
+                        void query.refetch();
+                    }
+                }, 5_000);
+            }
+        },
+        { immediate: true },
+    );
+    onScopeDispose(stopPolling);
+
+    return query;
 }
 
 export function useReconstructionVideoQuery(
