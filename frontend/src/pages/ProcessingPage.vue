@@ -124,7 +124,8 @@ function confirmCancel() {
                 id: reconstruction.value?.id.slice(0, 8) ?? '',
             }),
         }),
-        cancel: true,
+        cancel: t('processing.cancelNo'),
+        ok: t('processing.cancelYes'),
         persistent: true,
     }).onOk(() => {
         void confirmCancelProcessing();

@@ -254,6 +254,8 @@ export default {
         ready: '{name} is ready.',
         thisCapture: 'this capture',
         cancelTitle: 'Cancel processing',
+        cancelYes: 'Yes',
+        cancelNo: 'No',
         cancelConfirmation:
             'Are you sure you want to cancel processing for {name}? The uploaded video will be deleted.',
         cancelled: 'Processing cancelled.',
