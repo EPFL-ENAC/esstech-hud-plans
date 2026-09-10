@@ -11,15 +11,21 @@
                 :value="percentage"
                 size="140px"
                 :thickness="0.08"
-                color="primary"
+                :color="isFailureState ? 'negative' : 'primary'"
                 track-color="grey-3"
             >
-                <span class="text-h4 text-primary text-weight-medium"> {{ percentage }}% </span>
+                <span
+                    class="text-h4 text-weight-medium"
+                    :class="isFailureState ? 'text-negative' : 'text-primary'"
+                >
+                    {{ percentage }}%
+                </span>
             </q-circular-progress>
 
             <h1 class="text-h6 text-weight-bold q-mb-sm q-mt-lg">{{ chipMessage }}</h1>
 
             <q-btn
+                v-if="!isFailureState"
                 :label="t('processing.cancelButton')"
                 outline
                 color="negative"
@@ -29,7 +35,14 @@
                 @click="confirmCancel"
             />
 
-            <q-banner rounded class="bg-secondary text-primary text-left q-pa-md">
+            <q-banner
+                v-if="isFailureState"
+                rounded
+                class="bg-negative text-white text-left q-pa-md"
+            >
+                {{ reconstruction?.error_message ?? t('processing.notice') }}
+            </q-banner>
+            <q-banner v-else rounded class="bg-secondary text-primary text-left q-pa-md">
                 {{ t('processing.notice') }}
             </q-banner>
         </div>
@@ -57,6 +70,7 @@ const router = useRouter();
 const $q = useQuasar();
 
 const buildingId = computed(() => route.params.id as string);
+const requestedReconstructionId = computed(() => route.query.reconstruction as string | null);
 const offset = ref(0);
 const { data } = useReconstructionsQuery(buildingId, offset);
 
@@ -65,10 +79,21 @@ const reconstructions = computed(() => data.value?.slice(0, RECONSTRUCTIONS_PAGE
 function isProcessing(reconstruction: ReconstructionSummary): boolean {
     return ['preparing', 'scheduled', 'running'].includes(reconstruction.status);
 }
-const reconstruction = computed(
-    () => reconstructions.value.find(isProcessing) ?? reconstructions.value[0],
-);
+const reconstruction = computed(() => {
+    const list = reconstructions.value;
+    // Prefer the reconstruction the user opened the drawer for, then any
+    // active one, then the most recent row.
+    const requested = requestedReconstructionId.value
+        ? list.find(({ id }) => id === requestedReconstructionId.value)
+        : undefined;
+    return requested ?? list.find(isProcessing) ?? list[0];
+});
 
+const isFailureState = computed(
+    () =>
+        reconstruction.value !== undefined &&
+        ['failed', 'cancelled', 'crashed'].includes(reconstruction.value.status),
+);
 const percentage = computed(() => Math.round((reconstruction.value?.progress ?? 0) * 100));
 const reconstructionId = computed(() => reconstruction.value?.id ?? '');
 const { data: currentStep } = useReconstructionStepQuery(buildingId, reconstructionId);

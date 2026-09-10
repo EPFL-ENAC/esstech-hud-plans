@@ -69,18 +69,15 @@
                             :active="expandedId === reconstruction.id"
                         />
                         <section
-                            v-if="isProcessing(reconstruction)"
+                            v-if="showProcessingDetails(reconstruction)"
                             class="q-my-lg"
                             :aria-label="t('processing.details')"
                         >
-                            <h3 class="text-h6 text-weight-bold q-mt-none q-mb-md">
-                                {{ t('processing.details') }}
-                            </h3>
                             <q-list class="q-gutter-y-md">
                                 <q-item
                                     clickable
                                     :aria-label="t('processing.details')"
-                                    :to="`/capture/processing/${buildingId}`"
+                                    :to="`/capture/processing/${buildingId}?reconstruction=${reconstruction.id}`"
                                 >
                                     <q-item-section avatar>
                                         <q-avatar
@@ -109,10 +106,7 @@
                             </q-list>
                         </section>
                         <section
-                            v-else-if="
-                                reconstruction.status !== 'cancelled' &&
-                                reconstruction.status !== 'failed'
-                            "
+                            v-else-if="reconstruction.status !== 'cancelled'"
                             class="q-my-lg"
                             :aria-label="t('plans.associated')"
                         >
@@ -272,6 +266,9 @@ function hasSplat(reconstruction: Reconstruction): boolean {
 }
 function isProcessing(reconstruction: Reconstruction): boolean {
     return ['preparing', 'scheduled', 'running'].includes(reconstruction.status);
+}
+function showProcessingDetails(reconstruction: Reconstruction): boolean {
+    return isProcessing(reconstruction) || reconstruction.status === 'failed';
 }
 watch(reconstructions, (rows) => {
     if (!rows.some(({ id }) => id === expandedId.value)) expandedId.value = null;
