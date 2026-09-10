@@ -14,8 +14,10 @@ RUN pip install "uv==$UV_VERSION"
 WORKDIR /app
 
 COPY uv.lock pyproject.toml /app/
+COPY alembic.ini /app/
 COPY start.sh /app/
 COPY api /app/api
+COPY migrations /app/migrations
 
 RUN uv pip install --system --no-cache-dir -e /app
 RUN mkdir -p /app/external/bin && ln -s $(which ffmpeg) /app/external/bin/ffmpeg
