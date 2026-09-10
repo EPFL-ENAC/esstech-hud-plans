@@ -35,12 +35,12 @@ def colmap_compute_geometric_data(sparse_dir: str):
     center = np.mean(positions, axis=0)
     centered_positions = positions - center
     cov = np.cov(centered_positions, rowvar=False)
-    eigenvalues, eigenvectors = np.linalg.eig(cov)
+    eigenvalues, eigenvectors = np.linalg.eigh(cov)
     normal = eigenvectors[:, np.argmin(eigenvalues)]
     tangent = eigenvectors[:, np.argmax(eigenvalues)]
     normal *= np.sign(np.dot(normal, average_up))
     normal /= np.linalg.norm(normal)
-    world_rotation = np.stack([tangent, np.cross(normal, tangent), normal], axis=1)
+    world_rotation = np.stack([tangent, np.cross(normal, tangent), normal], axis=1).real
     radius = np.max(np.linalg.norm(centered_positions, axis=1))
 
     return ColmapGeometricData(
