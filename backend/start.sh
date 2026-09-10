@@ -20,6 +20,8 @@ fi
 
 rclone config create jumphost.rcp.epfl.ch sftp host=jumphost.rcp.epfl.ch user=$SSH_USERNAME key_file=/root/.ssh/id_ed25519
 
+alembic upgrade head
+
 # PREFECT_API_URL must be set to http://prefect-host:4200/api
 python -m api.lib.workflows &
 
