@@ -1,6 +1,7 @@
 import { i18n } from 'src/i18n/instance';
 import { baseUrl } from 'boot/api';
 import { authFetch } from 'src/lib/auth';
+import { downloadWithProgress, type FetchProgress } from 'src/lib/utils/fetchProgress';
 
 export interface CurrentUser {
     id: string;
@@ -294,19 +295,13 @@ export async function getReconstructionSplat(
     buildingId: string,
     reconstructionId: string,
     signal: AbortSignal,
+    onProgress?: (progress: FetchProgress) => void,
 ): Promise<ArrayBuffer> {
-    const response = await authFetch(
+    return downloadWithProgress(
         `${baseUrl}/buildings/${encodeURIComponent(buildingId)}/reconstructions/${encodeURIComponent(reconstructionId)}/splat`,
         { signal },
+        onProgress,
     );
-    if (!response.ok) {
-        throw new ApiError(
-            `Splat request failed with HTTP ${response.status}`,
-            response.status,
-            null,
-        );
-    }
-    return response.arrayBuffer();
 }
 
 export function createReconstruction(

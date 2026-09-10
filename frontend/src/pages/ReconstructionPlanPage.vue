@@ -16,10 +16,7 @@
             </template>
         </q-banner>
 
-        <div v-if="isLoading" class="row items-center q-gutter-sm q-mb-md" role="status">
-            <q-spinner color="primary" />
-            <span>{{ data ? t('plans.splat.refreshing') : t('plans.splat.loading') }}</span>
-        </div>
+        <splat-download-progress v-if="isLoading" class="q-mb-md" />
 
         <template v-if="showSplat && data">
             <q-banner v-if="renderError" class="bg-red-1 text-negative q-mb-md" role="alert">
@@ -66,6 +63,7 @@ import { useRoute } from 'vue-router';
 import PageHeader from 'src/components/PageHeader.vue';
 import { ApiError } from 'src/lib/buildings';
 import { useReconstructionSplatQuery } from 'src/queries/reconstructions';
+import SplatDownloadProgress from 'src/components/SplatDownloadProgress.vue';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();

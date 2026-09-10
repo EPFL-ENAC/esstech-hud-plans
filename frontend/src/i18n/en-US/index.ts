@@ -281,6 +281,8 @@ export default {
             loadFailed: 'Unable to load the splat. Please try again.',
             refreshing: 'Refreshing splat…',
             loading: 'Loading splat…',
+            downloading: 'Downloading splats ({loaded} MB / {total} MB)',
+            downloadingUnknown: 'Downloading splats ({loaded} MB)',
             displayFailed:
                 'Unable to display this splat. The file may be invalid or 3D rendering unavailable in your browser.',
             preparing: 'Preparing splat…',

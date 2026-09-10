@@ -10,6 +10,8 @@ import {
     type Ref,
 } from 'vue';
 import { getAuthSubject } from 'src/lib/auth';
+import type { FetchProgress } from 'src/lib/utils/fetchProgress';
+import { useSplatDownloadStore } from 'src/stores/splatDownload';
 import {
     getReconstructionSplat,
     getReconstructionStep,
@@ -196,6 +198,14 @@ export function useReconstructionSplatQuery(
     reconstructionId: Ref<string>,
 ) {
     const subject = getAuthSubject();
+    const splatDownload = useSplatDownloadStore();
+
+    // A different building or reconstruction must restart the progress bar.
+    watch([buildingId, reconstructionId], () => splatDownload.reset());
+
+    function reportProgress(progress: FetchProgress): void {
+        splatDownload.update(progress);
+    }
 
     return useQuery({
         key: () => [
@@ -204,8 +214,15 @@ export function useReconstructionSplatQuery(
             reconstructionId.value,
         ],
         enabled: () => subject !== null && buildingId.value !== '' && reconstructionId.value !== '',
-        query: ({ signal }) =>
-            getReconstructionSplat(buildingId.value, reconstructionId.value, signal),
+        query: ({ signal }) => {
+            splatDownload.reset();
+            return getReconstructionSplat(
+                buildingId.value,
+                reconstructionId.value,
+                signal,
+                reportProgress,
+            );
+        },
         staleTime: Infinity,
         refetchOnWindowFocus: false,
         refetchOnReconnect: false,
