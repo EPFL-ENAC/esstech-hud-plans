@@ -4,6 +4,7 @@ import time
 from pathlib import Path, PurePosixPath
 from typing import Callable
 
+from api.lib.compute import scitas as scitas_compute
 from api.lib.compute.scitas import (
     SLURM_STATES_COMPLETED,
     Scitas,
@@ -158,15 +159,24 @@ class ScitasCommandExecutionEnvironment(CommandExecutionEnvironment):
                 working_directory_rel_path=remote_workspace,
                 capture=command.capture,
             )
+            # Record the job so other backend processes can cancel it later.
+            scitas_compute.register_job(job_name, workspace.name)
             result = self._wait_for_result(command, job_name, emit_log)
             job_finished = True
         except BaseException:
             if job_name is not None and not job_finished:
                 try:
                     Scitas.cancel_job(job_name)
+                    # The job is cancelled. Drop it from the registry.
+                    scitas_compute.forget_job(job_name, workspace.name)
                 except Exception:
+                    # Keep the registry entry, so a later call can retry the
+                    # cancellation.
                     logger.exception("Failed to cancel Scitas job %s", job_name)
             raise
+
+        # The Slurm job is finished. Drop it from the registry in every path.
+        scitas_compute.forget_job(job_name, workspace.name)
 
         if result.return_code != 0:
             raise CommandExecutionError(command, return_code=result.return_code)
