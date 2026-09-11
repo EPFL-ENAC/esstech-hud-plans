@@ -28,6 +28,7 @@ export default {
     },
     auth: {
         appTitle: 'Points of Home',
+        appDescription: 'Scan, plan, build.',
         signIn: 'Sign in',
         logOut: 'Log out',
         signingIn: 'Signing you in...',
