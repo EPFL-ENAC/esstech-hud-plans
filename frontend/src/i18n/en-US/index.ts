@@ -50,7 +50,6 @@ export default {
         tipsTitle: 'Tips for best results',
         wideAngleTip: 'Use wide-angle lens',
         wideAngleHint: 'Set to 0.5x or widest available',
-        waitingForLocation: 'Recording stopped. Waiting for location…',
         stopRecording: 'Stop Recording',
         startRecording: 'Start Recording',
         handoffFailed: 'Could not open New Capture. Please record again.',
@@ -97,6 +96,18 @@ export default {
                 'Camera access is not supported by this browser. Try a browser with camera support.',
             previewInterrupted:
                 'The camera preview was interrupted. Reconnect or allow the camera, then try again.',
+        },
+        record: {
+            close: 'Close',
+            record: 'Start recording',
+            stop: 'Stop recording',
+            elapsed: 'Recording {time}',
+            recordFailed: 'Recording failed. Please record again.',
+            discardTitle: 'Discard this capture?',
+            discardMessage: 'Your recording will be lost if you go back now.',
+            discard: 'Discard capture',
+            keep: 'Continue',
+            openFailed: 'Could not open the capture page. Please try again.',
         },
         video: {
             choose: 'Choose a video',

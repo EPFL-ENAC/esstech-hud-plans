@@ -1,7 +1,7 @@
 <template>
     <section :aria-label="t('capture.camera.viewfinder')" :aria-busy="state === 'requesting'">
         <q-select
-            v-if="cameras.length"
+            v-if="cameras.length && !fullscreen"
             :model-value="selectedCameraId"
             :options="cameras"
             emit-value
@@ -37,7 +37,13 @@
         >
             {{ t('capture.camera.recordingUnsupported') }}
         </q-banner>
-        <q-card flat bordered square class="camera-viewfinder bg-black text-white">
+        <q-card
+            flat
+            bordered
+            square
+            class="camera-viewfinder bg-black text-white"
+            :class="{ 'camera-viewfinder--fullscreen': fullscreen }"
+        >
             <video
                 ref="videoElement"
                 autoplay
@@ -45,6 +51,7 @@
                 playsinline
                 :aria-label="t('capture.camera.livePreview')"
                 class="camera-video"
+                :class="{ 'camera-video--contain': fullscreen }"
             />
 
             <div
@@ -104,6 +111,8 @@ import type { RecordedVideo } from 'src/lib/captured-video';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
+
+withDefaults(defineProps<{ fullscreen?: boolean }>(), { fullscreen: false });
 
 type CameraState = 'requesting' | 'live' | 'paused' | 'error';
 
@@ -520,6 +529,21 @@ defineExpose({
     display: block;
     width: 100%;
     height: 100%;
+    object-fit: contain;
+}
+
+/* Full-screen record page: the camera fills the whole viewport. */
+.camera-viewfinder--fullscreen {
+    width: 100vw;
+    height: 100vh;
+    aspect-ratio: auto;
+    max-height: none;
+}
+
+.camera-video--contain {
+    /* The video box fills the viewport and the whole camera image stays
+       visible. The black page background fills the leftover bars, so no
+       part of the image is cropped. */
     object-fit: contain;
 }
 </style>

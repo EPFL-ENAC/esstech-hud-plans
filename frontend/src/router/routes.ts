@@ -159,6 +159,13 @@ const routes: RouteRecordRaw[] = [
         ],
     },
 
+    // Full-screen camera capture page. The page component owns its layout so
+    // the main navigation drawer and footer do not affect it.
+    {
+        path: '/capture/record',
+        component: () => import('pages/CaptureRecordPage.vue'),
+    },
+
     // Auth routes, outside the main layout (no header/drawer)
     {
         path: '/login',
