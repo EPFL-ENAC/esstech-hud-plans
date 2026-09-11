@@ -52,7 +52,12 @@
             {{ t('buildings.fields.coordinatesHint') }}
         </p>
         <p v-if="locationError" class="text-negative q-mb-none" role="alert">{{ locationError }}</p>
-        <building-location-map :latitude="details.latitude" :longitude="details.longitude" />
+        <building-location-map
+            :latitude="details.latitude"
+            :longitude="details.longitude"
+            draggable
+            @coords-change="onMapCoordsChange"
+        />
     </div>
 </template>
 
@@ -94,6 +99,14 @@ function coordinateModel(field: 'latitude' | 'longitude') {
 
 const latitude = coordinateModel('latitude');
 const longitude = coordinateModel('longitude');
+
+function onMapCoordsChange(newLatitude: number, newLongitude: number) {
+    details.value = {
+        ...details.value,
+        latitude: newLatitude,
+        longitude: newLongitude,
+    };
+}
 
 const locating = ref(false);
 const locationError = ref<string | null>(null);

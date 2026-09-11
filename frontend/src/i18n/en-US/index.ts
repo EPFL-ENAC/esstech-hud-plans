@@ -165,7 +165,8 @@ export default {
             geolocationFailed: 'Could not get your location. Please try again.',
             invalidCoordinates:
                 'Provide both coordinates or leave both empty. Latitude must be between −90 and 90, and longitude between −180 and 180.',
-            coordinatesHint: 'Provide both coordinates or leave both empty.',
+            coordinatesHint:
+                'Provide both coordinates or leave both empty. You can also drag the map pin.',
         },
         list: {
             emptyPage: 'No buildings on this page.',
