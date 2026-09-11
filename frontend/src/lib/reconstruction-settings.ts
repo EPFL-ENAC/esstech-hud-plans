@@ -11,17 +11,19 @@ export interface ReconstructionSettingsConfig {
     brush: BrushTrainingConfig;
 }
 
-export function makeDefaultReconstructionSettings(): ReconstructionSettingsConfig {
+export function makeDefaultReconstructionSettings(
+    preset: ReconstructionPreset = 'advanced',
+): ReconstructionSettingsConfig {
     return {
-        ffmpeg: { fps: 2, fit_in_width: 1920, fit_in_height: 1920 },
+        ffmpeg: { fps: preset === 'indoors' ? 4 : 2, fit_in_width: 1920, fit_in_height: 1920 },
         framePicker: makeDefaultFramePickerConfig(),
         colmap: {
             data_type: 'video',
-            quality: 'low',
+            quality: preset === 'indoors' ? 'high' : 'low',
             camera_model: 'OPENCV',
             single_camera: true,
-            use_gpu: false,
-            use_global_mapper: false,
+            use_gpu: true,
+            use_global_mapper: true,
         },
         brush: makeDefaultBrushConfig(),
     };

@@ -126,7 +126,7 @@ const presetOptions = computed(() => [
     { value: 'outdoors', label: t('capture.presets.outdoors') },
     { value: 'advanced', label: t('capture.presets.advanced') },
 ]);
-const advancedSettings = ref(makeDefaultReconstructionSettings());
+const advancedSettings = ref(makeDefaultReconstructionSettings('advanced'));
 const hasValidSettings = computed(
     () => preset.value !== 'advanced' || isValidReconstructionSettings(advancedSettings.value),
 );
@@ -162,7 +162,7 @@ async function startProcessing(): Promise<void> {
         settings: toSplatGenerationSettings(
             preset.value === 'advanced'
                 ? advancedSettings.value
-                : makeDefaultReconstructionSettings(),
+                : makeDefaultReconstructionSettings(preset.value),
         ),
     };
     navigationError.value = '';
