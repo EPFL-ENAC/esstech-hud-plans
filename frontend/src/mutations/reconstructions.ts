@@ -1,6 +1,7 @@
 import { useMutation, useQueryCache } from '@pinia/colada';
 import { computed } from 'vue';
 import { getAuthSubject } from 'src/lib/auth';
+import { useVideoUploadStore } from 'src/stores/videoUpload';
 import {
     type BuildingSelection,
     type Reconstruction,
@@ -27,16 +28,19 @@ function retainedBuildingId(
 export function useSubmitReconstructionMutation() {
     const queryCache = useQueryCache();
     const subject = getAuthSubject();
+    const videoUpload = useVideoUploadStore();
     const mutation = useMutation<Reconstruction, SubmitReconstructionVariables, unknown>({
         mutation: async (variables) => {
+            videoUpload.reset();
             if (variables.buildingId === null) {
                 const result = await createBuildingFromReconstruction(
                     variables.building,
                     variables,
+                    videoUpload.update,
                 );
                 return result.reconstruction;
             }
-            return createReconstruction(variables.buildingId, variables);
+            return createReconstruction(variables.buildingId, variables, videoUpload.update);
         },
         onSettled(data, error, variables) {
             const buildingId = data?.building_id ?? retainedBuildingId(error, variables);

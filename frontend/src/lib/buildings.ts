@@ -2,6 +2,7 @@ import { i18n } from 'src/i18n/instance';
 import { baseUrl } from 'boot/api';
 import { authFetch } from 'src/lib/auth';
 import { downloadWithProgress, type FetchProgress } from 'src/lib/utils/fetchProgress';
+import { uploadWithProgress } from 'src/lib/utils/xhrUpload';
 
 export interface CurrentUser {
     id: string;
@@ -304,31 +305,51 @@ export async function getReconstructionSplat(
     );
 }
 
+async function uploadJson<T>(
+    path: string,
+    body: FormData,
+    onProgress?: (progress: FetchProgress) => void,
+): Promise<T> {
+    const { status, text } = await uploadWithProgress(`${baseUrl}${path}`, body, onProgress);
+    let parsed: unknown = null;
+    if (text) {
+        try {
+            parsed = JSON.parse(text) as unknown;
+        } catch {
+            parsed = text;
+        }
+    }
+    if (status < 200 || status >= 300) {
+        throw new ApiError(`Request failed with HTTP ${status}`, status, parsed);
+    }
+    return parsed as T;
+}
+
 export function createReconstruction(
     buildingId: string,
     submission: ReconstructionSubmission,
+    onProgress?: (progress: FetchProgress) => void,
 ): Promise<Reconstruction> {
     const formData = new FormData();
     formData.append('file', submission.video);
     formData.append('settings', JSON.stringify(submission.settings));
-    return requestJson(`/buildings/${encodeURIComponent(buildingId)}/reconstructions`, {
-        method: 'POST',
-        body: formData,
-    });
+    return uploadJson(
+        `/buildings/${encodeURIComponent(buildingId)}/reconstructions`,
+        formData,
+        onProgress,
+    );
 }
 
 export function createBuildingFromReconstruction(
     building: BuildingCreate,
     submission: ReconstructionSubmission,
+    onProgress?: (progress: FetchProgress) => void,
 ): Promise<BuildingFromReconstruction> {
     const formData = new FormData();
     formData.append('file', submission.video);
     formData.append('building', JSON.stringify(building));
     formData.append('settings', JSON.stringify(submission.settings));
-    return requestJson('/buildings/from-reconstruction', {
-        method: 'POST',
-        body: formData,
-    });
+    return uploadJson('/buildings/from-reconstruction', formData, onProgress);
 }
 
 export function getFailedBuildingId(error: unknown): string | null {

@@ -59,6 +59,8 @@ export default {
         invalidSettings:
             'Check the settings: counts must be positive whole numbers, SH degree must be between 0 and 3, and sharpness ratio must be between 0 and 1. Stop growth may be zero; distance threshold cannot be negative.',
         startProcessing: 'Start Processing (10-60min)',
+        uploading: 'Uploading video ({loaded} MB / {total} MB)',
+        uploadingUnknown: 'Uploading video ({loaded} MB)',
         camera: {
             viewfinder: 'Camera viewfinder',
             label: 'Camera',

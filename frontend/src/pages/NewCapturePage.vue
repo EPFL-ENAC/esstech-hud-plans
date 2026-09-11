@@ -49,6 +49,8 @@
             </template>
         </q-banner>
 
+        <video-upload-progress v-if="submitting" class="q-mb-md" />
+
         <q-btn
             :label="t('capture.startProcessing')"
             color="primary"
@@ -69,6 +71,7 @@ import { useQuasar } from 'quasar';
 import { useSubmitReconstructionMutation } from 'src/mutations/reconstructions';
 import { useCaptureStore } from 'src/stores/capture';
 import PageHeader from 'src/components/PageHeader.vue';
+import VideoUploadProgress from 'src/components/VideoUploadProgress.vue';
 import VideoPicker from 'src/components/VideoPicker.vue';
 import type { VideoMetadata } from 'src/components/VideoPicker.types';
 import BuildingPicker from 'src/components/BuildingPicker.vue';

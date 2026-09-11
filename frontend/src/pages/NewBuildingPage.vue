@@ -15,6 +15,8 @@
                 {{ errorMessage }}
             </q-banner>
 
+            <video-upload-progress v-if="submitting" class="q-mb-md" />
+
             <q-card flat bordered>
                 <q-card-section>
                     <reconstruction-submission-form
@@ -67,6 +69,7 @@ import { ref } from 'vue';
 import { useQuasar } from 'quasar';
 import { useRouter } from 'vue-router';
 import ReconstructionSubmissionForm from 'src/components/ReconstructionSubmissionForm.vue';
+import VideoUploadProgress from 'src/components/VideoUploadProgress.vue';
 import {
     type ReconstructionSubmission,
     createBuilding,
