@@ -1,3 +1,4 @@
+import logging
 import shutil
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -8,6 +9,7 @@ from uuid import UUID, uuid4
 
 from api.config import config
 from api.db import get_engine
+from api.lib.compute import scitas as scitas_compute
 from api.lib.compute.brush import run_brush_training
 from api.lib.compute.colmap import run_colmap_reconstruction
 from api.lib.compute.evaluate_video_frame import pick_frames
@@ -24,7 +26,10 @@ from api.models.workflows import (
     FramePickerSettings,
     SplatGenerationWorkflowSettings,
 )
-from api.services.reconstructions import ReconstructionService
+from api.services.reconstructions import (
+    ReconstructionNotFoundError,
+    ReconstructionService,
+)
 from fastapi import UploadFile
 from prefect import flow, get_run_logger, task
 from prefect.client.schemas.objects import FlowRun
@@ -36,6 +41,8 @@ from starlette.concurrency import run_in_threadpool
 SPLAT_GENERATION_DEPLOYMENT = "splat-generation/default"
 LOCAL_EXECUTION_ENVIRONMENT = LocalCommandExecutionEnvironment()
 SCITAS_EXECUTION_ENVIRONMENT = ScitasCommandExecutionEnvironment()
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -102,10 +109,19 @@ async def _reconstruction_completed_hook(
     if reconstruction_id is None:
         return
     async with _reconstruction_service() as reconstructions:
-        await reconstructions.mark_completed(
-            reconstruction_id,
-            artifacts=_completed_artifacts(flow_run),
-        )
+        try:
+            await reconstructions.mark_completed(
+                reconstruction_id,
+                artifacts=_completed_artifacts(flow_run),
+            )
+        except ReconstructionNotFoundError:
+            # A delete request removes the row before the runner runs this
+            # hook. There is no row to mark, so exit without an error.
+            logger.info(
+                "Reconstruction %s was deleted; skip completed update",
+                reconstruction_id,
+            )
+            return
 
 
 async def _reconstruction_failed_hook(
@@ -117,10 +133,19 @@ async def _reconstruction_failed_hook(
     if reconstruction_id is None:
         return
     async with _reconstruction_service() as reconstructions:
-        await reconstructions.mark_failed(
-            reconstruction_id,
-            error_message=_state_message(state) or "Reconstruction workflow failed",
-        )
+        try:
+            await reconstructions.mark_failed(
+                reconstruction_id,
+                error_message=_state_message(state) or "Reconstruction workflow failed",
+            )
+        except ReconstructionNotFoundError:
+            # A delete request removes the row before the runner runs this
+            # hook. There is no row to mark, so exit without an error.
+            logger.info(
+                "Reconstruction %s was deleted; skip failed update",
+                reconstruction_id,
+            )
+            return
 
 
 async def _reconstruction_cancelled_hook(
@@ -131,11 +156,30 @@ async def _reconstruction_cancelled_hook(
     reconstruction_id = _flow_run_reconstruction_id(flow_run)
     if reconstruction_id is None:
         return
+    if config.USE_SCITAS:
+        # Cancel the related Slurm jobs. Tasks blocked on I/O do not observe
+        # the cancellation in the worker process, so it keeps their Slurm
+        # jobs running.
+        try:
+            scitas_compute.cancel_registered_jobs(reconstruction_id.hex)
+        except Exception:
+            logger.exception(
+                "Failed to cancel Slurm jobs for reconstruction %s", reconstruction_id
+            )
     async with _reconstruction_service() as reconstructions:
-        await reconstructions.mark_cancelled(
-            reconstruction_id,
-            error_message=_state_message(state),
-        )
+        try:
+            await reconstructions.mark_cancelled(
+                reconstruction_id,
+                error_message=_state_message(state),
+            )
+        except ReconstructionNotFoundError:
+            # A delete request removes the row before the runner runs this
+            # hook. There is no row to mark, so exit without an error.
+            logger.info(
+                "Reconstruction %s was deleted; skip cancelled update",
+                reconstruction_id,
+            )
+            return
 
 
 async def _reconstruction_crashed_hook(
@@ -147,10 +191,19 @@ async def _reconstruction_crashed_hook(
     if reconstruction_id is None:
         return
     async with _reconstruction_service() as reconstructions:
-        await reconstructions.mark_crashed(
-            reconstruction_id,
-            error_message=_state_message(state),
-        )
+        try:
+            await reconstructions.mark_crashed(
+                reconstruction_id,
+                error_message=_state_message(state),
+            )
+        except ReconstructionNotFoundError:
+            # A delete request removes the row before the runner runs this
+            # hook. There is no row to mark, so exit without an error.
+            logger.info(
+                "Reconstruction %s was deleted; skip crashed update",
+                reconstruction_id,
+            )
+            return
 
 
 async def _record_reconstruction_progress(

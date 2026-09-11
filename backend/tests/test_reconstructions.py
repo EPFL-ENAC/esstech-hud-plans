@@ -9,7 +9,9 @@ from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
+from api.config import config
 from api.db import get_session
+from api.lib.compute import scitas as scitas_compute
 from api.lib.workflows import common as workflow_common
 from api.lib.workflows import splat_generation as splat_workflow
 from api.lib.workflows.common import WorkflowNotFoundError
@@ -1057,6 +1059,40 @@ def test_nested_reconstruction_logs_map_prefect_failure_to_503(
     assert response.json() == {"detail": "Workflow service is unavailable"}
 
 
+@pytest.mark.parametrize("use_scitas", [False, True])
+def test_nested_reconstruction_cancel_requests_slurm_job_cancellation(
+    reconstruction_api: tuple[TestClient, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+    use_scitas: bool,
+) -> None:
+    client, building_id = reconstruction_api
+    created = _submit_reconstruction(client, building_id).json()
+    reconstruction_id = UUID(created["id"])
+
+    async def fake_cancel_workflow(workflow_id: UUID) -> None:
+        assert workflow_id == WORKFLOW_ID
+
+    monkeypatch.setattr(reconstruction_views, "cancel_workflow", fake_cancel_workflow)
+    monkeypatch.setattr(config, "USE_SCITAS", use_scitas)
+    cancelled_workspaces: list[str] = []
+    monkeypatch.setattr(
+        scitas_compute,
+        "cancel_registered_jobs",
+        cancelled_workspaces.append,
+    )
+
+    response = client.post(
+        f"/buildings/{building_id}/reconstructions/{reconstruction_id}/cancel"
+    )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "cancelled"
+    if use_scitas:
+        assert cancelled_workspaces == [reconstruction_id.hex]
+    else:
+        assert cancelled_workspaces == []
+
+
 def test_nested_reconstruction_routes_map_database_failures_to_503(
     reconstruction_api: tuple[TestClient, UUID],
 ) -> None:
@@ -1551,6 +1587,50 @@ def test_delete_removes_files_and_row_for_completed_reconstruction(
             assert await service.get(reconstruction.id, building_id=building.id) is None
             assert await service.list(building_id=building.id) == []
             assert cancel_calls == []
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("use_scitas", [False, True])
+def test_delete_cancels_scitas_jobs_for_processing_reconstruction(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    use_scitas: bool,
+) -> None:
+    monkeypatch.setattr(config, "USE_SCITAS", use_scitas)
+    monkeypatch.setattr(workflow_common, "WORKFLOW_DATA_DIRECTORY", tmp_path)
+    cancel_calls: list[UUID] = []
+
+    async def fake_cancel(workflow_id: UUID) -> None:
+        cancel_calls.append(workflow_id)
+
+    monkeypatch.setattr(workflow_common, "cancel_workflow", fake_cancel)
+    cancelled_workspaces: list[str] = []
+    monkeypatch.setattr(
+        scitas_compute,
+        "cancel_registered_jobs",
+        cancelled_workspaces.append,
+    )
+
+    async def run() -> None:
+        async with reconstruction_service() as (service, _, _, building, _):
+            reconstruction, root = _stored_reconstruction(
+                tmp_path,
+                building.id,
+                status=ReconstructionStatus.RUNNING,
+                workflow_id=WORKFLOW_ID,
+            )
+            service._session.add(reconstruction)
+            await service._session.commit()
+
+            await service.delete(reconstruction)
+
+            assert not root.exists()
+            assert await service.get(reconstruction.id, building_id=building.id) is None
+            if use_scitas:
+                assert cancelled_workspaces == [reconstruction.id.hex]
+            else:
+                assert cancelled_workspaces == []
 
     asyncio.run(run())
 

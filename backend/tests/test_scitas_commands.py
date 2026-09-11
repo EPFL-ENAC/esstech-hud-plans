@@ -1,9 +1,29 @@
 from pathlib import Path, PurePosixPath
+from types import SimpleNamespace
 
 import pytest
 from api.lib.compute import scitas as scitas_compute
 from api.lib.utils import commands
 from api.lib.utils.commands.environments import scitas as scitas_commands
+
+
+def _stub_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """Stub the registry writes and collect the register and forget calls."""
+    registered: list[tuple[str, str]] = []
+    forgotten: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        scitas_compute,
+        "register_job",
+        lambda job_name, workspace_name: registered.append((job_name, workspace_name)),
+    )
+    monkeypatch.setattr(
+        scitas_compute,
+        "forget_job",
+        lambda job_name, workspace_name: forgotten.append((job_name, workspace_name)),
+    )
+    return registered, forgotten
 
 
 def test_scitas_environment_stages_runs_streams_and_retrieves_workspace(
@@ -14,6 +34,7 @@ def test_scitas_environment_stages_runs_streams_and_retrieves_workspace(
     log_path = tmp_path / "job.log"
     calls: list[tuple] = []
     status_checks = 0
+    registered, forgotten = _stub_registry(monkeypatch)
 
     def copy_to(source_path: str, dest_path: str) -> None:
         calls.append(("copy-to", source_path, dest_path))
@@ -71,8 +92,11 @@ def test_scitas_environment_stages_runs_streams_and_retrieves_workspace(
     assert result == commands.CommandResult(return_code=0)
     assert records == ["first", "partial ☃ record", "last"]
     assert sleeps == [0.25]
+    assert registered == [("job-1", "workspace with spaces")]
+    assert forgotten == [("job-1", "workspace with spaces")]
+    # The executor submits the job and waits for it. The data copies of the
+    # workspace belong to the pipeline, not to the executor.
     assert calls == [
-        ("copy-to", str(workspace.resolve()), remote_workspace),
         (
             "submit",
             {
@@ -89,7 +113,6 @@ def test_scitas_environment_stages_runs_streams_and_retrieves_workspace(
                 "capture": "combined",
             },
         ),
-        ("copy-from", remote_workspace, str(workspace.resolve())),
     ]
 
 
@@ -127,6 +150,7 @@ def test_scitas_environment_retrieves_outputs_before_reporting_failure(
         lambda source, destination: copied_from.append((source, destination)),
     )
     monkeypatch.setattr(scitas_commands.Scitas, "cancel_job", cancelled.append)
+    registered, forgotten = _stub_registry(monkeypatch)
 
     command = commands.Command(tool="colmap", arguments=(), capture="combined")
     environment = commands.ScitasCommandExecutionEnvironment(poll_interval_seconds=0)
@@ -136,8 +160,12 @@ def test_scitas_environment_retrieves_outputs_before_reporting_failure(
 
     assert error.value.command == command
     assert error.value.return_code == 42
-    assert copied_from == [("workflows/workspace", str(workspace.resolve()))]
+    # The executor does not copy the workspace data. The pipeline does.
+    assert copied_from == []
     assert cancelled == []
+    assert registered == [("failed-job", "workspace")]
+    # A job that reports failure in a normal way is dropped from the registry.
+    assert forgotten == [("failed-job", "workspace")]
 
 
 def test_scitas_environment_cancels_job_when_log_callback_fails(
@@ -162,6 +190,7 @@ def test_scitas_environment_cancels_job_when_log_callback_fails(
     )
     monkeypatch.setattr(scitas_commands.Scitas, "refresh_logs", lambda: None)
     monkeypatch.setattr(scitas_commands.Scitas, "cancel_job", cancelled.append)
+    registered, forgotten = _stub_registry(monkeypatch)
 
     def fail_to_log(record: str) -> None:
         raise RuntimeError(f"Could not log: {record}")
@@ -176,6 +205,9 @@ def test_scitas_environment_cancels_job_when_log_callback_fails(
         )
 
     assert cancelled == ["running-job"]
+    assert registered == [("running-job", "workspace")]
+    # The cancellation path runs, so the executor drops the job entry.
+    assert forgotten == [("running-job", "workspace")]
 
 
 def test_scitas_environment_stops_after_unavailable_status_limit(
@@ -199,6 +231,7 @@ def test_scitas_environment_stops_after_unavailable_status_limit(
     monkeypatch.setattr(scitas_commands.Scitas, "refresh_logs", lambda: None)
     monkeypatch.setattr(scitas_commands.Scitas, "get_job_status", lambda job_name: None)
     monkeypatch.setattr(scitas_commands.Scitas, "cancel_job", cancelled.append)
+    registered, forgotten = _stub_registry(monkeypatch)
     monkeypatch.setattr(scitas_commands.time, "sleep", lambda seconds: None)
 
     environment = commands.ScitasCommandExecutionEnvironment(
@@ -216,6 +249,8 @@ def test_scitas_environment_stops_after_unavailable_status_limit(
         )
 
     assert cancelled == ["unknown-job"]
+    assert registered == [("unknown-job", "workspace")]
+    assert forgotten == [("unknown-job", "workspace")]
 
 
 @pytest.mark.parametrize(
@@ -300,3 +335,117 @@ def test_scitas_submit_job_uses_workspace_cwd_capture_and_failure_safe_stage_out
     assert 'rsync -avL --ignore-existing "$SCRATCH_DIR/" "$EXPORT_DIR/"' in script
     assert 'if [ "$COMMAND_EXIT_CODE" -ne 0 ]; then' in script
     assert 'exit "$STAGE_OUT_EXIT_CODE"' in script
+
+
+@pytest.fixture
+def block_store(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[str]]:
+    """Replace the Prefect block seams with a dict-based fake store."""
+    store: dict[str, list[str]] = {}
+
+    monkeypatch.setattr(
+        scitas_compute,
+        "_read_registered_jobs",
+        lambda workspace_name: list(store.get(workspace_name, [])),
+    )
+
+    def fake_write(workspace_name: str, job_names: list[str]) -> None:
+        store[workspace_name] = list(job_names)
+
+    monkeypatch.setattr(scitas_compute, "_write_registered_jobs", fake_write)
+    return store
+
+
+def test_registry_register_list_and_forget(block_store: dict[str, list[str]]) -> None:
+    scitas_compute.register_job("job-1", "ws")
+    scitas_compute.register_job("job-2", "ws")
+    scitas_compute.register_job("job-1", "ws")
+
+    assert scitas_compute.list_registered_jobs("ws") == ["job-1", "job-2"]
+    assert scitas_compute.list_registered_jobs("missing") == []
+    assert block_store["ws"] == ["job-1", "job-2"]
+
+    scitas_compute.forget_job("job-1", "ws")
+    scitas_compute.forget_job("unknown", "ws")
+    assert scitas_compute.list_registered_jobs("ws") == ["job-2"]
+
+
+def test_registry_rejects_unsafe_workspace_names() -> None:
+    for ws in ("", ".", "..", "a/b"):
+        with pytest.raises(ValueError):
+            scitas_compute.register_job("job-1", ws)
+        with pytest.raises(ValueError):
+            scitas_compute.list_registered_jobs(ws)
+        with pytest.raises(ValueError):
+            scitas_compute.cancel_registered_jobs(ws)
+
+
+def test_registry_cancels_only_active_jobs_and_forgets_them(
+    block_store: dict[str, list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scitas_compute.register_job("running-1", "ws")
+    scitas_compute.register_job("done-1", "ws")
+    scitas_compute.register_job("unknown-1", "ws")
+    statuses = {
+        "running-1": "RUNNING",
+        "done-1": "COMPLETED",
+        "unknown-1": None,
+    }
+    cancelled: list[str] = []
+    monkeypatch.setattr(
+        scitas_compute.Scitas,
+        "get_job_status",
+        lambda job_name: statuses[job_name],
+    )
+    monkeypatch.setattr(
+        scitas_compute.Scitas,
+        "cancel_job",
+        lambda job_name: cancelled.append(job_name),
+    )
+
+    cancelled_names = scitas_compute.cancel_registered_jobs("ws")
+
+    assert cancelled_names == ["running-1"]
+    assert cancelled == ["running-1"]
+    assert scitas_compute.list_registered_jobs("ws") == []
+
+
+@pytest.mark.parametrize("failure", ["status", "cancel"])
+def test_registry_keeps_entries_and_continues_after_failure(
+    block_store: dict[str, list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    scitas_compute.register_job("broken-1", "ws")
+    scitas_compute.register_job("ok-1", "ws")
+    cancelled: list[str] = []
+
+    def fail_status(job_name: str) -> str:
+        if job_name == "broken-1":
+            raise RuntimeError("SSH down")
+        return "RUNNING"
+
+    def fail_cancel(job_name: str) -> None:
+        if job_name == "broken-1":
+            raise RuntimeError("scancel failed")
+        cancelled.append(job_name)
+
+    monkeypatch.setattr(
+        scitas_compute.Scitas,
+        "get_job_status",
+        fail_status if failure == "status" else lambda job_name: "RUNNING",
+    )
+    monkeypatch.setattr(
+        scitas_compute.Scitas,
+        "cancel_job",
+        fail_cancel
+        if failure == "cancel"
+        else lambda job_name: cancelled.append(job_name),
+    )
+
+    cancelled_names = scitas_compute.cancel_registered_jobs("ws")
+
+    assert cancelled_names == ["ok-1"]
+    assert cancelled == ["ok-1"]
+    # Keep the failed entry, so a later call can retry the cancellation.
+    assert scitas_compute.list_registered_jobs("ws") == ["broken-1"]

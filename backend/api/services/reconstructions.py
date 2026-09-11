@@ -4,6 +4,8 @@ import logging
 from typing import Literal
 from uuid import UUID
 
+from api.config import config
+from api.lib.compute import scitas as scitas_compute
 from api.lib.workflows import common as workflow_common
 from api.models.building import Building
 from api.models.reconstruction import (
@@ -184,6 +186,18 @@ class ReconstructionService:
             except workflow_common.WorkflowNotFoundError:
                 # The workflow run no longer exists.
                 pass
+
+        if config.USE_SCITAS:
+            # Cancel the related Slurm jobs now. Tasks blocked on I/O do not
+            # observe the cancellation in the worker process, so it keeps
+            # their Slurm jobs running.
+            try:
+                scitas_compute.cancel_registered_jobs(reconstruction.id.hex)
+            except Exception:
+                logger.exception(
+                    "Failed to cancel Slurm jobs for reconstruction %s",
+                    reconstruction.id,
+                )
 
         SplatGenerationArtifact.load(
             reconstruction.id,
