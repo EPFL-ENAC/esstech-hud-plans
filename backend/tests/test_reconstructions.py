@@ -12,6 +12,7 @@ import pytest
 from api.db import get_session
 from api.lib.workflows import common as workflow_common
 from api.lib.workflows import splat_generation as splat_workflow
+from api.lib.workflows.common import WorkflowNotFoundError
 from api.models.building import Building
 from api.models.reconstruction import (
     Reconstruction,
@@ -22,6 +23,7 @@ from api.models.reconstruction import (
 from api.models.user import User
 from api.models.workflows import FramePickerSettings, SplatGenerationWorkflowSettings
 from api.services.auth import require_user
+from api.services.buildings import BuildingService
 from api.services.reconstructions import (
     ReconstructionSchedulingError,
     ReconstructionService,
@@ -53,6 +55,36 @@ def _video(filename: str = "scan.mov", content: bytes = b"video bytes") -> Uploa
         filename=filename,
         headers=Headers({"content-type": "video/quicktime"}),
     )
+
+
+def _stored_reconstruction(
+    tmp_path: Path,
+    building_id: UUID,
+    *,
+    status: ReconstructionStatus,
+    workflow_id: UUID | None = None,
+) -> tuple[Reconstruction, Path]:
+    artifact_id = uuid4()
+    root = tmp_path / artifact_id.hex
+    (root / "video").mkdir(parents=True)
+    video_path = root / "video" / "input.mp4"
+    video_path.write_bytes(b"video bytes")
+    (root / "frames").mkdir()
+    (root / "frames_raw").mkdir()
+    (root / "colmap").mkdir()
+    splat_path = root / "splat.ply"
+    splat_path.write_bytes(b"splat bytes")
+    reconstruction = Reconstruction(
+        id=artifact_id,
+        building_id=building_id,
+        settings={},
+        status=status,
+        prefect_workflow_id=workflow_id,
+        workspace_directory=str(root.resolve()),
+        input_video_path=str(video_path.resolve()),
+        splat_path=str(splat_path.resolve()),
+    )
+    return reconstruction, root
 
 
 @asynccontextmanager
@@ -1489,3 +1521,226 @@ def test_building_from_reconstruction_openapi_contract(
     assert operation["responses"]["503"]["content"]["application/json"]["schema"][
         "$ref"
     ].endswith("/BuildingFromReconstructionError")
+
+
+def test_delete_removes_files_and_row_for_completed_reconstruction(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(workflow_common, "WORKFLOW_DATA_DIRECTORY", tmp_path)
+    cancel_calls: list[UUID] = []
+
+    async def fake_cancel(workflow_id: UUID) -> None:
+        cancel_calls.append(workflow_id)
+
+    monkeypatch.setattr(workflow_common, "cancel_workflow", fake_cancel)
+
+    async def run() -> None:
+        async with reconstruction_service() as (service, _, _, building, _):
+            reconstruction, root = _stored_reconstruction(
+                tmp_path,
+                building.id,
+                status=ReconstructionStatus.COMPLETED,
+            )
+            service._session.add(reconstruction)
+            await service._session.commit()
+
+            await service.delete(reconstruction)
+
+            assert not root.exists()
+            assert await service.get(reconstruction.id, building_id=building.id) is None
+            assert await service.list(building_id=building.id) == []
+            assert cancel_calls == []
+
+    asyncio.run(run())
+
+
+def test_delete_cancels_running_workflow_then_removes_files_and_row(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(workflow_common, "WORKFLOW_DATA_DIRECTORY", tmp_path)
+    cancel_calls: list[UUID] = []
+
+    async def fake_cancel(workflow_id: UUID) -> None:
+        cancel_calls.append(workflow_id)
+
+    monkeypatch.setattr(workflow_common, "cancel_workflow", fake_cancel)
+
+    async def run() -> None:
+        async with reconstruction_service() as (service, _, _, building, _):
+            reconstruction, root = _stored_reconstruction(
+                tmp_path,
+                building.id,
+                status=ReconstructionStatus.RUNNING,
+                workflow_id=WORKFLOW_ID,
+            )
+            service._session.add(reconstruction)
+            await service._session.commit()
+
+            await service.delete(reconstruction)
+
+            assert cancel_calls == [WORKFLOW_ID]
+            assert not root.exists()
+            assert await service.get(reconstruction.id, building_id=building.id) is None
+
+    asyncio.run(run())
+
+
+def test_delete_removes_files_and_row_for_failed_reconstruction(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(workflow_common, "WORKFLOW_DATA_DIRECTORY", tmp_path)
+    cancel_calls: list[UUID] = []
+
+    async def fake_cancel(workflow_id: UUID) -> None:
+        cancel_calls.append(workflow_id)
+
+    monkeypatch.setattr(workflow_common, "cancel_workflow", fake_cancel)
+
+    async def run() -> None:
+        async with reconstruction_service() as (service, _, _, building, _):
+            reconstruction, root = _stored_reconstruction(
+                tmp_path,
+                building.id,
+                status=ReconstructionStatus.FAILED,
+                workflow_id=WORKFLOW_ID,
+            )
+            service._session.add(reconstruction)
+            await service._session.commit()
+
+            await service.delete(reconstruction)
+
+            assert cancel_calls == []
+            assert not root.exists()
+            assert await service.get(reconstruction.id, building_id=building.id) is None
+
+    asyncio.run(run())
+
+
+def test_delete_tolerates_missing_workflow_run(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(workflow_common, "WORKFLOW_DATA_DIRECTORY", tmp_path)
+    cancel_calls: list[UUID] = []
+
+    async def fake_cancel(workflow_id: UUID) -> None:
+        cancel_calls.append(workflow_id)
+        raise WorkflowNotFoundError
+
+    monkeypatch.setattr(workflow_common, "cancel_workflow", fake_cancel)
+
+    async def run() -> None:
+        async with reconstruction_service() as (service, _, _, building, _):
+            reconstruction, root = _stored_reconstruction(
+                tmp_path,
+                building.id,
+                status=ReconstructionStatus.SCHEDULED,
+                workflow_id=WORKFLOW_ID,
+            )
+            service._session.add(reconstruction)
+            await service._session.commit()
+
+            await service.delete(reconstruction)
+
+            assert cancel_calls == [WORKFLOW_ID]
+            assert not root.exists()
+            assert await service.get(reconstruction.id, building_id=building.id) is None
+
+    asyncio.run(run())
+
+
+def test_nested_reconstruction_delete_route(
+    reconstruction_api: tuple[TestClient, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, building_id = reconstruction_api
+    cancel_calls: list[UUID] = []
+
+    async def fake_cancel(workflow_id: UUID) -> None:
+        cancel_calls.append(workflow_id)
+
+    monkeypatch.setattr(workflow_common, "cancel_workflow", fake_cancel)
+
+    response = _submit_reconstruction(client, building_id)
+    assert response.status_code == 202
+    created = response.json()
+    reconstruction_id = UUID(created["id"])
+    directory = Path(created["workspace_directory"])
+    assert directory.is_dir()
+
+    deleted = client.delete(
+        f"/buildings/{building_id}/reconstructions/{reconstruction_id}"
+    )
+
+    assert deleted.status_code == 204
+    assert cancel_calls == [WORKFLOW_ID]
+    assert not directory.exists()
+    assert (
+        client.get(
+            f"/buildings/{building_id}/reconstructions/{reconstruction_id}"
+        ).status_code
+        == 404
+    )
+    assert client.get(f"/buildings/{building_id}/reconstructions").json() == []
+    assert (
+        client.delete(f"/buildings/{building_id}/reconstructions/{uuid4()}").status_code
+        == 404
+    )
+
+
+def test_building_delete_removes_reconstruction_files_and_cancels_workflows(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(workflow_common, "WORKFLOW_DATA_DIRECTORY", tmp_path)
+    cancel_calls: list[UUID] = []
+
+    async def fake_cancel(workflow_id: UUID) -> None:
+        cancel_calls.append(workflow_id)
+
+    monkeypatch.setattr(workflow_common, "cancel_workflow", fake_cancel)
+
+    async def run() -> None:
+        async with reconstruction_service() as (
+            service,
+            session,
+            engine,
+            first,
+            second,
+        ):
+            running, running_root = _stored_reconstruction(
+                tmp_path,
+                first.id,
+                status=ReconstructionStatus.RUNNING,
+                workflow_id=WORKFLOW_ID,
+            )
+            completed, completed_root = _stored_reconstruction(
+                tmp_path,
+                first.id,
+                status=ReconstructionStatus.COMPLETED,
+            )
+            foreign, foreign_root = _stored_reconstruction(
+                tmp_path,
+                second.id,
+                status=ReconstructionStatus.COMPLETED,
+            )
+            session.add_all([running, completed, foreign])
+            await session.commit()
+
+            buildings = BuildingService(session)
+            await buildings.delete(first)
+
+            assert cancel_calls == [WORKFLOW_ID]
+            assert not running_root.exists()
+            assert not completed_root.exists()
+            assert foreign_root.exists()
+            assert await session.get(Building, BUILDING_ID) is None
+            assert await session.get(Building, OTHER_BUILDING_ID) is not None
+            assert await session.get(Reconstruction, running.id) is None
+            assert await session.get(Reconstruction, completed.id) is None
+            assert await session.get(Reconstruction, foreign.id) is not None
+
+    asyncio.run(run())

@@ -281,6 +281,13 @@ export function cancelReconstruction(
     );
 }
 
+export function deleteReconstruction(buildingId: string, reconstructionId: string): Promise<null> {
+    return requestJson<null>(
+        `/buildings/${encodeURIComponent(buildingId)}/reconstructions/${encodeURIComponent(reconstructionId)}`,
+        { method: 'DELETE' },
+    );
+}
+
 export async function getReconstructionVideo(
     buildingId: string,
     reconstructionId: string,

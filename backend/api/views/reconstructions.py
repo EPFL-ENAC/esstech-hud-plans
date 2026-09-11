@@ -224,6 +224,29 @@ async def get_reconstruction(
     return reconstruction
 
 
+@router.delete(
+    "/{reconstruction_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a reconstruction and its workflow data",
+    description=(
+        "Cancels the Prefect workflow if it is running, removes all workflow "
+        "data from disk (video, frames, COLMAP output, splat), and deletes the "
+        "reconstruction row. Prefect flow logs stay in the Prefect database."
+    ),
+)
+async def delete_reconstruction(
+    reconstruction: Annotated[Reconstruction, Depends(get_current_reconstruction)],
+    reconstructions: Annotated[
+        ReconstructionService,
+        Depends(get_reconstruction_service),
+    ],
+) -> None:
+    try:
+        await reconstructions.delete(reconstruction)
+    except (OSError, SQLAlchemyError) as exc:
+        raise _database_unavailable(exc) from exc
+
+
 @router.post(
     "/{reconstruction_id}/cancel",
     status_code=status.HTTP_202_ACCEPTED,

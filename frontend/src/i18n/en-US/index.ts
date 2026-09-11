@@ -226,6 +226,13 @@ export default {
         attempt: 'Reconstruction attempt',
         latestAttempt: 'Latest reconstruction attempt',
         deleteCapture: 'Delete Capture',
+        deleteTitle: 'Delete capture',
+        deleteYes: 'Yes',
+        deleteNo: 'No',
+        deleteConfirmation:
+            'Are you sure you want to delete {name}? The capture and all its data will be removed permanently.',
+        deleted: 'Capture deleted.',
+        deleteFailed: 'Could not delete the capture. Please try again.',
         empty: 'No reconstructions yet.',
         emptyPage: 'No reconstructions on this page.',
         pagination: 'Reconstruction pagination',

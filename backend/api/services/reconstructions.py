@@ -161,6 +161,42 @@ class ReconstructionService:
 
         return await self._record_scheduled_workflow(reconstruction, workflow_id)
 
+    async def delete(self, reconstruction: Reconstruction) -> None:
+        """Cancel a pending workflow, remove stored artifacts, and drop the row."""
+
+        # Imports stay local so the Prefect flow can call this service to publish
+        # lifecycle updates without creating a module import cycle.
+        from api.lib.workflows.splat_generation import SplatGenerationArtifact
+
+        if (
+            reconstruction.status
+            in (
+                ReconstructionStatus.PREPARING,
+                ReconstructionStatus.SCHEDULED,
+                ReconstructionStatus.RUNNING,
+            )
+            and reconstruction.prefect_workflow_id is not None
+        ):
+            try:
+                await workflow_common.cancel_workflow(
+                    reconstruction.prefect_workflow_id
+                )
+            except workflow_common.WorkflowNotFoundError:
+                # The workflow run no longer exists.
+                pass
+
+        SplatGenerationArtifact.load(
+            reconstruction.id,
+            workflow_common.WORKFLOW_DATA_DIRECTORY,
+        ).remove()
+
+        try:
+            await self._session.delete(reconstruction)
+            await self._session.commit()
+        except Exception:
+            await self._session.rollback()
+            raise
+
     async def mark_running(
         self,
         reconstruction_id: UUID,

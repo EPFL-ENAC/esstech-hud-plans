@@ -14,6 +14,7 @@ from api.models.building import (
 )
 from api.models.reconstruction import Reconstruction, ReconstructionStatus
 from api.models.user import utc_now
+from api.services.reconstructions import ReconstructionService
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -162,6 +163,15 @@ class BuildingService:
         return building
 
     async def delete(self, building: Building) -> None:
+        # Reconstruct rows cascade-delete with the building, but their workflow
+        # runs and artifact files must be cleaned up first to avoid leaks.
+        result = await self._session.exec(
+            select(Reconstruction).where(Reconstruction.building_id == building.id)
+        )
+        reconstruction_service = ReconstructionService(self._session)
+        for reconstruction in result.all():
+            await reconstruction_service.delete(reconstruction)
+
         try:
             await self._session.delete(building)
             await self._session.commit()

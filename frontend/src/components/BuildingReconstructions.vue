@@ -193,7 +193,8 @@
                             class="full-width"
                             unelevated
                             no-caps
-                            disable
+                            :disable="isDeleting"
+                            @click="confirmDelete(reconstruction)"
                         />
                     </div>
                 </q-expansion-item>
@@ -223,13 +224,15 @@
 
 <script setup lang="ts">
 import { computed, ref, toRef, watch } from 'vue';
+import { useQuasar } from 'quasar';
 import ReconstructionStatusChip from 'src/components/ReconstructionStatusChip.vue';
 import ReconstructionVideo from 'src/components/ReconstructionVideo.vue';
-import type { Reconstruction } from 'src/lib/buildings';
+import { deleteReconstruction, type Reconstruction } from 'src/lib/buildings';
 import { RECONSTRUCTIONS_PAGE_SIZE, useReconstructionsQuery } from 'src/queries/reconstructions';
 import { useI18n } from 'vue-i18n';
 
 const { t, locale } = useI18n();
+const $q = useQuasar();
 
 const props = defineProps<{ buildingId: string }>();
 const offset = ref(0);
@@ -260,6 +263,48 @@ const dateFormatter = computed(
 function setExpanded(id: string, open: boolean) {
     if (open) expandedId.value = id;
     else if (expandedId.value === id) expandedId.value = null;
+}
+const deletingId = ref<string | null>(null);
+const isDeleting = computed(() => deletingId.value !== null);
+
+function confirmDelete(reconstruction: Reconstruction) {
+    $q.dialog({
+        title: t('reconstructions.deleteTitle'),
+        message: t('reconstructions.deleteConfirmation', {
+            name: t('reconstructions.named', {
+                id: reconstruction.id.slice(0, 8),
+            }),
+        }),
+        cancel: t('reconstructions.deleteNo'),
+        ok: t('reconstructions.deleteYes'),
+        persistent: true,
+    }).onOk(() => {
+        void deleteCapture(reconstruction);
+    });
+}
+
+async function deleteCapture(reconstruction: Reconstruction) {
+    if (deletingId.value) return;
+
+    deletingId.value = reconstruction.id;
+    try {
+        await deleteReconstruction(props.buildingId, reconstruction.id);
+        $q.notify({
+            type: 'positive',
+            message: t('reconstructions.deleted'),
+            position: 'top',
+        });
+        expandedId.value = null;
+        void refetch();
+    } catch {
+        $q.notify({
+            type: 'negative',
+            message: t('reconstructions.deleteFailed'),
+            position: 'top',
+        });
+    } finally {
+        deletingId.value = null;
+    }
 }
 function hasSplat(reconstruction: Reconstruction): boolean {
     return reconstruction.status === 'completed' && reconstruction.splat_path !== null;
