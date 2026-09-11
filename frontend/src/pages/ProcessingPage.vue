@@ -25,7 +25,7 @@
             <h1 class="text-h6 text-weight-bold q-mb-sm q-mt-lg">{{ chipMessage }}</h1>
 
             <q-btn
-                v-if="!isFailureState"
+                v-if="!isFailureState && !isCompletedState"
                 :label="t('processing.cancelButton')"
                 outline
                 color="negative"
@@ -42,7 +42,11 @@
             >
                 {{ reconstruction?.error_message ?? t('processing.notice') }}
             </q-banner>
-            <q-banner v-else rounded class="bg-secondary text-primary text-left q-pa-md">
+            <q-banner
+                v-else-if="!isCompletedState"
+                rounded
+                class="bg-secondary text-primary text-left q-pa-md"
+            >
                 {{ t('processing.notice') }}
             </q-banner>
         </div>
@@ -50,7 +54,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import PageHeader from 'src/components/PageHeader.vue';
@@ -93,6 +97,24 @@ const isFailureState = computed(
     () =>
         reconstruction.value !== undefined &&
         ['failed', 'cancelled', 'crashed'].includes(reconstruction.value.status),
+);
+const isCompletedState = computed(() => reconstruction.value?.status === 'completed');
+
+// Redirect to the building page if the reconstruction is completed
+let redirectTimer: ReturnType<typeof setTimeout> | null = null;
+onUnmounted(() => {
+    if (redirectTimer !== null) clearTimeout(redirectTimer);
+});
+watch(
+    isCompletedState,
+    (completed) => {
+        if (!completed || redirectTimer !== null) return;
+        redirectTimer = setTimeout(() => {
+            redirectTimer = null;
+            void router.replace(`/building/${buildingId.value}`);
+        }, 1500);
+    },
+    { immediate: true },
 );
 const percentage = computed(() => Math.round((reconstruction.value?.progress ?? 0) * 100));
 const reconstructionId = computed(() => reconstruction.value?.id ?? '');
