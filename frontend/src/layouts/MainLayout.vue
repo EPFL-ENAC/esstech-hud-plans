@@ -60,6 +60,18 @@
             </q-list>
         </q-drawer>
 
+        <!-- Blank scrim behind the right drawer. Blocks all interaction
+             with the page outside the drawer while it is open. -->
+        <div
+            class="detail-drawer-scrim"
+            :class="detailOpen ? 'detail-drawer-scrim--open' : ''"
+            aria-hidden="true"
+            @mousedown.stop.prevent
+            @touchstart.stop.prevent
+            @touchmove.stop.prevent
+            @wheel.stop.prevent
+        ></div>
+
         <!-- Right drawer: detail pages. Full screen width on medium sized
              screens and smaller, and it stops above the footer so the footer
              tab bar stays visible. -->
@@ -83,7 +95,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { useRoute, useRouter } from 'vue-router';
 import { useUiStore, type BackgroundPageName } from 'src/stores/ui';
@@ -157,44 +169,6 @@ function closeDrawer() {
         void router.push(`/${ui.background}`);
     }
 }
-
-// A click that should not close the drawer: one inside the drawer itself,
-// or one on a link / other interactive element, which should keep its
-// normal behaviour (routing) instead.
-function clickShouldKeepDrawer(evt: MouseEvent): boolean {
-    const target = evt.target as Element | null;
-    if (target === null) {
-        return false;
-    }
-    const drawer = document.querySelector('.q-drawer--right');
-    if (drawer?.contains(target) === true) {
-        return true;
-    }
-    return (
-        target.closest('a, button, [role="button"], .q-item--clickable, .q-tab, .q-btn') !== null
-    );
-}
-
-// Close the right drawer when the user clicks on an empty region outside
-// it (e.g. the underlying page or the left navigation drawer padding).
-// Clicks on links or list items are left to their usual routing behaviour.
-// No backdrop is shown, so the left navigation drawer stays fully usable.
-//
-// Uses the capture phase on purpose: navigation (e.g. to a nested 2d/3d plan
-// page) re-renders the drawer content and detaches the clicked element from
-// the DOM. A bubbling handler would then fail its containment check against
-// the now-detached target and wrongly close the drawer. Capture runs at the
-// document before any target handler can navigate, so the clicked element is
-// still attached and the check stays reliable.
-function onDocClick(evt: MouseEvent) {
-    if (detailOpen.value !== true || clickShouldKeepDrawer(evt)) {
-        return;
-    }
-    closeDrawer();
-}
-
-onMounted(() => document.addEventListener('click', onDocClick, true));
-onBeforeUnmount(() => document.removeEventListener('click', onDocClick, true));
 </script>
 
 <style scoped>
@@ -223,5 +197,25 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick, true));
    sticky header must start at the drawer's left edge. */
 :deep(.q-drawer--right .q-page-sticky) {
     left: 0 !important;
+}
+
+/* Footer and header sit at z-index 2000, the right drawer at 3000 and the
+   left drawer at 1000. With z-index 1999 the scrim dims everything outside
+   the right drawer except the footer, which paints over it and stays fully
+   visible and usable on mobile. */
+.detail-drawer-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 1999;
+    background: rgba(0, 0, 0, 0.4);
+    opacity: 0;
+    pointer-events: none;
+    user-select: none;
+    transition: opacity 0.12s;
+}
+
+.detail-drawer-scrim--open {
+    opacity: 1;
+    pointer-events: auto;
 }
 </style>

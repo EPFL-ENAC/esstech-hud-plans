@@ -35,11 +35,13 @@ export type BuildingUpdate = {
     name?: string;
     address?: string | null;
 } & (
-    { latitude?: never; longitude?: never } | { latitude: number | null; longitude: number | null }
+    | { latitude?: never; longitude?: never }
+    | { latitude: number | null; longitude: number | null }
 );
 
 export type BuildingSelection =
-    { buildingId: string } | { buildingId: null; building: BuildingCreate };
+    | { buildingId: string }
+    | { buildingId: null; building: BuildingCreate };
 
 export function isValidBuildingCreate(building: BuildingCreate): boolean {
     const { latitude, longitude } = building;
@@ -67,7 +69,13 @@ export interface BuildingLocation {
 }
 
 export type ReconstructionStatus =
-    'preparing' | 'scheduled' | 'running' | 'completed' | 'failed' | 'cancelled' | 'crashed';
+    | 'preparing'
+    | 'scheduled'
+    | 'running'
+    | 'completed'
+    | 'failed'
+    | 'cancelled'
+    | 'crashed';
 
 export interface ReconstructionSummary {
     id: string;
