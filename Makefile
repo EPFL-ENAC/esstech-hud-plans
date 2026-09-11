@@ -3,6 +3,7 @@ install:
 	cd backend && make install
 	cd frontend && npm install
 	test -f .env || cp .env.example .env
+	make run-db && make db-upgrade && make stop-db
 
 lint:
 	uvx pre-commit run --all-files
@@ -24,9 +25,8 @@ run-db:
 stop-db:
 	docker compose down
 
-reset-db:
+drop-db:
 	docker compose down --volumes
-	docker compose up -d
 
 db-upgrade:
 	cd backend && make db-upgrade
@@ -36,6 +36,9 @@ db-downgrade:
 
 db-revision:
 	cd backend && make db-revision name="$(name)"
+
+run-all:
+	make run-db && make db-upgrade && trap 'kill $(jobs -p) 2>/dev/null; make stop-db' INT && { make run-workflows & make run-backend & make run-frontend & wait; }
 
 test:
 	cd backend && make test
