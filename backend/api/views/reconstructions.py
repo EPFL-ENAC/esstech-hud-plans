@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
+from api.config import config
+from api.lib.compute import scitas as scitas_compute
 from api.lib.compute.colmap_geometric_data import colmap_compute_geometric_data
 from api.lib.workflows import common as workflow_common
 from api.lib.workflows.common import (
@@ -282,6 +284,17 @@ async def cancel_reconstruction(
     except WorkflowNotFoundError:
         # The workflow run no longer exists.
         pass
+
+    # Cancel the related Slurm jobs now. The worker process does not notice
+    # cancellation of tasks that are blocked on I/O, so it keeps their
+    # Slurm jobs running.
+    if config.USE_SCITAS:
+        try:
+            scitas_compute.cancel_registered_jobs(reconstruction.id.hex)
+        except Exception:
+            logger.exception(
+                "Failed to cancel Slurm jobs for reconstruction %s", reconstruction.id
+            )
 
     # The on_cancellation hook only runs in a worker or engine process that
     # observes the run, so mark the reconstruction as cancelled here.

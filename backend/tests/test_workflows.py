@@ -1,5 +1,6 @@
 import asyncio
 import json
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,6 +20,7 @@ from api.models.workflows import (
     SplatGenerationWorkflowSettings,
 )
 from api.services.auth import require_user
+from api.services.reconstructions import ReconstructionNotFoundError
 from api.views import workflows as workflow_views
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -1338,3 +1340,93 @@ def test_listen_to_workflow_returns_503_when_stream_cannot_start(
     assert response.status_code == 503
     assert response.json() == {"detail": "Workflow log stream is unavailable"}
     assert stream_closed
+
+
+@pytest.mark.parametrize("use_scitas", [False, True])
+def test_reconstruction_cancelled_hook_cancels_registered_scitas_jobs(
+    monkeypatch: pytest.MonkeyPatch,
+    use_scitas: bool,
+) -> None:
+    reconstruction_id = uuid4()
+    flow_run = SimpleNamespace(
+        id=uuid4(),
+        parameters={"reconstruction_id": str(reconstruction_id), "settings": {}},
+    )
+    state = SimpleNamespace(message="state message", name="State")
+
+    class FakeReconstructionService:
+        async def mark_cancelled(self, received_id: UUID, **kwargs: object) -> None:
+            assert received_id == reconstruction_id
+
+    @asynccontextmanager
+    async def fake_service_context():
+        yield FakeReconstructionService()
+
+    monkeypatch.setattr(splat_workflow, "_reconstruction_service", fake_service_context)
+    monkeypatch.setattr(splat_workflow.config, "USE_SCITAS", use_scitas)
+    cancelled_workspaces: list[str] = []
+    monkeypatch.setattr(
+        splat_workflow.scitas_compute,
+        "cancel_registered_jobs",
+        cancelled_workspaces.append,
+    )
+
+    asyncio.run(splat_workflow._reconstruction_cancelled_hook(None, flow_run, state))
+
+    if use_scitas:
+        assert cancelled_workspaces == [reconstruction_id.hex]
+    else:
+        assert cancelled_workspaces == []
+
+
+# A delete request removes the reconstruction row before the runner runs the
+# terminal hooks. None of the hooks may raise when the row is missing.
+@pytest.mark.parametrize(
+    ("hook_name", "mark_method_name"),
+    [
+        ("_reconstruction_completed_hook", "mark_completed"),
+        ("_reconstruction_failed_hook", "mark_failed"),
+        ("_reconstruction_crashed_hook", "mark_crashed"),
+    ],
+)
+def test_reconstruction_terminal_hooks_tolerate_deleted_reconstruction(
+    monkeypatch: pytest.MonkeyPatch,
+    hook_name: str,
+    mark_method_name: str,
+) -> None:
+    reconstruction_id = uuid4()
+    flow_run = SimpleNamespace(
+        id=uuid4(),
+        parameters={
+            "reconstruction_id": str(reconstruction_id),
+            "settings": {},
+            "workspace_directory": "/data/workspace",
+            "video_path": "/data/workspace/video/input.mp4",
+            "frames_directory": "/data/workspace/frames",
+            "colmap_directory": "/data/workspace/colmap",
+            "splat_path": "/data/workspace/splat.ply",
+        },
+    )
+    state = SimpleNamespace(message="state message", name="State")
+
+    class FakeReconstructionService:
+        async def mark_failed(self, received_id: UUID, **kwargs: object) -> None:
+            assert received_id == reconstruction_id
+            raise ReconstructionNotFoundError
+
+        async def mark_crashed(self, received_id: UUID, **kwargs: object) -> None:
+            assert received_id == reconstruction_id
+            raise ReconstructionNotFoundError
+
+        async def mark_completed(self, received_id: UUID, **kwargs: object) -> None:
+            assert received_id == reconstruction_id
+            raise ReconstructionNotFoundError
+
+    @asynccontextmanager
+    async def fake_service_context():
+        yield FakeReconstructionService()
+
+    monkeypatch.setattr(splat_workflow, "_reconstruction_service", fake_service_context)
+
+    hook = getattr(splat_workflow, hook_name)
+    asyncio.run(hook(None, flow_run, state))

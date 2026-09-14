@@ -12,6 +12,18 @@ from typing import Literal
 import paramiko
 from api.config import config
 from api.lib.compute.remote import RemoteCompute, StepName
+from prefect.blocks.core import Block
+from prefect.utilities.asyncutils import run_coro_as_sync
+
+
+class ScitasJobNamesBlock(Block):
+    """A block that stores the Slurm job names of one Scitas workspace."""
+
+    _block_type_name = "Scitas Job Names"
+    _block_type_slug = "scitas-job-names"
+
+    value: list[str]
+
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -149,6 +161,129 @@ def _get_partition_for_tool(tool: StepName) -> str:
         return config.SCITAS_PARTITION_COLMAP
     else:
         return config.SCITAS_PARTITION_DEFAULT
+
+
+# Prefect-backed job registry --------------------------------------------
+# One ScitasJobNamesBlock block document per workspace, in the Prefect
+# database. Each document holds a list of the Slurm job names submitted for
+# that workspace. The workspace of a splat-generation job is the reconstruction
+# artifact directory, so its name is the reconstruction ID hex. Every backend
+# process that reaches the Prefect API shares the registry and can cancel the
+# jobs when a request for cancellation arrives. The synchronous functions run
+# the block calls through run_coro_as_sync, so callers can be sync worker
+# threads or async request handlers.
+REGISTRY_PREFIX = "scitas-jobs-"
+
+
+def _block_name(workspace_name: str) -> str:
+    """Return the Prefect block document name of a workspace.
+
+    The workspace name comes from a directory name. Reject unsafe names, so
+    they can not inject other block names.
+    """
+    if (
+        not workspace_name
+        or workspace_name in (".", "..")
+        or os.sep in workspace_name
+        or (os.altsep is not None and os.altsep in workspace_name)
+    ):
+        raise ValueError(f"Unsafe registry workspace name: {workspace_name!r}")
+    return f"{REGISTRY_PREFIX}{workspace_name}"
+
+
+async def _read_registered_jobs_async(workspace_name: str) -> list[str]:
+    """Load the registered job names of a workspace from Prefect.
+
+    A missing block document is not an error and returns no names.
+    """
+    name = _block_name(workspace_name)  # Check the workspace name first.
+    try:
+        block = await ScitasJobNamesBlock.aload(name)
+    except ValueError:
+        # The block document is missing. Report an empty registry.
+        return []
+    value = block.value
+    if not isinstance(value, list):
+        return []
+    return [name for name in value if isinstance(name, str)]
+
+
+def _read_registered_jobs(workspace_name: str) -> list[str]:
+    """Read the registered job names of a workspace, synchronously."""
+    return run_coro_as_sync(_read_registered_jobs_async(workspace_name))
+
+
+async def _write_registered_jobs_async(
+    workspace_name: str,
+    job_names: list[str],
+) -> None:
+    """Store the registered job names of a workspace in Prefect.
+
+    An empty list deletes the block document.
+    """
+    name = _block_name(workspace_name)
+    if job_names:
+        await ScitasJobNamesBlock(value=job_names).asave(name, overwrite=True)
+    else:
+        try:
+            await ScitasJobNamesBlock.adelete(name)
+        except ValueError:
+            # The block document is already missing. There is nothing to do.
+            pass
+
+
+def _write_registered_jobs(workspace_name: str, job_names: list[str]) -> None:
+    """Write the registered job names of a workspace, synchronously."""
+    run_coro_as_sync(_write_registered_jobs_async(workspace_name, job_names))
+
+
+def register_job(job_name: str, workspace_name: str) -> None:
+    """Add a job name to the Prefect block document of its workspace."""
+    _block_name(workspace_name)  # Check the workspace name before any API call.
+    names = _read_registered_jobs(workspace_name)
+    if job_name not in names:
+        names.append(job_name)
+    _write_registered_jobs(workspace_name, names)
+
+
+def forget_job(job_name: str, workspace_name: str) -> None:
+    """Remove a job name from the Prefect block document of its workspace."""
+    _block_name(workspace_name)  # Check the workspace name before any API call.
+    names = _read_registered_jobs(workspace_name)
+    if job_name in names:
+        names.remove(job_name)
+        _write_registered_jobs(workspace_name, names)
+
+
+def list_registered_jobs(workspace_name: str) -> list[str]:
+    """Return the registered job names of a workspace."""
+    return _read_registered_jobs(workspace_name)
+
+
+def cancel_registered_jobs(workspace_name: str) -> list[str]:
+    """Cancel the registered jobs of a workspace and forget the cancelled names.
+
+    Cancel only jobs that are still pending or running. If a status check or
+    a cancellation fails, keep the registry entry, so a later call can retry.
+    Continue with the remaining jobs.
+    """
+    cancelled: list[str] = []
+    for job_name in list_registered_jobs(workspace_name):
+        try:
+            status = Scitas.get_job_status(job_name)
+            if status is not None and status not in SLURM_STATES_COMPLETED:
+                Scitas.cancel_job(job_name)
+                cancelled.append(job_name)
+            forget_job(job_name, workspace_name)
+        except Exception:
+            logger.exception("Failed to cancel registered Scitas job %s", job_name)
+    if cancelled:
+        logger.info(
+            "Cancelled Scitas jobs %s of workspace %s",
+            cancelled,
+            workspace_name,
+        )
+    return cancelled
 
 
 class Scitas(RemoteCompute):
