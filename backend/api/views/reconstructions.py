@@ -40,6 +40,7 @@ from fastapi import Depends, File, Form, HTTPException, Query, UploadFile, statu
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.routing import APIRouter
 from sqlalchemy.exc import SQLAlchemyError
+from starlette.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)
 
@@ -288,9 +289,13 @@ async def cancel_reconstruction(
     # Cancel the related Slurm jobs now. The worker process does not notice
     # cancellation of tasks that are blocked on I/O, so it keeps their
     # Slurm jobs running.
+    # Run the cancellation in a threadpool. The call does blocking I/O (SSH
+    # and Prefect API calls), so it must not block the event loop.
     if config.USE_SCITAS:
         try:
-            scitas_compute.cancel_registered_jobs(reconstruction.id.hex)
+            await run_in_threadpool(
+                scitas_compute.cancel_registered_jobs, reconstruction.id.hex
+            )
         except Exception:
             logger.exception(
                 "Failed to cancel Slurm jobs for reconstruction %s", reconstruction.id

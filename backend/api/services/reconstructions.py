@@ -18,6 +18,7 @@ from api.models.workflows import SplatGenerationWorkflowSettings
 from fastapi import UploadFile
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +190,12 @@ class ReconstructionService:
 
         if config.USE_SCITAS:
             try:
-                scitas_compute.cancel_registered_jobs(reconstruction.id.hex)
+                # Run the cancellation in a threadpool. The call does blocking
+                # I/O (SSH and Prefect API calls), so it must not block the
+                # event loop of the async request handler.
+                await run_in_threadpool(
+                    scitas_compute.cancel_registered_jobs, reconstruction.id.hex
+                )
             except Exception:
                 logger.exception(
                     "Failed to cancel Slurm jobs for reconstruction %s",

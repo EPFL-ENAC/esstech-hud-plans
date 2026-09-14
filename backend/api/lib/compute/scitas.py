@@ -174,6 +174,19 @@ def _get_partition_for_tool(tool: StepName) -> str:
 # threads or async request handlers.
 REGISTRY_PREFIX = "scitas-jobs-"
 
+_registry_locks: dict[str, threading.Lock] = {}
+_registry_locks_lock = threading.Lock()
+
+
+def _registry_lock(block_name: str) -> threading.Lock:
+    """Return the lock that serialises registry updates of one workspace."""
+    with _registry_locks_lock:
+        lock = _registry_locks.get(block_name)
+        if lock is None:
+            lock = threading.Lock()
+            _registry_locks[block_name] = lock
+        return lock
+
 
 def _block_name(workspace_name: str) -> str:
     """Return the Prefect block document name of a workspace.
@@ -239,20 +252,22 @@ def _write_registered_jobs(workspace_name: str, job_names: list[str]) -> None:
 
 def register_job(job_name: str, workspace_name: str) -> None:
     """Add a job name to the Prefect block document of its workspace."""
-    _block_name(workspace_name)  # Check the workspace name before any API call.
-    names = _read_registered_jobs(workspace_name)
-    if job_name not in names:
-        names.append(job_name)
-    _write_registered_jobs(workspace_name, names)
+    name = _block_name(workspace_name)  # Check the workspace name first.
+    with _registry_lock(name):
+        names = _read_registered_jobs(workspace_name)
+        if job_name not in names:
+            names.append(job_name)
+        _write_registered_jobs(workspace_name, names)
 
 
 def forget_job(job_name: str, workspace_name: str) -> None:
     """Remove a job name from the Prefect block document of its workspace."""
-    _block_name(workspace_name)  # Check the workspace name before any API call.
-    names = _read_registered_jobs(workspace_name)
-    if job_name in names:
-        names.remove(job_name)
-        _write_registered_jobs(workspace_name, names)
+    name = _block_name(workspace_name)  # Check the workspace name first.
+    with _registry_lock(name):
+        names = _read_registered_jobs(workspace_name)
+        if job_name in names:
+            names.remove(job_name)
+            _write_registered_jobs(workspace_name, names)
 
 
 def list_registered_jobs(workspace_name: str) -> list[str]:
@@ -265,6 +280,9 @@ def cancel_registered_jobs(workspace_name: str) -> list[str]:
 
     Cancel only jobs that are still pending or running. If a status check or
     a cancellation fails, keep the registry entry, so a later call can retry.
+    If the forget step fails after a cancellation, the job is already
+    cancelled, so the kept entry only causes a harmless second cancel of an
+    already-cancelled job in a later call.
     Continue with the remaining jobs.
     """
     cancelled: list[str] = []
@@ -274,9 +292,13 @@ def cancel_registered_jobs(workspace_name: str) -> list[str]:
             if status is not None and status not in SLURM_STATES_COMPLETED:
                 Scitas.cancel_job(job_name)
                 cancelled.append(job_name)
-            forget_job(job_name, workspace_name)
         except Exception:
             logger.exception("Failed to cancel registered Scitas job %s", job_name)
+            continue
+        try:
+            forget_job(job_name, workspace_name)
+        except Exception:
+            logger.exception("Failed to forget registered Scitas job %s", job_name)
     if cancelled:
         logger.info(
             "Cancelled Scitas jobs %s of workspace %s",

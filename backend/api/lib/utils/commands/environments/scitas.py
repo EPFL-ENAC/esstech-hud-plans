@@ -171,7 +171,8 @@ class ScitasCommandExecutionEnvironment(CommandExecutionEnvironment):
                     logger.exception("Failed to cancel Scitas job %s", job_name)
             raise
 
-        scitas_compute.forget_job(job_name, workspace.name)
+        if job_name is not None:
+            scitas_compute.forget_job(job_name, workspace.name)
 
         if result.return_code != 0:
             raise CommandExecutionError(command, return_code=result.return_code)
