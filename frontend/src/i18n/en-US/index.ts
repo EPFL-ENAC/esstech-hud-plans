@@ -241,6 +241,7 @@ export default {
             preparing: 'Preparing',
             scheduled: 'Scheduled',
             running: 'Processing',
+            cancelling: 'Cancelling',
             completed: 'Completed',
             failed: 'Failed',
             cancelled: 'Cancelled',

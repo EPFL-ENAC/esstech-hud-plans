@@ -35,13 +35,11 @@ export type BuildingUpdate = {
     name?: string;
     address?: string | null;
 } & (
-    | { latitude?: never; longitude?: never }
-    | { latitude: number | null; longitude: number | null }
+    { latitude?: never; longitude?: never } | { latitude: number | null; longitude: number | null }
 );
 
 export type BuildingSelection =
-    | { buildingId: string }
-    | { buildingId: null; building: BuildingCreate };
+    { buildingId: string } | { buildingId: null; building: BuildingCreate };
 
 export function isValidBuildingCreate(building: BuildingCreate): boolean {
     const { latitude, longitude } = building;
@@ -72,6 +70,7 @@ export type ReconstructionStatus =
     | 'preparing'
     | 'scheduled'
     | 'running'
+    | 'cancelling'
     | 'completed'
     | 'failed'
     | 'cancelled'

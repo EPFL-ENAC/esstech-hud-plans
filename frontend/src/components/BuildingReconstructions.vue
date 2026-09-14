@@ -56,7 +56,7 @@
                             </q-item-label>
                             <q-item-label>
                                 <reconstruction-status-chip
-                                    :reconstruction="reconstruction"
+                                    :reconstruction="chipReconstruction(reconstruction)"
                                     :tooltip="t('reconstructions.attempt')"
                                 />
                             </q-item-label>
@@ -229,6 +229,7 @@ import ReconstructionStatusChip from 'src/components/ReconstructionStatusChip.vu
 import ReconstructionVideo from 'src/components/ReconstructionVideo.vue';
 import { deleteReconstruction, type Reconstruction } from 'src/lib/buildings';
 import { RECONSTRUCTIONS_PAGE_SIZE, useReconstructionsQuery } from 'src/queries/reconstructions';
+import { useReconstructionProcessingStore } from 'src/stores/reconstructions';
 import { useI18n } from 'vue-i18n';
 
 const { t, locale } = useI18n();
@@ -244,6 +245,7 @@ const {
     isForegroundLoading: isLoading,
 } = useReconstructionsQuery(toRef(props, 'buildingId'), offset);
 const reconstructions = computed(() => data.value?.slice(0, RECONSTRUCTIONS_PAGE_SIZE) ?? []);
+const reconstructionProcessingStore = useReconstructionProcessingStore();
 const hasNext = computed(() => (data.value?.length ?? 0) > RECONSTRUCTIONS_PAGE_SIZE);
 const page = computed({
     get: () => offset.value / RECONSTRUCTIONS_PAGE_SIZE + 1,
@@ -311,6 +313,17 @@ function hasSplat(reconstruction: Reconstruction): boolean {
 }
 function isProcessing(reconstruction: Reconstruction): boolean {
     return ['preparing', 'scheduled', 'running'].includes(reconstruction.status);
+}
+function chipReconstruction(reconstruction: Reconstruction): Reconstruction {
+    // The optimistic state only applies while the backend still reports
+    // a processing status.
+    if (
+        reconstructionProcessingStore.isCancelling(reconstruction.id) &&
+        isProcessing(reconstruction)
+    ) {
+        return { ...reconstruction, status: 'cancelling' };
+    }
+    return reconstruction;
 }
 function showProcessingDetails(reconstruction: Reconstruction): boolean {
     return isProcessing(reconstruction) || reconstruction.status === 'failed';

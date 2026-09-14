@@ -25,7 +25,7 @@
             <h1 class="text-h6 text-weight-bold q-mb-sm q-mt-lg">{{ chipMessage }}</h1>
 
             <q-btn
-                v-if="!isFailureState && !isCompletedState"
+                v-if="!isFailureState && !isCompletedState && !isCancelling"
                 :label="t('processing.cancelButton')"
                 outline
                 color="negative"
@@ -66,6 +66,7 @@ import {
     useReconstructionStepQuery,
 } from 'src/queries/reconstructions';
 import { useI18n } from 'vue-i18n';
+import { useReconstructionProcessingStore } from 'src/stores/reconstructions';
 
 const { t } = useI18n();
 
@@ -76,10 +77,12 @@ const $q = useQuasar();
 const buildingId = computed(() => route.params.id as string);
 const requestedReconstructionId = computed(() => route.query.reconstruction as string | null);
 const offset = ref(0);
-const { data } = useReconstructionsQuery(buildingId, offset);
+const { data, refetch } = useReconstructionsQuery(buildingId, offset);
 
 // Same source as the status chips in the reconstruction list.
 const reconstructions = computed(() => data.value?.slice(0, RECONSTRUCTIONS_PAGE_SIZE) ?? []);
+// Server statuses only. 'cancelling' is a frontend-only optimistic state
+// (see confirmCancelProcessing) that the backend never returns.
 function isProcessing(reconstruction: ReconstructionSummary): boolean {
     return ['preparing', 'scheduled', 'running'].includes(reconstruction.status);
 }
@@ -99,6 +102,15 @@ const isFailureState = computed(
         ['failed', 'cancelled', 'crashed'].includes(reconstruction.value.status),
 );
 const isCompletedState = computed(() => reconstruction.value?.status === 'completed');
+const reconstructionProcessingStore = useReconstructionProcessingStore();
+// The optimistic state only applies while the backend still reports a
+// processing status, so a leftover entry never shows for a settled row.
+const isCancelling = computed(
+    () =>
+        reconstruction.value !== undefined &&
+        reconstructionProcessingStore.isCancelling(reconstruction.value.id) &&
+        isProcessing(reconstruction.value),
+);
 
 // Redirect to the building page if the reconstruction is completed
 let redirectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -130,6 +142,9 @@ const chipMessage = computed(() => {
     if (!reconstructionValue) {
         return t('reconstructions.noReconstruction');
     }
+    if (isCancelling.value) {
+        return t('reconstructions.status.cancelling');
+    }
     if (reconstructionValue.status === 'running') {
         const step = currentStepDisplay.value;
         if (step) return step;
@@ -156,10 +171,16 @@ function confirmCancel() {
 
 async function confirmCancelProcessing() {
     const reconstructionId = reconstruction.value?.id;
-    if (!reconstructionId) return;
+    if (!reconstructionId || isCancelling.value) return;
 
+    // Show the cancelling state immediately while the cancel request
+    // runs; surviving a page close needs the shared store.
+    reconstructionProcessingStore.markCancelling(reconstructionId);
     try {
         await cancelReconstruction(buildingId.value, reconstructionId);
+        // Refresh the shared list at once so the building page already shows
+        // the settled row after the redirect.
+        void refetch();
         $q.notify({
             type: 'positive',
             message: t('processing.cancelled'),
@@ -167,6 +188,7 @@ async function confirmCancelProcessing() {
         });
         void router.replace(`/building/${buildingId.value}`);
     } catch {
+        reconstructionProcessingStore.clearCancelling(reconstructionId);
         $q.notify({
             type: 'negative',
             message: t('processing.cancelFailed'),

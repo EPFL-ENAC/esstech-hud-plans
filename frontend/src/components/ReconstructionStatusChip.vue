@@ -25,6 +25,7 @@ const statuses = computed(
             preparing: { label: t('reconstructions.status.preparing'), ...active },
             scheduled: { label: t('reconstructions.status.scheduled'), ...active },
             running: { label: t('reconstructions.status.running'), ...active },
+            cancelling: { label: t('reconstructions.status.cancelling'), ...active },
             completed: {
                 label: t('reconstructions.status.completed'),
                 color: 'positive',
@@ -40,7 +41,9 @@ const statuses = computed(
 );
 
 const isProcessing = computed(() =>
-    ['preparing', 'scheduled', 'running'].includes(props.reconstruction?.status ?? ''),
+    ['preparing', 'scheduled', 'running', 'cancelling'].includes(
+        props.reconstruction?.status ?? '',
+    ),
 );
 
 const presentation = computed(() =>
