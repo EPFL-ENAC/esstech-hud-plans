@@ -2,6 +2,8 @@ export default {
     common: {
         back: 'Back',
         retry: 'Retry',
+        queryLoading: 'Loading…',
+        queryLoadFailed: 'Could not load data.',
         edit: 'Edit',
         save: 'Save',
         cancel: 'Cancel',
@@ -23,7 +25,11 @@ export default {
     },
     more: {
         account: 'Account',
+        accountLoading: 'Loading account details…',
+        accountLoadFailed: 'Could not load account details.',
+        notProvided: 'Not provided',
         settings: 'Settings',
+        language: 'Language',
         help: 'Help & Support',
     },
     auth: {

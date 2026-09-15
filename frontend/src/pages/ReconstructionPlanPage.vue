@@ -2,62 +2,80 @@
     <q-page
         class="bg-white text-dark q-px-md q-pb-xl"
         style="padding-top: 64px"
-        :aria-busy="isLoading || (showSplat && rendering)"
+        :aria-busy="showSplat && rendering"
     >
         <page-header :title="t('plans.threeDimensional')" />
         <h1 class="text-h6 text-weight-bold q-mt-none">
             {{ t('reconstructions.named', { id: reconstructionId.slice(0, 8) }) }}
         </h1>
 
-        <q-banner v-if="error" class="bg-red-1 text-negative q-mb-md" role="alert">
-            {{ errorMessage }}
-            <template #action>
-                <q-btn flat :label="t('common.retry')" :disable="isLoading" @click="refetch()" />
+        <QueryStateSwitcher
+            v-if="reconstructionId"
+            class="splat-query"
+            :state="state"
+            :async-status="asyncStatus"
+            :retry="refetch"
+            :loading-message="t('plans.splat.loading')"
+            :error-message="errorMessage"
+        >
+            <template #pending>
+                <splat-download-progress role="presentation" />
             </template>
-        </q-banner>
-
-        <splat-download-progress v-if="isLoading" class="q-mb-md" />
-
-        <template v-if="showSplat && data">
-            <q-banner v-if="renderError" class="bg-red-1 text-negative q-mb-md" role="alert">
-                {{ t('plans.splat.displayFailed') }}
-                <template #action>
-                    <q-btn flat :label="t('common.retry')" @click="retryRendering" />
+            <template #refreshing>
+                <splat-download-progress role="presentation" />
+            </template>
+            <template #success="{ data }">
+                <template v-if="showSplat">
+                    <q-banner
+                        v-if="renderError"
+                        class="bg-red-1 text-negative q-mb-md"
+                        role="alert"
+                    >
+                        {{ t('plans.splat.displayFailed') }}
+                        <template #action>
+                            <q-btn flat :label="t('common.retry')" @click="retryRendering" />
+                        </template>
+                    </q-banner>
+                    <template v-else>
+                        <div
+                            v-if="rendering"
+                            class="row items-center q-gutter-sm q-mb-md"
+                            role="status"
+                        >
+                            <q-spinner color="primary" />
+                            <span>{{ t('plans.splat.preparing') }}</span>
+                        </div>
+                        <q-card flat bordered class="overflow-hidden">
+                            <SplatRenderer
+                                :key="`${buildingId}/${reconstructionId}/${renderAttempt}`"
+                                :splat-data="data"
+                                @ready="rendering = false"
+                                @error="onRenderError"
+                            />
+                        </q-card>
+                        <p class="text-caption text-grey-7 q-mt-sm">
+                            {{ t('plans.splat.controls') }}
+                        </p>
+                    </template>
                 </template>
-            </q-banner>
-            <template v-else>
-                <div v-if="rendering" class="row items-center q-gutter-sm q-mb-md" role="status">
-                    <q-spinner color="primary" />
-                    <span>{{ t('plans.splat.preparing') }}</span>
-                </div>
-                <q-card flat bordered class="overflow-hidden">
-                    <SplatRenderer
-                        :key="`${buildingId}/${reconstructionId}/${renderAttempt}`"
-                        :splat-data="data"
-                        @ready="rendering = false"
-                        @error="onRenderError"
+                <template v-if="showSplat">
+                    <q-btn
+                        :label="t('plans.splat.downloadPly')"
+                        color="primary"
+                        icon="file_download"
+                        class="full-width q-mt-md"
+                        unelevated
+                        no-caps
+                        @click="downloadPly(data)"
                     />
-                </q-card>
-                <p class="text-caption text-grey-7 q-mt-sm">
-                    {{ t('plans.splat.controls') }}
-                </p>
+                </template>
             </template>
-        </template>
-        <template v-if="showSplat && data">
-            <q-btn
-                :label="t('plans.splat.downloadPly')"
-                color="primary"
-                icon="file_download"
-                class="full-width q-mt-md"
-                unelevated
-                no-caps
-                @click="downloadPly(data)"
-            />
-        </template>
+        </QueryStateSwitcher>
     </q-page>
 </template>
 
 <script setup lang="ts">
+import QueryStateSwitcher from 'src/components/QueryStateSwitcher.vue';
 import { computed, defineAsyncComponent, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import PageHeader from 'src/components/PageHeader.vue';
@@ -76,7 +94,7 @@ const buildingId = computed(() =>
 const reconstructionId = computed(() =>
     typeof route.params.reconstructionId === 'string' ? route.params.reconstructionId : '',
 );
-const { data, error, isLoading, refetch } = useReconstructionSplatQuery(
+const { data, error, state, asyncStatus, refetch } = useReconstructionSplatQuery(
     buildingId,
     reconstructionId,
 );
