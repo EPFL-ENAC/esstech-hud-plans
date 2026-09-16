@@ -9,8 +9,7 @@ const routes: RouteRecordRaw[] = [
                 path: '',
                 redirect: '/home',
             },
-            // Real tab pages. They render in the main (default) view and are
-            // kept alive so their state survives opening a detail drawer.
+            // Tab pages render in the main (default) view.
             {
                 path: 'home',
                 name: 'home',
@@ -24,6 +23,10 @@ const routes: RouteRecordRaw[] = [
                 component: () => import('pages/CapturePage.vue'),
             },
             {
+                path: 'capture/new',
+                redirect: (to) => ({ path: '/capture', query: to.query, hash: to.hash }),
+            },
+            {
                 path: 'library',
                 name: 'library',
                 meta: { tab: true },
@@ -34,6 +37,24 @@ const routes: RouteRecordRaw[] = [
                 name: 'more',
                 meta: { tab: true },
                 component: () => import('pages/MorePage.vue'),
+            },
+            {
+                path: 'more/settings',
+                name: 'settings',
+                meta: { drawer: true },
+                components: {
+                    default: () => import('components/BackgroundPage.vue'),
+                    detail: () => import('pages/SettingsPage.vue'),
+                },
+            },
+            {
+                path: 'more/help',
+                name: 'help',
+                meta: { drawer: true },
+                components: {
+                    default: () => import('components/BackgroundPage.vue'),
+                    detail: () => import('pages/HelpPage.vue'),
+                },
             },
 
             // Detail pages. These open in the right drawer over the current
@@ -79,22 +100,6 @@ const routes: RouteRecordRaw[] = [
                 components: {
                     default: () => import('components/BackgroundPage.vue'),
                     detail: () => import('pages/BuildingDataPage.vue'),
-                },
-            },
-            {
-                path: 'capture/video',
-                meta: { drawer: true },
-                components: {
-                    default: () => import('components/BackgroundPage.vue'),
-                    detail: () => import('pages/CaptureVideoPage.vue'),
-                },
-            },
-            {
-                path: 'capture/new',
-                meta: { drawer: true },
-                components: {
-                    default: () => import('components/BackgroundPage.vue'),
-                    detail: () => import('pages/NewCapturePage.vue'),
                 },
             },
             {

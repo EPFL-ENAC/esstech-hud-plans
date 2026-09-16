@@ -10,7 +10,7 @@
             :label="t('capture.camera.label')"
             :aria-label="t('capture.camera.label')"
             class="q-mb-md"
-            :disable="state === 'requesting' || isRecording || isStopping"
+            :disable="!canSelectCamera"
             :loading="loadingCameras"
             @update:model-value="selectCamera"
         >
@@ -148,6 +148,9 @@ const recordingSupported = typeof MediaRecorder !== 'undefined';
 const recordingError = ref('');
 const isRecording = ref(false);
 const isStopping = ref(false);
+const canSelectCamera = computed(
+    () => state.value !== 'requesting' && !isRecording.value && !isStopping.value,
+);
 const canStartRecording = computed(
     () =>
         state.value === 'live' &&
@@ -509,6 +512,10 @@ onBeforeUnmount(() => {
 });
 
 defineExpose({
+    cameras,
+    selectedCameraId: readonly(selectedCameraId),
+    canSelectCamera,
+    selectCamera,
     startRecording,
     stopRecording,
     canStartRecording,

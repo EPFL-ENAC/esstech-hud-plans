@@ -11,7 +11,7 @@
                 class="full-width"
                 unelevated
                 no-caps
-                :to="{ path: '/capture/new', query: { buildingId } }"
+                :to="{ path: '/capture', query: { buildingId } }"
             />
         </div>
 

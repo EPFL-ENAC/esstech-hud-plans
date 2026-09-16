@@ -1,19 +1,18 @@
 <template>
-    <q-page class="q-pa-md">
-        <div class="page-content q-gutter-y-md">
-            <div class="row items-center justify-between">
-                <div>
-                    <h1 class="text-h5 q-my-none">Buildings</h1>
-                    <div class="text-caption text-grey-7">Buildings owned by the current user</div>
-                </div>
+    <q-page class="q-pa-md" style="padding-top: 64px">
+        <page-header :title="t('buildings.pluralTitle')">
+            <template #rightActions>
                 <q-btn
                     round
                     color="primary"
                     icon="add"
-                    aria-label="New building"
+                    :aria-label="t('buildings.new')"
                     to="/buildings/new"
                 />
-            </div>
+            </template>
+        </page-header>
+        <div class="page-content q-gutter-y-md">
+            <div class="text-caption text-grey-7">{{ t('buildings.ownedByCurrentUser') }}</div>
 
             <q-banner v-if="errorMessage" rounded class="bg-red-1 text-negative">
                 <div class="row items-center justify-between">
@@ -88,9 +87,13 @@
 </template>
 
 <script setup lang="ts">
+import PageHeader from 'src/components/PageHeader.vue';
+import { useI18n } from 'vue-i18n';
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { type Building, type CurrentUser, getCurrentUser, listBuildings } from 'src/lib/buildings';
+
+const { t } = useI18n();
 
 const router = useRouter();
 const user = ref<CurrentUser | null>(null);

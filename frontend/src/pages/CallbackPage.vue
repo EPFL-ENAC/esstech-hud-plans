@@ -1,7 +1,8 @@
 <template>
     <q-layout view="lHh LpR lFf">
         <q-page-container>
-            <q-page class="row items-center justify-center">
+            <q-page class="row items-center justify-center" style="padding-top: 64px">
+                <page-header :back="false" :title="t('auth.signingIn')" />
                 <div v-if="status === 'exchanging'" class="column items-center q-gutter-y-md">
                     <q-spinner size="lg" color="primary" />
                     <div>{{ t('auth.signingIn') }}</div>
@@ -13,6 +14,7 @@
 </template>
 
 <script setup lang="ts">
+import PageHeader from 'src/components/PageHeader.vue';
 import { ref, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { baseUrl, keycloakRedirectUri } from 'boot/api';

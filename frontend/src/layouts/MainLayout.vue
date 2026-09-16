@@ -2,7 +2,9 @@
     <q-layout view="hhh Lpr lFf" class="app-layout">
         <q-page-container>
             <router-view v-slot="{ Component, route }">
-                <keep-alive :include="['HomePage', 'CapturePage', 'LibraryPage', 'MorePage']">
+                <!-- Capture uses a single-use draft for recording round trips;
+                     a new visit must not restore an already-submitted form. -->
+                <keep-alive :include="['HomePage', 'LibraryPage', 'MorePage']">
                     <component :is="Component" :key="route.path" />
                 </keep-alive>
             </router-view>

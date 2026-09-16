@@ -1,8 +1,8 @@
 <template>
-    <q-page class="q-pa-md">
+    <q-page class="q-pa-md" style="padding-top: 64px">
+        <page-header :title="t('navigation.workflowTest')" />
         <div class="wrapper q-gutter-y-md">
             <div>
-                <h1 class="text-h5 q-my-none">Workflows API test</h1>
                 <div class="text-caption text-grey-7 q-mt-xs">
                     Temporary page for exercising the splat-generation workflow endpoints.
                 </div>
@@ -157,11 +157,15 @@
 </template>
 
 <script setup lang="ts">
+import PageHeader from 'src/components/PageHeader.vue';
+import { useI18n } from 'vue-i18n';
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
 import { baseUrl } from 'boot/api';
 import ReconstructionSubmissionForm from 'src/components/ReconstructionSubmissionForm.vue';
 import { authFetch } from 'src/lib/auth';
 import type { ReconstructionSubmission } from 'src/lib/buildings';
+
+const { t } = useI18n();
 
 type RequestName = 'submit' | 'status' | 'result';
 

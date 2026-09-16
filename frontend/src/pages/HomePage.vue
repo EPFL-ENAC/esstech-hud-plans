@@ -1,5 +1,6 @@
 <template>
-    <q-page class="bg-white text-dark q-pb-xl">
+    <q-page class="bg-white text-dark q-pb-xl" style="padding-top: 64px">
+        <page-header :back="false" :title="t('navigation.home')" />
         <section class="q-px-md q-pt-md q-mb-lg">
             <h2 class="text-h6 text-weight-bold q-mb-md">{{ t('home.quickActions') }}</h2>
             <div class="row q-col-gutter-md">
@@ -71,6 +72,7 @@
 </template>
 
 <script setup lang="ts">
+import PageHeader from 'src/components/PageHeader.vue';
 import MyBuildingsList from 'src/components/MyBuildingsList.vue';
 import { useI18n } from 'vue-i18n';
 

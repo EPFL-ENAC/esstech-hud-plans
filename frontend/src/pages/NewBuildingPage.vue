@@ -1,14 +1,9 @@
 <template>
-    <q-page class="q-pa-md">
+    <q-page class="q-pa-md" style="padding-top: 64px">
+        <page-header :title="t('buildings.newReconstruction')" />
         <div class="page-content q-gutter-y-md">
-            <div class="row items-center q-gutter-sm">
-                <q-btn flat round icon="arrow_back" aria-label="Back" to="/buildings" />
-                <div>
-                    <h1 class="text-h5 q-my-none">New building reconstruction</h1>
-                    <div class="text-caption text-grey-7">
-                        Create a building and schedule its first reconstruction.
-                    </div>
-                </div>
+            <div class="text-caption text-grey-7">
+                {{ t('buildings.newReconstructionDescription') }}
             </div>
 
             <q-banner v-if="errorMessage" rounded class="bg-red-1 text-negative">
@@ -65,6 +60,8 @@
 </template>
 
 <script setup lang="ts">
+import PageHeader from 'src/components/PageHeader.vue';
+import { useI18n } from 'vue-i18n';
 import { ref } from 'vue';
 import { useQuasar } from 'quasar';
 import { useRouter } from 'vue-router';
@@ -76,6 +73,8 @@ import {
     createReconstruction,
     getFailedReconstructionId,
 } from 'src/lib/buildings';
+
+const { t } = useI18n();
 
 const router = useRouter();
 const quasar = useQuasar();

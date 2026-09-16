@@ -6,7 +6,7 @@
             :options="options"
             :loading="isLoading"
             :disable="disable"
-            :error="!hasResolvedBuilding"
+            :error="!hasResolvedBuilding || null"
             :error-message="
                 isLoading
                     ? t('buildings.picker.loadingSelected')

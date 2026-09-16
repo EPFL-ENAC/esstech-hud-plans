@@ -1,6 +1,6 @@
 <template>
     <q-page-sticky expand position="top" class="page-header-sticky">
-        <q-toolbar class="page-header q-px-md">
+        <q-toolbar class="page-header q-px-md q-py-sm text-dark" role="banner">
             <q-btn
                 v-if="back"
                 flat
@@ -11,10 +11,12 @@
                 :label="t('common.back')"
                 @click="router.back()"
             />
-            <q-toolbar-title class="text-subtitle1 text-weight-medium">
-                <slot name="title">{{ title }}</slot>
+            <q-toolbar-title tag="h1" class="text-h4 text-weight-medium q-my-none">
+                {{ title }}
             </q-toolbar-title>
-            <slot />
+            <div v-if="$slots.rightActions" class="row items-center no-wrap q-gutter-sm">
+                <slot name="rightActions" />
+            </div>
         </q-toolbar>
     </q-page-sticky>
 </template>
@@ -27,11 +29,10 @@ const { t } = useI18n();
 
 withDefaults(
     defineProps<{
-        title?: string;
+        title: string;
         back?: boolean;
     }>(),
     {
-        title: '',
         back: true,
     },
 );

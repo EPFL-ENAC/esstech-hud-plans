@@ -1,6 +1,6 @@
 <template>
-    <q-page class="bg-white text-dark q-pa-md q-pb-xl">
-        <h1 class="text-h5 text-weight-bold q-mb-lg">{{ t('navigation.more') }}</h1>
+    <q-page class="bg-white text-dark q-pa-md q-pb-xl" style="padding-top: 64px">
+        <page-header :back="false" :title="t('navigation.more')" />
 
         <section class="account" aria-labelledby="account-heading">
             <h2 id="account-heading" class="account-heading">{{ t('more.account') }}</h2>
@@ -42,27 +42,21 @@
         </section>
 
         <q-list class="more-links">
-            <q-expansion-item
-                :label="t('more.settings')"
-                class="bordered-expand"
-                header-class="text-subtitle1 text-weight-medium"
-                expand-icon-class="text-dark"
-            >
-                <div class="q-pa-md">
-                    <q-select
-                        v-model="locale"
-                        :options="languageOptions"
-                        :label="t('more.language')"
-                        emit-value
-                        map-options
-                        outlined
-                        dense
-                    />
-                </div>
-            </q-expansion-item>
+            <q-card flat bordered class="link-card">
+                <q-item clickable v-ripple :to="{ name: 'settings' }">
+                    <q-item-section>
+                        <q-item-label class="text-subtitle1 text-weight-medium">
+                            {{ t('more.settings') }}
+                        </q-item-label>
+                    </q-item-section>
+                    <q-item-section side>
+                        <q-icon name="chevron_right" size="20px" color="dark" />
+                    </q-item-section>
+                </q-item>
+            </q-card>
 
             <q-card flat bordered class="link-card items-center">
-                <q-item>
+                <q-item clickable v-ripple :to="{ name: 'help' }">
                     <q-item-section>
                         <q-item-label class="text-subtitle1 text-weight-medium">
                             {{ t('more.help') }}
@@ -91,19 +85,14 @@
 </template>
 
 <script setup lang="ts">
+import PageHeader from 'src/components/PageHeader.vue';
 import { useRouter } from 'vue-router';
 import QueryStateSwitcher from 'src/components/QueryStateSwitcher.vue';
 import { logout } from 'src/lib/auth';
 import { useCurrentUserQuery } from 'src/queries/user';
 import { useI18n } from 'vue-i18n';
-import type { MessageLanguages } from 'src/i18n/instance';
 
-const { t, locale } = useI18n({ useScope: 'global' });
-const languageOptions = [
-    { label: 'English', value: 'en' },
-    { label: 'Français', value: 'fr' },
-    { label: 'Español', value: 'es' },
-] satisfies { label: string; value: MessageLanguages }[];
+const { t } = useI18n();
 
 const router = useRouter();
 const { state, asyncStatus, refetch } = useCurrentUserQuery();
@@ -183,11 +172,6 @@ function handleLogout() {
 .account-placeholder-name {
     width: 60%;
     height: 1.5rem;
-}
-
-:global(.bordered-expand) {
-    border: 1px solid rgba(0, 0, 0, 0.12);
-    border-radius: 4px;
 }
 
 @media (max-width: 599px) {

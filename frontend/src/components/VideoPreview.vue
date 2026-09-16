@@ -1,15 +1,5 @@
 <template>
-    <div class="q-gutter-y-md">
-        <q-file
-            v-model="file"
-            outlined
-            clearable
-            accept="video/*"
-            :label="t('capture.video.choose')"
-        >
-            <template #prepend><q-icon name="movie" /></template>
-        </q-file>
-
+    <div v-if="file" class="video-preview-panel">
         <video
             v-if="previewUrl"
             :key="previewUrl"
@@ -23,31 +13,31 @@
             @error="onPreviewError"
         />
 
-        <div v-if="metadata" class="text-primary">
-            {{ metadata.duration }} &nbsp; {{ metadata.size }}
+        <div class="video-details">
+            <span class="video-filename">{{ file.name }}</span>
+            <span v-if="metadata" class="video-metadata">
+                {{ metadata.duration }} &nbsp; {{ metadata.size }}
+            </span>
         </div>
 
-        <q-banner v-if="errorMessage" class="bg-red-1 text-negative" role="alert">
+        <q-banner v-if="errorMessage" class="video-error" role="alert">
             {{ errorMessage }}
         </q-banner>
     </div>
 </template>
 
-<script lang="ts">
-export type { VideoMetadata } from './VideoPicker.types';
-</script>
-
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue';
-import type { VideoMetadata } from './VideoPicker.types';
+import type { VideoMetadata } from './VideoPreview.types';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
 
 const props = defineProps<{
+    file: File | null;
+    disable?: boolean;
     fallbackDurationSeconds?: number | undefined;
 }>();
-const file = defineModel<File | null>({ default: null });
 const emit = defineEmits<{
     metadata: [value: VideoMetadata | null];
 }>();
@@ -86,7 +76,7 @@ function formatDuration(duration: number): string {
 
 function onMetadataLoaded(event: Event): void {
     const video = currentVideo(event);
-    if (!video || !file.value || errorMessage.value) return;
+    if (!video || !props.file || errorMessage.value) return;
 
     const duration =
         Number.isFinite(video.duration) && video.duration > 0
@@ -100,7 +90,7 @@ function onMetadataLoaded(event: Event): void {
 
     updateMetadata({
         duration: formatDuration(duration),
-        size: t('capture.video.size', { size: (file.value.size / 1_000_000).toFixed(2) }),
+        size: t('capture.video.size', { size: (props.file.size / 1_000_000).toFixed(2) }),
     });
 }
 
@@ -111,7 +101,7 @@ function onPreviewError(event: Event): void {
 }
 
 watch(
-    file,
+    () => props.file,
     (selectedFile) => {
         updateMetadata(null);
         errorMessage.value = '';
@@ -125,6 +115,39 @@ onBeforeUnmount(releasePreview);
 </script>
 
 <style scoped>
+.video-preview-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.video-details {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.video-description {
+    display: flex;
+    justify-content: space-between;
+    min-width: 0;
+    gap: 2rem;
+}
+
+.video-filename {
+    overflow-wrap: anywhere;
+}
+
+.video-metadata {
+    color: var(--q-primary);
+}
+
+.video-error {
+    background: #ffebee;
+    color: var(--q-negative);
+}
+
 .video-preview {
     display: block;
     width: 100%;

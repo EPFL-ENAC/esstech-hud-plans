@@ -2,6 +2,7 @@ import type enUS from '../en-US';
 
 export default {
     common: {
+        or: 'Ou',
         back: 'Retour',
         retry: 'Réessayer',
         queryLoading: 'Chargement…',
@@ -9,11 +10,15 @@ export default {
         edit: 'Modifier',
         save: 'Enregistrer',
         cancel: 'Annuler',
+        close: 'Fermer',
         list: 'Liste',
         map: 'Carte',
         error: 'Erreur : {message}',
     },
     navigation: {
+        admin: 'Administration',
+        splatPipeline: 'Pipeline de génération de splats',
+        workflowTest: 'Test de l’API des workflows',
         home: 'Accueil',
         capture: 'Capture',
         library: 'Bibliothèque',
@@ -26,6 +31,7 @@ export default {
         recent: 'Récent',
     },
     more: {
+        languageSettings: 'Paramètres de langue',
         account: 'Compte',
         accountLoading: 'Chargement des informations du compte…',
         accountLoadFailed: 'Impossible de charger les informations du compte.',
@@ -33,6 +39,7 @@ export default {
         settings: 'Paramètres',
         language: 'Langue',
         help: 'Aide et assistance',
+        helpPlaceholder: 'Les ressources d’aide et d’assistance seront disponibles ici.',
     },
     auth: {
         appTitle: 'Points of Home',
@@ -49,6 +56,9 @@ export default {
         goHome: 'Retour à l’accueil',
     },
     capture: {
+        sourceVideo: 'Vidéo source',
+        destinationBuilding: 'Bâtiment de destination',
+        reconstructionSettings: 'Paramètres de reconstruction',
         newCapture: 'Nouvelle capture',
         chooseMethod: 'Comment souhaitez-vous effectuer la capture ?',
         captureVideo: 'Enregistrer une vidéo',
@@ -56,8 +66,18 @@ export default {
         upload: 'Importer depuis l’appareil',
         chooseExistingVideo: 'Choisir un fichier vidéo existant',
         tipsTitle: 'Conseils pour de meilleurs résultats',
+        doNotShowTipsAgain: 'Ne plus afficher',
         wideAngleTip: 'Utilisez un objectif grand-angle',
         wideAngleHint: 'Réglez sur 0,5× ou sur l’angle le plus large disponible',
+        viewingAnglesTip: 'Filmez sous autant d’angles que possible',
+        viewingAnglesHint:
+            'Si un seul côté d’un objet est filmé, certaines parties de la scène manqueront dans la reconstruction',
+        walkSlowlyTip: 'Marchez lentement autour du sujet',
+        walkSlowlyHint:
+            'Les mouvements rapides produisent des images floues qui dégradent les résultats',
+        wellLitTip: 'Fonctionne mieux dans un environnement bien éclairé',
+        wellLitHint:
+            'Dans un environnement peu éclairé, la caméra du téléphone prend des images plus floues',
         stopRecording: 'Arrêter l’enregistrement',
         startRecording: 'Démarrer l’enregistrement',
         handoffFailed: 'Impossible d’ouvrir la nouvelle capture. Veuillez enregistrer à nouveau.',
@@ -122,7 +142,10 @@ export default {
             openFailed: 'Impossible d’ouvrir la page de capture. Veuillez réessayer.',
         },
         video: {
-            choose: 'Choisir une vidéo',
+            takeVideo: 'Enregistrer une vidéo',
+            pickFile: 'Choisir un fichier',
+            pickAnotherFile: 'Choisir un autre fichier',
+            clear: 'Retirer la vidéo',
             preview: 'Aperçu de la vidéo sélectionnée',
             durationFailed:
                 'Impossible de lire la durée de la vidéo. Veuillez choisir une autre vidéo.',
@@ -139,6 +162,11 @@ export default {
         },
     },
     buildings: {
+        pluralTitle: 'Bâtiments',
+        new: 'Nouveau bâtiment',
+        ownedByCurrentUser: 'Bâtiments de l’utilisateur connecté',
+        newReconstruction: 'Nouvelle reconstruction de bâtiment',
+        newReconstructionDescription: 'Créez un bâtiment et programmez sa première reconstruction.',
         title: 'Bâtiment',
         untitled: 'Bâtiment sans nom',
         defaultName: 'Bâtiment {number}',
@@ -306,6 +334,7 @@ export default {
         cancelFailed: 'Impossible d’annuler le traitement. Veuillez réessayer.',
     },
     plans: {
+        interactiveBlueprint: 'Plan interactif',
         associated: 'Plan associé',
         twoDimensional: 'Plan 2D',
         threeDimensional: 'Plan 3D',

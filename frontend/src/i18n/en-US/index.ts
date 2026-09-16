@@ -1,5 +1,6 @@
 export default {
     common: {
+        or: 'Or',
         back: 'Back',
         retry: 'Retry',
         queryLoading: 'Loading…',
@@ -7,11 +8,15 @@ export default {
         edit: 'Edit',
         save: 'Save',
         cancel: 'Cancel',
+        close: 'Close',
         list: 'List',
         map: 'Map',
         error: 'Error: {message}',
     },
     navigation: {
+        admin: 'Admin',
+        splatPipeline: 'Splat Generation Pipeline',
+        workflowTest: 'Workflows API test',
         home: 'Home',
         capture: 'Capture',
         library: 'Library',
@@ -24,6 +29,7 @@ export default {
         recent: 'Recent',
     },
     more: {
+        languageSettings: 'Language settings',
         account: 'Account',
         accountLoading: 'Loading account details…',
         accountLoadFailed: 'Could not load account details.',
@@ -31,6 +37,7 @@ export default {
         settings: 'Settings',
         language: 'Language',
         help: 'Help & Support',
+        helpPlaceholder: 'Help and support resources will be available here.',
     },
     auth: {
         appTitle: 'Points of Home',
@@ -47,6 +54,9 @@ export default {
         goHome: 'Go Home',
     },
     capture: {
+        sourceVideo: 'Source video',
+        destinationBuilding: 'Destination building',
+        reconstructionSettings: 'Reconstruction settings',
         newCapture: 'New Capture',
         chooseMethod: 'How would you like to capture?',
         captureVideo: 'Capture video',
@@ -54,8 +64,16 @@ export default {
         upload: 'Upload from device',
         chooseExistingVideo: 'Choose an existing video file',
         tipsTitle: 'Tips for best results',
-        wideAngleTip: 'Use wide-angle lens',
+        doNotShowTipsAgain: 'Do not show again',
+        wideAngleTip: 'Use Wide angle lens',
         wideAngleHint: 'Set to 0.5x or widest available',
+        viewingAnglesTip: 'Provide as many viewing angles as possible',
+        viewingAnglesHint:
+            'If only a single side of an object is filmed, the reconstruction will miss parts of the scene',
+        walkSlowlyTip: 'Walk slowly around the subject',
+        walkSlowlyHint: 'Fast movement creates blurry images that lead to worse results',
+        wellLitTip: 'Works best in a well-lit environment',
+        wellLitHint: 'Low-light environments make the phone camera take blurrier pictures',
         stopRecording: 'Stop Recording',
         startRecording: 'Start Recording',
         handoffFailed: 'Could not open New Capture. Please record again.',
@@ -116,7 +134,10 @@ export default {
             openFailed: 'Could not open the capture page. Please try again.',
         },
         video: {
-            choose: 'Choose a video',
+            takeVideo: 'Take a Video',
+            pickFile: 'Pick a file',
+            pickAnotherFile: 'Pick another file',
+            clear: 'Remove video',
             preview: 'Selected video preview',
             durationFailed: 'Unable to read the video duration. Please choose another video.',
             playbackFailed:
@@ -131,6 +152,11 @@ export default {
         },
     },
     buildings: {
+        pluralTitle: 'Buildings',
+        new: 'New building',
+        ownedByCurrentUser: 'Buildings owned by the current user',
+        newReconstruction: 'New building reconstruction',
+        newReconstructionDescription: 'Create a building and schedule its first reconstruction.',
         title: 'Building',
         untitled: 'Untitled building',
         defaultName: 'Building {number}',
@@ -291,6 +317,7 @@ export default {
         cancelFailed: 'Could not cancel processing. Please try again.',
     },
     plans: {
+        interactiveBlueprint: 'Interactive Blueprint',
         associated: 'Associated Plan',
         twoDimensional: '2D Plan',
         threeDimensional: '3D Plan',

@@ -2,6 +2,7 @@ import type enUS from '../en-US';
 
 export default {
     common: {
+        or: 'O',
         back: 'Volver',
         retry: 'Reintentar',
         queryLoading: 'Cargando…',
@@ -9,11 +10,15 @@ export default {
         edit: 'Editar',
         save: 'Guardar',
         cancel: 'Cancelar',
+        close: 'Cerrar',
         list: 'Lista',
         map: 'Mapa',
         error: 'Error: {message}',
     },
     navigation: {
+        admin: 'Administración',
+        splatPipeline: 'Proceso de generación de splats',
+        workflowTest: 'Prueba de la API de flujos de trabajo',
         home: 'Inicio',
         capture: 'Captura',
         library: 'Biblioteca',
@@ -26,6 +31,7 @@ export default {
         recent: 'Reciente',
     },
     more: {
+        languageSettings: 'Ajustes de idioma',
         account: 'Cuenta',
         accountLoading: 'Cargando los datos de la cuenta…',
         accountLoadFailed: 'No se pudieron cargar los datos de la cuenta.',
@@ -33,6 +39,7 @@ export default {
         settings: 'Ajustes',
         language: 'Idioma',
         help: 'Ayuda y asistencia',
+        helpPlaceholder: 'Los recursos de ayuda y asistencia estarán disponibles aquí.',
     },
     auth: {
         appTitle: 'Points of Home',
@@ -49,6 +56,9 @@ export default {
         goHome: 'Volver al inicio',
     },
     capture: {
+        sourceVideo: 'Vídeo de origen',
+        destinationBuilding: 'Edificio de destino',
+        reconstructionSettings: 'Ajustes de reconstrucción',
         newCapture: 'Nueva captura',
         chooseMethod: '¿Cómo quieres realizar la captura?',
         captureVideo: 'Grabar un vídeo',
@@ -56,8 +66,17 @@ export default {
         upload: 'Subir desde el dispositivo',
         chooseExistingVideo: 'Elegir un archivo de vídeo existente',
         tipsTitle: 'Consejos para obtener mejores resultados',
+        doNotShowTipsAgain: 'No volver a mostrar',
         wideAngleTip: 'Usa un objetivo gran angular',
         wideAngleHint: 'Selecciona 0,5× o el ángulo más amplio disponible',
+        viewingAnglesTip: 'Graba desde tantos ángulos como sea posible',
+        viewingAnglesHint:
+            'Si solo se graba un lado de un objeto, faltarán partes de la escena en la reconstrucción',
+        walkSlowlyTip: 'Camina despacio alrededor del sujeto',
+        walkSlowlyHint:
+            'Los movimientos rápidos producen imágenes borrosas que empeoran los resultados',
+        wellLitTip: 'Funciona mejor en un entorno bien iluminado',
+        wellLitHint: 'En entornos con poca luz, la cámara del teléfono toma imágenes más borrosas',
         stopRecording: 'Detener la grabación',
         startRecording: 'Iniciar la grabación',
         handoffFailed: 'No se pudo abrir la nueva captura. Vuelve a grabar.',
@@ -120,7 +139,10 @@ export default {
             openFailed: 'No se pudo abrir la página de captura. Inténtalo de nuevo.',
         },
         video: {
-            choose: 'Elegir un vídeo',
+            takeVideo: 'Grabar un vídeo',
+            pickFile: 'Elegir un archivo',
+            pickAnotherFile: 'Elegir otro archivo',
+            clear: 'Quitar el vídeo',
             preview: 'Vista previa del vídeo seleccionado',
             durationFailed: 'No se pudo leer la duración del vídeo. Elige otro vídeo.',
             playbackFailed:
@@ -135,6 +157,11 @@ export default {
         },
     },
     buildings: {
+        pluralTitle: 'Edificios',
+        new: 'Nuevo edificio',
+        ownedByCurrentUser: 'Edificios del usuario actual',
+        newReconstruction: 'Nueva reconstrucción de edificio',
+        newReconstructionDescription: 'Crea un edificio y programa su primera reconstrucción.',
         title: 'Edificio',
         untitled: 'Edificio sin nombre',
         defaultName: 'Edificio {number}',
@@ -301,6 +328,7 @@ export default {
         cancelFailed: 'No se pudo cancelar el procesamiento. Inténtalo de nuevo.',
     },
     plans: {
+        interactiveBlueprint: 'Plano interactivo',
         associated: 'Plano asociado',
         twoDimensional: 'Plano 2D',
         threeDimensional: 'Plano 3D',
