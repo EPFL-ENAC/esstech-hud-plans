@@ -1,10 +1,11 @@
 <template>
     <div class="q-gutter-y-md">
+        <!-- Empty trailing token lets the picker keep files with no detected MIME type. -->
         <q-file
             v-model="file"
             outlined
             clearable
-            accept="video/*"
+            accept="video/*,"
             :label="t('capture.video.choose')"
         >
             <template #prepend><q-icon name="movie" /></template>

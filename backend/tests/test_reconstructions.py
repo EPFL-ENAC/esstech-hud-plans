@@ -967,7 +967,7 @@ def test_nested_reconstruction_create_validates_video_and_settings(
 ) -> None:
     client, building_id = reconstruction_api
 
-    wrong_media_type = client.post(
+    non_video_file = client.post(
         f"/buildings/{building_id}/reconstructions",
         files={"file": ("scan.txt", b"not video", "text/plain")},
         data={"settings": json.dumps({})},
@@ -978,7 +978,7 @@ def test_nested_reconstruction_create_validates_video_and_settings(
         data={"settings": json.dumps({"ffmpeg": {"fps": 0}})},
     )
 
-    assert wrong_media_type.status_code == 400
+    assert non_video_file.status_code == 400
     assert invalid_settings.status_code == 422
 
 
@@ -1395,17 +1395,18 @@ def test_building_from_reconstruction_creates_linked_owned_records(
 
 
 @pytest.mark.parametrize(
-    ("building", "settings", "media_type", "expected_status"),
+    ("building", "settings", "media_type", "filename", "expected_status"),
     [
-        ("not json", "{}", "video/mp4", 422),
-        ("null", "{}", "video/mp4", 422),
-        ('{"latitude": 46}', "{}", "video/mp4", 422),
-        ('{"latitude": 91, "longitude": 0}', "{}", "video/mp4", 422),
-        ("{}", "not json", "video/mp4", 422),
-        ("{}", "null", "video/mp4", 422),
-        ("{}", '{"ffmpeg": {"fps": 0}}', "video/mp4", 422),
-        ("{}", "{}", "text/plain", 400),
-        ("{}", "{}", "application/octet-stream", 400),
+        ("not json", "{}", "video/mp4", "scan.mp4", 422),
+        ("null", "{}", "video/mp4", "scan.mp4", 422),
+        ('{"latitude": 46}', "{}", "video/mp4", "scan.mp4", 422),
+        ('{"latitude": 91, "longitude": 0}', "{}", "video/mp4", "scan.mp4", 422),
+        ("{}", "not json", "video/mp4", "scan.mp4", 422),
+        ("{}", "null", "video/mp4", "scan.mp4", 422),
+        ("{}", '{"ffmpeg": {"fps": 0}}', "video/mp4", "scan.mp4", 422),
+        ("{}", "{}", "text/plain", "scan.txt", 400),
+        ("{}", "{}", "application/octet-stream", "scan.txt", 400),
+        ("{}", "{}", "", "clip", 400),
     ],
 )
 def test_building_from_reconstruction_validates_before_creating_records(
@@ -1413,6 +1414,7 @@ def test_building_from_reconstruction_validates_before_creating_records(
     building: str,
     settings: str,
     media_type: str,
+    filename: str,
     expected_status: int,
     tmp_path: Path,
 ) -> None:
@@ -1420,12 +1422,37 @@ def test_building_from_reconstruction_validates_before_creating_records(
     before = client.get("/buildings").json()
     response = client.post(
         "/buildings/from-reconstruction",
-        files={"file": ("scan.mp4", b"video bytes", media_type)},
+        files={"file": (filename, b"video bytes", media_type)},
         data={"building": building, "settings": settings},
     )
     assert response.status_code == expected_status
     assert client.get("/buildings").json() == before
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("filename", "content"),
+    [
+        # Empty client MIME type with a video file extension.
+        ("scan.mp4", b"video bytes"),
+        ("clip.mov", b"video bytes"),
+    ],
+)
+def test_building_from_reconstruction_accepts_empty_mime_type(
+    reconstruction_api: tuple[TestClient, UUID],
+    filename: str,
+    content: bytes,
+) -> None:
+    """The backend detects the type from the file, not the client MIME type."""
+    client, _ = reconstruction_api
+    response = client.post(
+        "/buildings/from-reconstruction",
+        files={"file": (filename, content, "")},
+        data={"building": "{}", "settings": "{}"},
+    )
+    assert response.status_code == 202
+    created = response.json()
+    assert created["reconstruction"]["status"] == "scheduled"
 
 
 @pytest.mark.parametrize("missing", ["file", "building", "settings"])
