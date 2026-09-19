@@ -98,6 +98,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import { useSubmitReconstructionMutation } from 'src/mutations/reconstructions';
 import { useCaptureStore } from 'src/stores/capture';
+import { useUiStore } from 'src/stores/ui';
 import VideoUploadProgress from 'src/components/VideoUploadProgress.vue';
 import FilePickerButton from 'src/components/FilePickerButton.vue';
 import VideoPreview from 'src/components/VideoPreview.vue';
@@ -117,6 +118,7 @@ const { t } = useI18n();
 
 const router = useRouter();
 const route = useRoute();
+const ui = useUiStore();
 const $q = useQuasar();
 const {
     mutateAsync: submitReconstruction,
@@ -128,11 +130,9 @@ const navigationError = ref('');
 const submissionError = computed(() => navigationError.value || mutationError.value);
 
 const captureStore = useCaptureStore();
-// BackgroundPage can also render this form behind a detail drawer.
-// Only the capture route should consume a recording or a saved form.
-const savedDraft = route.path === '/capture' ? captureStore.takeDraft() : null;
+const savedDraft = captureStore.takeDraft();
 const draft = savedDraft?.returnTo === route.fullPath ? savedDraft : null;
-const recordedVideo = route.path === '/capture' ? captureStore.takeVideo() : null;
+const recordedVideo = captureStore.takeVideo();
 const capturedVideo = shallowRef(recordedVideo ?? draft?.capturedVideo ?? null);
 
 function defaultBuildingSelection(): BuildingSelection {
@@ -252,6 +252,7 @@ async function startProcessing(): Promise<void> {
 }
 
 async function openBuilding(buildingId: string): Promise<void> {
+    ui.setBackground('library');
     try {
         const failure = await router.push(`/building/${encodeURIComponent(buildingId)}`);
         if (failure) {

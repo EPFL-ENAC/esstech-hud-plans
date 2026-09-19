@@ -26,7 +26,7 @@
             </template>
         </QueryStateSwitcher>
 
-        <!-- Keep MapLibre's host and its resize observer mounted across query transitions. -->
+        <!-- Keep MapLibre's host and its resize observer mounted across query transitions, thus not putting them in the QueryStateSwitcher. -->
         <q-banner v-if="mapError" class="bg-red-1 text-negative q-mb-md" role="alert">
             {{ mapError }}
             <template #action>

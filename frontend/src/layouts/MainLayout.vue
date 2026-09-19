@@ -100,7 +100,7 @@
 import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { useRoute, useRouter } from 'vue-router';
-import { useUiStore, type BackgroundPageName } from 'src/stores/ui';
+import { useUiStore } from 'src/stores/ui';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
@@ -134,14 +134,17 @@ const detailWidth = computed(() => ($q.screen.lt.md ? $q.screen.width : 650));
 // user close (swipe/back) which happens with no recent navigation.
 let lastNavAt = 0;
 
-// Remember which real tab page the user is on, so detail pages can keep it
-// as their background.
+// Remember the last tab that can serve as a detail drawer's background.
 watch(
     () => route.path,
     () => {
         lastNavAt = Date.now();
-        if (route.meta.tab === true) {
-            ui.setBackground(route.name as BackgroundPageName);
+        switch (route.name) {
+            case 'home':
+            case 'library':
+            case 'more':
+                ui.setBackground(route.name);
+                break;
         }
     },
     { immediate: true },

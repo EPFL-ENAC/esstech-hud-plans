@@ -57,8 +57,8 @@ const routes: RouteRecordRaw[] = [
                 },
             },
 
-            // Detail pages. These open in the right drawer over the current
-            // tab page (BackgroundPage keeps the underlying page mounted).
+            // Detail pages open in the right drawer. BackgroundPage renders
+            // the selected tab page beneath it (Library after Capture).
             // They live outside /library so a building is not a "child" of the
             // Library page.
             {
