@@ -33,6 +33,7 @@ const { t } = useI18n();
 function onFileChange(event: Event): void {
     const target = event.target as HTMLInputElement;
     const selectedFile = target.files?.[0];
+    // Keep files with an empty MIME type; the backend validates the upload.
     if (selectedFile) file.value = selectedFile;
     target.value = '';
 }

@@ -1,5 +1,6 @@
 """Shared dependencies and validation for video reconstruction submissions."""
 
+import mimetypes
 from typing import Annotated
 
 from api.db import get_session
@@ -22,12 +23,18 @@ def validate_reconstruction_submission(
     video: UploadFile,
     settings: str,
 ) -> SplatGenerationWorkflowSettings:
+    """Validate a video upload and decode the workflow settings.
+
+    Client-provided content types are not trusted. Browsers can send an empty
+    or generic type when they cannot detect the MIME type of the selected file.
+    """
     if not video.filename:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="File must have a filename",
         )
-    if video.content_type is None or not video.content_type.startswith("video/"):
+    media_type = mimetypes.guess_type(video.filename)[0]
+    if media_type is None or not media_type.startswith("video/"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Uploaded file must be a video",
