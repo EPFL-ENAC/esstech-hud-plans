@@ -97,7 +97,9 @@ const viewfinder = useTemplateRef<InstanceType<typeof CameraViewfinder>>('viewfi
 const router = useRouter();
 const $q = useQuasar();
 const captureStore = useCaptureStore();
+// Preserve whether the recorder was opened from a form for history navigation.
 const returnTo = captureStore.returnTo;
+const draftReturnTo = captureStore.ensureDraft().returnTo;
 const localPreferencesStore = useLocalPreferencesStore();
 const busy = ref(false);
 const showTips = ref(!localPreferencesStore.hideVideoTips);
@@ -157,14 +159,12 @@ async function toggleRecording(): Promise<void> {
         if (disposed) return;
         // No automatic location ask after a stop: the video hands off
         // without a location and the capture form opens at once.
-        captureStore.setVideo(toCapturedVideo(recording, null));
+        captureStore.setDraftVideo(toCapturedVideo(recording, null));
         const failure = returnTo ? await router.replace(returnTo) : await router.push('/capture');
         if (failure) {
-            captureStore.clearVideo();
             if (!disposed) handoffError.value = t('capture.handoffFailed');
         }
     } catch (error) {
-        captureStore.clearVideo();
         if (!disposed) {
             handoffError.value = error instanceof Error ? error.message : t('capture.openFailed');
         }
@@ -198,7 +198,6 @@ function confirmDiscard(): void {
 async function discardCapture(): Promise<void> {
     // An in-progress recorder is discarded by the viewfinder's unmount
     // cleanup when the page unloads.
-    captureStore.clearVideo();
     if (returnTo) {
         try {
             const failure = await router.replace(returnTo);
@@ -215,9 +214,8 @@ async function discardCapture(): Promise<void> {
 
 onBeforeUnmount(() => {
     disposed = true;
-    if (returnTo && router.currentRoute.value.fullPath !== returnTo) {
+    if (router.currentRoute.value.fullPath !== draftReturnTo) {
         captureStore.clearDraft();
-        captureStore.clearVideo();
     }
     if (timerId !== null) {
         window.clearInterval(timerId);

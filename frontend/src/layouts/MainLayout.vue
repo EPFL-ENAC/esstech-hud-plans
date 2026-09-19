@@ -100,7 +100,7 @@
 import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { useRoute, useRouter } from 'vue-router';
-import { useUiStore } from 'src/stores/ui';
+import { useUiStore, type BackgroundPageName } from 'src/stores/ui';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
@@ -139,12 +139,8 @@ watch(
     () => route.path,
     () => {
         lastNavAt = Date.now();
-        switch (route.name) {
-            case 'home':
-            case 'library':
-            case 'more':
-                ui.setBackground(route.name);
-                break;
+        if (route.meta.tab === true && route.name !== 'capture') {
+            ui.setBackground(route.name as BackgroundPageName);
         }
     },
     { immediate: true },

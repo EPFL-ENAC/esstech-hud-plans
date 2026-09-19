@@ -97,7 +97,7 @@ import { computed, ref, shallowRef, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import { useSubmitReconstructionMutation } from 'src/mutations/reconstructions';
-import { useCaptureStore } from 'src/stores/capture';
+import { makeEmptyCaptureDraft, useCaptureStore } from 'src/stores/capture';
 import { useUiStore } from 'src/stores/ui';
 import VideoUploadProgress from 'src/components/VideoUploadProgress.vue';
 import FilePickerButton from 'src/components/FilePickerButton.vue';
@@ -131,26 +131,25 @@ const submissionError = computed(() => navigationError.value || mutationError.va
 
 const captureStore = useCaptureStore();
 const savedDraft = captureStore.takeDraft();
-const draft = savedDraft?.returnTo === route.fullPath ? savedDraft : null;
-const recordedVideo = captureStore.takeVideo();
-const capturedVideo = shallowRef(recordedVideo ?? draft?.capturedVideo ?? null);
+const hasMatchingDraft = savedDraft?.returnTo === route.fullPath;
+const draft = hasMatchingDraft ? savedDraft : makeEmptyCaptureDraft(route.fullPath);
+const capturedVideo = shallowRef(draft.capturedVideo);
 
 function defaultBuildingSelection(): BuildingSelection {
     const buildingId = route.query.buildingId;
-    return buildingId === undefined
-        ? {
-              buildingId: null,
-              building: {
-                  name: t('buildings.defaultName', { number: 1 }),
-                  latitude: capturedVideo.value?.location?.latitude ?? null,
-                  longitude: capturedVideo.value?.location?.longitude ?? null,
-              },
-          }
-        : { buildingId: typeof buildingId === 'string' ? buildingId : '' };
+    if (buildingId !== undefined) {
+        return { buildingId: typeof buildingId === 'string' ? buildingId : '' };
+    }
+    const selection = makeEmptyCaptureDraft().buildingSelection;
+    if (selection.buildingId === null) {
+        selection.building.latitude = capturedVideo.value?.location?.latitude ?? null;
+        selection.building.longitude = capturedVideo.value?.location?.longitude ?? null;
+    }
+    return selection;
 }
 
 const buildingSelection = ref<BuildingSelection>(
-    draft?.buildingSelection ?? defaultBuildingSelection(),
+    hasMatchingDraft ? draft.buildingSelection : defaultBuildingSelection(),
 );
 const hasValidBuilding = ref(false);
 watch(
@@ -160,19 +159,17 @@ watch(
     },
 );
 
-const preset = ref<ReconstructionPreset>(draft?.preset ?? 'indoors');
+const preset = ref<ReconstructionPreset>(draft.preset);
 const presetOptions = computed(() => [
     { value: 'indoors', label: t('capture.presets.indoors') },
     { value: 'outdoors', label: t('capture.presets.outdoors') },
     { value: 'advanced', label: t('capture.presets.advanced') },
 ]);
-const advancedSettings = ref(
-    draft?.advancedSettings ?? makeDefaultReconstructionSettings('advanced'),
-);
+const advancedSettings = ref(draft.advancedSettings);
 const hasValidSettings = computed(
     () => preset.value !== 'advanced' || isValidReconstructionSettings(advancedSettings.value),
 );
-const videoFile = ref<File | null>(recordedVideo?.file ?? draft?.videoFile ?? null);
+const videoFile = ref<File | null>(draft.videoFile);
 const fallbackDurationSeconds = computed(() =>
     capturedVideo.value && videoFile.value === capturedVideo.value.file
         ? capturedVideo.value.durationSeconds
