@@ -2,7 +2,9 @@
     <q-layout view="hhh Lpr lFf" class="app-layout">
         <q-page-container>
             <router-view v-slot="{ Component, route }">
-                <keep-alive :include="['HomePage', 'CapturePage', 'LibraryPage', 'MorePage']">
+                <!-- Capture uses a single-use draft for recording round trips;
+                     a new visit must not restore an already-submitted form. -->
+                <keep-alive :include="['HomePage', 'LibraryPage', 'MorePage']">
                     <component :is="Component" :key="route.path" />
                 </keep-alive>
             </router-view>
@@ -132,13 +134,12 @@ const detailWidth = computed(() => ($q.screen.lt.md ? $q.screen.width : 650));
 // user close (swipe/back) which happens with no recent navigation.
 let lastNavAt = 0;
 
-// Remember which real tab page the user is on, so detail pages can keep it
-// as their background.
+// Remember the last tab that can serve as a detail drawer's background.
 watch(
     () => route.path,
     () => {
         lastNavAt = Date.now();
-        if (route.meta.tab === true) {
+        if (route.meta.tab === true && route.name !== 'capture') {
             ui.setBackground(route.name as BackgroundPageName);
         }
     },

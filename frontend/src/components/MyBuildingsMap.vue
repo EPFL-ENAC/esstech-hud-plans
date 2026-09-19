@@ -1,24 +1,32 @@
 <template>
-    <section class="q-px-md" :aria-label="t('buildings.map.locations')" :aria-busy="isLoading">
-        <q-banner v-if="state.error" class="bg-red-1 text-negative q-mb-md" role="alert">
-            {{ data ? t('buildings.map.refreshFailed') : t('buildings.map.loadFailed') }}
-            <template #action>
-                <q-btn flat :label="t('common.retry')" :disable="isLoading" @click="refetch()" />
+    <section class="q-px-md" :aria-label="t('buildings.map.locations')">
+        <QueryStateSwitcher
+            :state="state"
+            :async-status="asyncStatus"
+            :retry="refetch"
+            :loading-message="t('buildings.map.loading')"
+            :error-message="data ? t('buildings.map.refreshFailed') : t('buildings.map.loadFailed')"
+        >
+            <template #pending>
+                <div class="q-py-xl text-center">
+                    <q-spinner color="primary" size="2em" class="q-mr-sm" />
+                    {{ t('buildings.map.loading') }}
+                </div>
             </template>
-        </q-banner>
+            <template #refreshing>
+                <div class="text-grey-7">
+                    <q-spinner color="primary" class="q-mr-sm" />
+                    {{ t('buildings.map.refreshing') }}
+                </div>
+            </template>
+            <template #success="{ data: locations }">
+                <p v-if="locations.length === 0" class="text-grey-7" role="status">
+                    {{ t('buildings.map.empty') }}
+                </p>
+            </template>
+        </QueryStateSwitcher>
 
-        <div v-if="state.status === 'pending'" class="q-py-xl text-center" role="status">
-            <q-spinner color="primary" size="2em" class="q-mr-sm" />
-            {{ t('buildings.map.loading') }}
-        </div>
-        <p v-else-if="data?.length === 0" class="text-grey-7" role="status">
-            {{ t('buildings.map.empty') }}
-        </p>
-        <div v-else-if="isLoading && data" class="text-grey-7 q-mb-sm" role="status">
-            <q-spinner color="primary" class="q-mr-sm" />
-            {{ t('buildings.map.refreshing') }}
-        </div>
-
+        <!-- Keep MapLibre's host and its resize observer mounted across query transitions, thus not putting them in the QueryStateSwitcher. -->
         <q-banner v-if="mapError" class="bg-red-1 text-negative q-mb-md" role="alert">
             {{ mapError }}
             <template #action>
@@ -32,16 +40,8 @@
 </template>
 
 <script setup lang="ts">
-import {
-    computed,
-    nextTick,
-    onActivated,
-    onBeforeUnmount,
-    onDeactivated,
-    onMounted,
-    ref,
-    watch,
-} from 'vue';
+import QueryStateSwitcher from 'src/components/QueryStateSwitcher.vue';
+import { nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import {
     LngLatBounds,
@@ -65,7 +65,6 @@ setWorkerUrl(mapWorkerUrl);
 
 const router = useRouter();
 const { data, state, asyncStatus, refetch } = useBuildingLocationsQuery();
-const isLoading = computed(() => asyncStatus.value === 'loading');
 const mapContainer = ref<HTMLDivElement | null>(null);
 const mapError = ref('');
 let map: MapLibreMap | undefined;

@@ -1,8 +1,7 @@
 <template>
-    <q-page class="q-pa-md">
+    <q-page class="q-pa-md" style="padding-top: 64px">
+        <page-header :title="t('navigation.splatPipeline')" />
         <div class="wrapper">
-            <h1 class="text-h5 q-mb-lg">Splat Generation Pipeline</h1>
-
             <input-settings v-model="inputConfig" v-model:tab="activeTab" class="q-mb-md" />
             <frame-extraction-settings
                 v-model="frameExtractionConfig"
@@ -40,6 +39,8 @@
 </template>
 
 <script setup lang="ts">
+import PageHeader from 'src/components/PageHeader.vue';
+import { useI18n } from 'vue-i18n';
 import { ref, type Ref, computed, onMounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import InputSettings from 'src/components/InputSettings.vue';
@@ -57,6 +58,8 @@ import { type BrushTrainingConfig, makeDefaultBrushConfig } from 'src/lib/splats
 import { type BlueprintConfig, makeDefaultBlueprintConfig } from 'src/lib/splats/blueprint';
 import { baseUrl } from 'boot/api';
 import { authFetch } from 'src/lib/auth';
+
+const { t } = useI18n();
 
 const router = useRouter();
 const route = useRoute();

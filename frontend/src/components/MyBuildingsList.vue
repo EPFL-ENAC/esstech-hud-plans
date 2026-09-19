@@ -1,74 +1,80 @@
 <template>
-    <section aria-labelledby="my-buildings-title" :aria-busy="isLoading">
-        <q-banner v-if="state.error" class="bg-red-1 text-negative q-mx-md q-mb-md" role="alert">
-            {{ data ? t('buildings.list.refreshFailed') : t('buildings.list.loadFailed') }}
-            <template #action>
-                <q-btn flat :label="t('common.retry')" :disable="isLoading" @click="refetch()" />
+    <section aria-labelledby="my-buildings-title">
+        <QueryStateSwitcher
+            class="buildings-query"
+            :state="state"
+            :async-status="isLoading ? 'loading' : 'idle'"
+            :retry="refetch"
+            :loading-message="t('common.queryLoading')"
+            :error-message="
+                data ? t('buildings.list.refreshFailed') : t('buildings.list.loadFailed')
+            "
+        >
+            <template #pending>
+                <q-list separator class="my-buildings-list">
+                    <q-item v-for="index in 3" :key="index" aria-hidden="true">
+                        <q-item-section avatar>
+                            <q-skeleton width="72px" height="72px" square />
+                        </q-item-section>
+                        <q-item-section>
+                            <q-skeleton type="text" width="60%" />
+                            <q-skeleton type="text" width="40%" />
+                        </q-item-section>
+                    </q-item>
+                </q-list>
             </template>
-        </q-banner>
-
-        <q-list v-if="state.status === 'pending'" separator class="my-buildings-list">
-            <q-item v-for="index in 3" :key="index" aria-hidden="true">
-                <q-item-section avatar>
-                    <q-skeleton width="72px" height="72px" square />
-                </q-item-section>
-                <q-item-section>
-                    <q-skeleton type="text" width="60%" />
-                    <q-skeleton type="text" width="40%" />
-                </q-item-section>
-            </q-item>
-        </q-list>
-
-        <template v-else-if="data">
-            <div v-if="isLoading" class="q-px-md q-pb-sm text-grey-7" role="status">
-                <q-spinner color="primary" class="q-mr-sm" />
-                {{ t('buildings.list.refreshing') }}
-            </div>
-            <q-list v-if="buildings.length" separator class="my-buildings-list">
-                <q-item
-                    v-for="building in buildings"
-                    :key="building.id"
-                    clickable
-                    :to="`/building/${building.id}`"
-                >
-                    <q-item-section avatar>
-                        <q-avatar
-                            square
-                            size="72px"
-                            color="white"
-                            text-color="primary"
-                            class="avatar-icon"
-                        >
-                            <floor-plan-thumb />
-                        </q-avatar>
-                    </q-item-section>
-                    <q-item-section>
-                        <q-item-label class="building-name text-subtitle1 text-weight-medium">
-                            {{ building.name.trim() || t('buildings.untitled') }}
-                        </q-item-label>
-                        <q-item-label caption>
-                            {{
-                                t('buildings.list.created', {
-                                    date: formatCreatedAt(building.created_at),
-                                })
-                            }}
-                        </q-item-label>
-                        <q-item-label>
-                            <reconstruction-status-chip
-                                :reconstruction="building.latest_reconstruction"
-                            />
-                        </q-item-label>
-                    </q-item-section>
-                    <q-item-section side>
-                        <q-icon name="chevron_right" size="20px" color="dark" />
-                    </q-item-section>
-                </q-item>
-            </q-list>
-            <p v-else class="q-px-md text-grey-7" role="status">
-                {{ emptyMessage }}
-            </p>
-        </template>
-
+            <template #refreshing>
+                <div class="q-px-md text-grey-7">
+                    <q-spinner color="primary" class="q-mr-sm" />
+                    {{ t('buildings.list.refreshing') }}
+                </div>
+            </template>
+            <template #success>
+                <q-list v-if="buildings.length" separator class="my-buildings-list">
+                    <q-item
+                        v-for="building in buildings"
+                        :key="building.id"
+                        clickable
+                        :to="`/building/${building.id}`"
+                    >
+                        <q-item-section avatar>
+                            <q-avatar
+                                square
+                                size="72px"
+                                color="white"
+                                text-color="primary"
+                                class="avatar-icon"
+                            >
+                                <floor-plan-thumb />
+                            </q-avatar>
+                        </q-item-section>
+                        <q-item-section>
+                            <q-item-label class="building-name text-subtitle1 text-weight-medium">
+                                {{ building.name.trim() || t('buildings.untitled') }}
+                            </q-item-label>
+                            <q-item-label caption>
+                                {{
+                                    t('buildings.list.created', {
+                                        date: formatCreatedAt(building.created_at),
+                                    })
+                                }}
+                            </q-item-label>
+                            <q-item-label>
+                                <reconstruction-status-chip
+                                    :reconstruction="building.latest_reconstruction"
+                                />
+                            </q-item-label>
+                        </q-item-section>
+                        <q-item-section side>
+                            <q-icon name="chevron_right" size="20px" color="dark" />
+                        </q-item-section>
+                    </q-item>
+                </q-list>
+                <p v-else class="q-px-md text-grey-7" role="status">
+                    {{ emptyMessage }}
+                </p>
+            </template>
+        </QueryStateSwitcher>
         <nav
             v-if="(data && data.length > 0) || offset > 0"
             :aria-label="t('buildings.list.pagination')"
@@ -89,6 +95,7 @@
 </template>
 
 <script setup lang="ts">
+import QueryStateSwitcher from 'src/components/QueryStateSwitcher.vue';
 import { computed, ref, watch } from 'vue';
 import FloorPlanThumb from 'src/components/FloorPlanThumb.vue';
 import ReconstructionStatusChip from 'src/components/ReconstructionStatusChip.vue';
@@ -144,6 +151,10 @@ function formatCreatedAt(value: string): string {
 </script>
 
 <style scoped>
+.buildings-query :deep(.query-error) {
+    margin-inline: 1rem;
+}
+
 .my-buildings-list {
     border-top: 1px solid rgba(0, 0, 0, 0.12);
     border-bottom: 1px solid rgba(0, 0, 0, 0.12);

@@ -1,5 +1,5 @@
 <template>
-    <section aria-labelledby="reconstructions-title" :aria-busy="isLoading" class="q-mb-lg">
+    <section aria-labelledby="reconstructions-title" class="q-mb-lg">
         <h2 id="reconstructions-title" class="q-px-md text-h6 text-weight-bold q-mb-md">
             {{ t('reconstructions.title') }}
         </h2>
@@ -11,198 +11,202 @@
                 class="full-width"
                 unelevated
                 no-caps
-                :to="{ path: '/capture/new', query: { buildingId } }"
+                :to="{ path: '/capture', query: { buildingId } }"
             />
         </div>
 
-        <q-banner v-if="state.error" class="bg-red-1 text-negative q-px-md q-mb-md" role="alert">
-            {{ data ? t('reconstructions.refreshFailed') : t('reconstructions.loadFailed') }}
-            <template #action>
-                <q-btn flat :label="t('common.retry')" :disable="isLoading" @click="refetch()" />
-            </template>
-        </q-banner>
-        <div
-            v-if="state.status === 'pending'"
-            role="status"
-            class="q-px-md"
-            :aria-label="t('reconstructions.loading')"
+        <QueryStateSwitcher
+            class="reconstructions-query"
+            :state="state"
+            :async-status="isLoading ? 'loading' : 'idle'"
+            :retry="refetch"
+            :loading-message="t('reconstructions.loading')"
+            :error-message="
+                data ? t('reconstructions.refreshFailed') : t('reconstructions.loadFailed')
+            "
         >
-            <q-skeleton v-for="index in 3" :key="index" height="72px" class="q-mb-sm" />
-        </div>
-        <template v-else-if="data">
-            <div v-if="isLoading" class="q-px-md text-grey-7 q-mb-sm" role="status">
-                <q-spinner color="primary" class="q-mr-sm" />
-                {{ t('reconstructions.refreshing') }}
-            </div>
-            <q-list v-if="reconstructions.length" separator class="reconstructions-list">
-                <q-expansion-item
-                    v-for="reconstruction in reconstructions"
-                    :key="reconstruction.id"
-                    :model-value="expandedId === reconstruction.id"
-                    expand-separator
-                    @update:model-value="(open) => setExpanded(reconstruction.id, open)"
-                >
-                    <template #header>
-                        <q-item-section>
-                            <q-item-label class="text-subtitle1 text-weight-medium">
-                                {{
-                                    t('reconstructions.named', {
-                                        id: reconstruction.id.slice(0, 8),
-                                    })
-                                }}
-                            </q-item-label>
-                            <q-item-label caption>
-                                {{ dateFormatter.format(new Date(reconstruction.created_at)) }}
-                            </q-item-label>
-                            <q-item-label>
-                                <reconstruction-status-chip
-                                    :reconstruction="chipReconstruction(reconstruction)"
-                                    :tooltip="t('reconstructions.attempt')"
-                                />
-                            </q-item-label>
-                        </q-item-section>
-                    </template>
-                    <div class="q-pa-md">
-                        <reconstruction-video
-                            :building-id="buildingId"
-                            :reconstruction-id="reconstruction.id"
-                            :active="expandedId === reconstruction.id"
-                        />
-                        <section
-                            v-if="showProcessingDetails(reconstruction)"
-                            class="q-my-lg"
-                            :aria-label="t('processing.details')"
-                        >
-                            <q-list class="q-gutter-y-md">
-                                <q-item
-                                    clickable
-                                    :aria-label="t('processing.details')"
-                                    :to="`/capture/processing/${buildingId}?reconstruction=${reconstruction.id}`"
-                                >
-                                    <q-item-section avatar>
-                                        <q-avatar
-                                            square
-                                            size="48px"
-                                            font-size="31px"
-                                            color="white"
-                                            text-color="primary"
-                                            class="avatar-icon"
-                                        >
-                                            <q-icon name="tune" />
-                                        </q-avatar>
-                                    </q-item-section>
-                                    <q-item-section>
-                                        <q-item-label class="text-subtitle1 text-weight-medium">
-                                            {{ t('processing.details') }}
-                                        </q-item-label>
-                                        <q-item-label caption>
-                                            {{ t('processing.detailsDescription') }}
-                                        </q-item-label>
-                                    </q-item-section>
-                                    <q-item-section side>
-                                        <q-icon name="chevron_right" size="20px" color="dark" />
-                                    </q-item-section>
-                                </q-item>
-                            </q-list>
-                        </section>
-                        <section
-                            v-else-if="reconstruction.status !== 'cancelled'"
-                            class="q-my-lg"
-                            :aria-label="t('plans.associated')"
-                        >
-                            <h3 class="text-h6 text-weight-bold q-mt-none q-mb-md">
-                                {{ t('plans.associated') }}
-                            </h3>
-                            <q-list class="q-gutter-y-md">
-                                <q-item
-                                    clickable
-                                    :aria-label="t('plans.twoDimensional')"
-                                    :disable="!hasSplat(reconstruction)"
-                                    :to="`/building/${buildingId}/plan/2d?reconstruction=${reconstruction.id}`"
-                                >
-                                    <q-item-section avatar>
-                                        <q-avatar
-                                            square
-                                            size="48px"
-                                            font-size="31px"
-                                            color="white"
-                                            text-color="primary"
-                                            class="avatar-icon"
-                                        >
-                                            <q-icon name="crop_square" />
-                                        </q-avatar>
-                                    </q-item-section>
-                                    <q-item-section>
-                                        <q-item-label class="text-subtitle1 text-weight-medium">
-                                            {{ t('plans.twoDimensional') }}
-                                        </q-item-label>
-                                        <q-item-label caption>
-                                            {{ t('plans.twoDimensionalDescription') }}
-                                        </q-item-label>
-                                    </q-item-section>
-                                    <q-item-section side>
-                                        <q-icon name="chevron_right" size="20px" color="dark" />
-                                    </q-item-section>
-                                </q-item>
-                                <q-item
-                                    clickable
-                                    :aria-label="t('plans.threeDimensional')"
-                                    :disable="!hasSplat(reconstruction)"
-                                    :to="{
-                                        name: 'reconstruction-3d-plan',
-                                        params: {
-                                            buildingId,
-                                            reconstructionId: reconstruction.id,
-                                        },
-                                    }"
-                                >
-                                    <q-item-section avatar>
-                                        <q-avatar
-                                            square
-                                            size="48px"
-                                            font-size="31px"
-                                            color="white"
-                                            text-color="primary"
-                                            class="avatar-icon"
-                                        >
-                                            <q-icon name="view_in_ar" />
-                                        </q-avatar>
-                                    </q-item-section>
-                                    <q-item-section>
-                                        <q-item-label class="text-subtitle1 text-weight-medium">
-                                            {{ t('plans.threeDimensional') }}
-                                        </q-item-label>
-                                        <q-item-label caption>
-                                            {{ t('plans.threeDimensionalDescription') }}
-                                        </q-item-label>
-                                    </q-item-section>
-                                    <q-item-section side>
-                                        <q-icon name="chevron_right" size="20px" color="dark" />
-                                    </q-item-section>
-                                </q-item>
-                                <q-tooltip v-if="!hasSplat(reconstruction)">
-                                    {{ t('plans.unavailable') }}
-                                </q-tooltip>
-                            </q-list>
-                        </section>
-                        <div v-else class="q-my-lg" aria-hidden="true" />
-                        <q-btn
-                            :label="t('reconstructions.deleteCapture')"
-                            outline
-                            color="negative"
-                            class="full-width"
-                            unelevated
-                            no-caps
-                            :disable="isDeleting"
-                            @click="confirmDelete(reconstruction)"
-                        />
-                    </div>
-                </q-expansion-item>
-            </q-list>
-            <p v-else class="q-px-md text-grey-7" role="status">
-                {{ offset === 0 ? t('reconstructions.empty') : t('reconstructions.emptyPage') }}
-            </p>
-        </template>
+            <template #pending>
+                <div class="q-px-md">
+                    <q-skeleton v-for="index in 3" :key="index" height="72px" class="q-mb-sm" />
+                </div>
+            </template>
+            <template #refreshing>
+                <div class="q-px-md text-grey-7">
+                    <q-spinner color="primary" class="q-mr-sm" />
+                    {{ t('reconstructions.refreshing') }}
+                </div>
+            </template>
+            <template #success>
+                <q-list v-if="reconstructions.length" separator class="reconstructions-list">
+                    <q-expansion-item
+                        v-for="reconstruction in reconstructions"
+                        :key="reconstruction.id"
+                        :model-value="expandedId === reconstruction.id"
+                        expand-separator
+                        @update:model-value="(open) => setExpanded(reconstruction.id, open)"
+                    >
+                        <template #header>
+                            <q-item-section>
+                                <q-item-label class="text-subtitle1 text-weight-medium">
+                                    {{
+                                        t('reconstructions.named', {
+                                            id: reconstruction.id.slice(0, 8),
+                                        })
+                                    }}
+                                </q-item-label>
+                                <q-item-label caption>
+                                    {{ dateFormatter.format(new Date(reconstruction.created_at)) }}
+                                </q-item-label>
+                                <q-item-label>
+                                    <reconstruction-status-chip
+                                        :reconstruction="chipReconstruction(reconstruction)"
+                                        :tooltip="t('reconstructions.attempt')"
+                                    />
+                                </q-item-label>
+                            </q-item-section>
+                        </template>
+                        <div class="q-pa-md">
+                            <reconstruction-video
+                                :building-id="buildingId"
+                                :reconstruction-id="reconstruction.id"
+                                :active="expandedId === reconstruction.id"
+                            />
+                            <section
+                                v-if="showProcessingDetails(reconstruction)"
+                                class="q-my-lg"
+                                :aria-label="t('processing.details')"
+                            >
+                                <q-list class="q-gutter-y-md">
+                                    <q-item
+                                        clickable
+                                        :aria-label="t('processing.details')"
+                                        :to="`/capture/processing/${buildingId}?reconstruction=${reconstruction.id}`"
+                                    >
+                                        <q-item-section avatar>
+                                            <q-avatar
+                                                square
+                                                size="48px"
+                                                font-size="31px"
+                                                color="white"
+                                                text-color="primary"
+                                                class="avatar-icon"
+                                            >
+                                                <q-icon name="tune" />
+                                            </q-avatar>
+                                        </q-item-section>
+                                        <q-item-section>
+                                            <q-item-label class="text-subtitle1 text-weight-medium">
+                                                {{ t('processing.details') }}
+                                            </q-item-label>
+                                            <q-item-label caption>
+                                                {{ t('processing.detailsDescription') }}
+                                            </q-item-label>
+                                        </q-item-section>
+                                        <q-item-section side>
+                                            <q-icon name="chevron_right" size="20px" color="dark" />
+                                        </q-item-section>
+                                    </q-item>
+                                </q-list>
+                            </section>
+                            <section
+                                v-else-if="reconstruction.status !== 'cancelled'"
+                                class="q-my-lg"
+                                :aria-label="t('plans.associated')"
+                            >
+                                <h3 class="text-h6 text-weight-bold q-mt-none q-mb-md">
+                                    {{ t('plans.associated') }}
+                                </h3>
+                                <q-list class="q-gutter-y-md">
+                                    <q-item
+                                        clickable
+                                        :aria-label="t('plans.twoDimensional')"
+                                        :disable="!hasSplat(reconstruction)"
+                                        :to="`/building/${buildingId}/plan/2d?reconstruction=${reconstruction.id}`"
+                                    >
+                                        <q-item-section avatar>
+                                            <q-avatar
+                                                square
+                                                size="48px"
+                                                font-size="31px"
+                                                color="white"
+                                                text-color="primary"
+                                                class="avatar-icon"
+                                            >
+                                                <q-icon name="crop_square" />
+                                            </q-avatar>
+                                        </q-item-section>
+                                        <q-item-section>
+                                            <q-item-label class="text-subtitle1 text-weight-medium">
+                                                {{ t('plans.twoDimensional') }}
+                                            </q-item-label>
+                                            <q-item-label caption>
+                                                {{ t('plans.twoDimensionalDescription') }}
+                                            </q-item-label>
+                                        </q-item-section>
+                                        <q-item-section side>
+                                            <q-icon name="chevron_right" size="20px" color="dark" />
+                                        </q-item-section>
+                                    </q-item>
+                                    <q-item
+                                        clickable
+                                        :aria-label="t('plans.threeDimensional')"
+                                        :disable="!hasSplat(reconstruction)"
+                                        :to="{
+                                            name: 'reconstruction-3d-plan',
+                                            params: {
+                                                buildingId,
+                                                reconstructionId: reconstruction.id,
+                                            },
+                                        }"
+                                    >
+                                        <q-item-section avatar>
+                                            <q-avatar
+                                                square
+                                                size="48px"
+                                                font-size="31px"
+                                                color="white"
+                                                text-color="primary"
+                                                class="avatar-icon"
+                                            >
+                                                <q-icon name="view_in_ar" />
+                                            </q-avatar>
+                                        </q-item-section>
+                                        <q-item-section>
+                                            <q-item-label class="text-subtitle1 text-weight-medium">
+                                                {{ t('plans.threeDimensional') }}
+                                            </q-item-label>
+                                            <q-item-label caption>
+                                                {{ t('plans.threeDimensionalDescription') }}
+                                            </q-item-label>
+                                        </q-item-section>
+                                        <q-item-section side>
+                                            <q-icon name="chevron_right" size="20px" color="dark" />
+                                        </q-item-section>
+                                    </q-item>
+                                    <q-tooltip v-if="!hasSplat(reconstruction)">
+                                        {{ t('plans.unavailable') }}
+                                    </q-tooltip>
+                                </q-list>
+                            </section>
+                            <div v-else class="q-my-lg" aria-hidden="true" />
+                            <q-btn
+                                :label="t('reconstructions.deleteCapture')"
+                                outline
+                                color="negative"
+                                class="full-width"
+                                unelevated
+                                no-caps
+                                :disable="isDeleting"
+                                @click="confirmDelete(reconstruction)"
+                            />
+                        </div>
+                    </q-expansion-item>
+                </q-list>
+                <p v-else class="q-px-md text-grey-7" role="status">
+                    {{ offset === 0 ? t('reconstructions.empty') : t('reconstructions.emptyPage') }}
+                </p>
+            </template>
+        </QueryStateSwitcher>
         <nav
             v-if="data || offset > 0"
             :aria-label="t('reconstructions.pagination')"
@@ -223,6 +227,7 @@
 </template>
 
 <script setup lang="ts">
+import QueryStateSwitcher from 'src/components/QueryStateSwitcher.vue';
 import { computed, ref, toRef, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import ReconstructionStatusChip from 'src/components/ReconstructionStatusChip.vue';
@@ -334,6 +339,10 @@ watch(reconstructions, (rows) => {
 </script>
 
 <style scoped>
+.reconstructions-query :deep(.query-error) {
+    margin-inline: 1rem;
+}
+
 .reconstructions-list {
     border-top: 1px solid rgba(0, 0, 0, 0.12);
     border-bottom: 1px solid rgba(0, 0, 0, 0.12);

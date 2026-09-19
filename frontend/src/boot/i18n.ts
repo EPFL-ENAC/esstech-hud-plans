@@ -1,4 +1,9 @@
 import { defineBoot } from '#q-app/wrappers';
+import { Lang } from 'quasar';
+import enUS from 'quasar/lang/en-US';
+import fr from 'quasar/lang/fr';
+import es from 'quasar/lang/es';
+import { watch } from 'vue';
 import { i18n, type MessageSchema } from 'src/i18n/instance';
 
 export type { MessageLanguages, MessageSchema } from 'src/i18n/instance';
@@ -19,4 +24,30 @@ declare module 'vue-i18n' {
 
 export default defineBoot(({ app }) => {
     app.use(i18n);
+
+    const storageKey = 'hud-language';
+    const quasarLanguages = { en: enUS, fr, es };
+
+    try {
+        const savedLocale = localStorage.getItem(storageKey);
+        if (savedLocale === 'en' || savedLocale === 'fr' || savedLocale === 'es') {
+            i18n.global.locale.value = savedLocale;
+        }
+    } catch {
+        // Language switching still works when browser storage is unavailable.
+    }
+
+    watch(
+        i18n.global.locale,
+        (locale) => {
+            Lang.set(quasarLanguages[locale]);
+            document.documentElement.lang = locale;
+            try {
+                localStorage.setItem(storageKey, locale);
+            } catch {
+                // Keep the selected language for this session if it cannot be saved.
+            }
+        },
+        { immediate: true },
+    );
 });

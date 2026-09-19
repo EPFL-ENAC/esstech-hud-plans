@@ -2,7 +2,6 @@
     <q-page
         class="bg-white text-dark q-px-md q-py-md"
         style="padding-top: 64px; display: flex; flex-direction: column"
-        :aria-busy="isLoading"
     >
         <page-header :title="t('plans.building2dTitle')" />
 
@@ -24,31 +23,45 @@
             </q-btn>
         </div>
 
-        <q-banner v-if="error" class="bg-red-1 text-negative q-mb-md" role="alert">
-            {{ t('plans.splat.unavailable') }}
-            <template #action>
-                <q-btn flat :label="t('common.retry')" :disable="isLoading" @click="refetch()" />
+        <QueryStateSwitcher
+            v-if="reconstructionId"
+            class="splat-query"
+            :state="state"
+            :async-status="asyncStatus"
+            :retry="refetch"
+            :loading-message="t('plans.splat.loading')"
+            :error-message="t('plans.splat.unavailable')"
+        >
+            <template #pending>
+                <splat-download-progress role="presentation" />
             </template>
-        </q-banner>
-
-        <splat-download-progress v-if="isLoading" class="q-mb-md" />
-
-        <template v-if="showSplat && data">
-            <div class="viewer-wrapper">
-                <interactive-blueprint-viewer
-                    :splat-data="data"
-                    :fetch-geometry="
-                        () => fetchReconstructionBlueprintGeometryJSON(buildingId, reconstructionId)
-                    "
-                    :params="DEFAULT_BLUEPRINT_PARAMS"
-                    fill
-                />
-            </div>
-        </template>
+            <template #refreshing>
+                <splat-download-progress role="presentation" />
+            </template>
+            <template #success="{ data }">
+                <template v-if="showSplat">
+                    <div class="viewer-wrapper">
+                        <interactive-blueprint-viewer
+                            :splat-data="data"
+                            :fetch-geometry="
+                                () =>
+                                    fetchReconstructionBlueprintGeometryJSON(
+                                        buildingId,
+                                        reconstructionId,
+                                    )
+                            "
+                            :params="DEFAULT_BLUEPRINT_PARAMS"
+                            fill
+                        />
+                    </div>
+                </template>
+            </template>
+        </QueryStateSwitcher>
     </q-page>
 </template>
 
 <script setup lang="ts">
+import QueryStateSwitcher from 'src/components/QueryStateSwitcher.vue';
 import { computed, defineAsyncComponent, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import PageHeader from 'src/components/PageHeader.vue';
@@ -70,7 +83,7 @@ const buildingId = computed(() => (typeof route.params.id === 'string' ? route.p
 const reconstructionId = computed(() =>
     typeof route.query.reconstruction === 'string' ? route.query.reconstruction : '',
 );
-const { data, error, isLoading, refetch } = useReconstructionSplatQuery(
+const { data, error, state, asyncStatus, refetch } = useReconstructionSplatQuery(
     buildingId,
     reconstructionId,
 );
@@ -90,6 +103,19 @@ const tools = computed(() => [
 </script>
 
 <style scoped>
+.splat-query {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+}
+
+.splat-query :deep(.query-content) {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
 .viewer-wrapper {
     position: relative;
     flex: 1;

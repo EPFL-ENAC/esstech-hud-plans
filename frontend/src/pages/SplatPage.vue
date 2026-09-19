@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PageHeader from 'src/components/PageHeader.vue';
+import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 import { computed, onMounted, ref } from 'vue';
 import { makeAsyncResultLoader, useReactiveChain } from 'unwrapped/vue';
@@ -14,6 +16,8 @@ import {
 } from 'src/stores/splats';
 import { baseUrl } from 'boot/api';
 import { authFetch } from 'src/lib/auth';
+
+const { t } = useI18n();
 
 const route = useRoute();
 const generationId = computed(() => route.params.id as string);
@@ -72,10 +76,10 @@ function downloadPly(splatData: ArrayBuffer): void {
 </script>
 
 <template>
-    <q-page class="q-pa-md">
+    <q-page class="q-pa-md" style="padding-top: 64px">
+        <page-header :title="t('plans.interactiveBlueprint')" />
         <SplatLoader :result="splat">
             <template v-slot="{ value }">
-                <h3 class="q-my-md">Interactive Blueprint</h3>
                 <interactive-blueprint-viewer
                     :splat-data="value"
                     :fetch-geometry="() => fetchBlueprintGeometryJSON(generationId)"

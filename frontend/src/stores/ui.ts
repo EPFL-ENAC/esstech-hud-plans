@@ -5,19 +5,18 @@ import { ref } from 'vue';
  * Names of the "real" tab pages that can sit underneath the right
  * detail drawer.
  */
-export type BackgroundPageName = 'home' | 'capture' | 'library' | 'more';
+export type BackgroundPageName = 'home' | 'library' | 'more';
 
 export const useUiStore = defineStore('ui', () => {
     /**
-     * The last real tab page the user visited. The right detail drawer keeps
-     * this page mounted as its background, so opening a building from Home or
-     * Library leaves the user on Home or Library.
+     * The page BackgroundPage renders beneath the right detail drawer.
+     * Capture selects Library when opening a submitted building.
      */
     const background = ref<BackgroundPageName>('home');
     const libraryTab = ref<'list' | 'map'>('list');
     const librarySearch = ref<string | null>(null);
 
-    function setBackground(page: BackgroundPageName) {
+    function setBackground(page: BackgroundPageName): void {
         background.value = page;
     }
 

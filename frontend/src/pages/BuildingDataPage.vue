@@ -1,52 +1,71 @@
 <template>
-    <q-page
-        class="bg-white text-dark q-px-md q-pb-xl"
-        style="padding-top: 64px"
-        :aria-busy="isLoading || isSaving"
-    >
+    <q-page class="bg-white text-dark q-px-md q-pb-xl" style="padding-top: 64px">
         <page-header :title="t('buildings.dataTitle', { name: buildingName })" />
 
-        <q-banner v-if="state.error" class="bg-red-1 text-negative q-mb-md" role="alert">
-            {{ loadErrorMessage }}
-            <template #action>
-                <q-btn
-                    flat
-                    :label="t('common.retry')"
-                    :disable="isLoading || isSaving"
-                    @click="refetch()"
-                />
+        <QueryStateSwitcher
+            :state="state"
+            :async-status="asyncStatus"
+            :retry="refetch"
+            :loading-message="t('buildings.loading')"
+            :error-message="loadErrorMessage"
+        >
+            <template #error="{ retrying }">
+                <q-banner class="bg-red-1 text-negative">
+                    {{ loadErrorMessage }}
+                    <template #action>
+                        <q-btn
+                            flat
+                            :label="t('common.retry')"
+                            :disable="retrying || isSaving"
+                            @click="refetch()"
+                        />
+                    </template>
+                </q-banner>
             </template>
-        </q-banner>
-
-        <div v-if="!draft && !state.error" role="status" :aria-label="t('buildings.loading')">
-            <q-skeleton type="text" width="60%" class="q-mb-md" />
-            <q-skeleton height="56px" class="q-mb-md" />
-            <q-skeleton height="200px" square />
-        </div>
-
-        <q-form v-else-if="draft && !notFound" class="q-mb-lg" @submit="save">
-            <h2 class="text-subtitle1 text-weight-bold q-mb-md">
-                {{ t('buildings.localization') }}
-            </h2>
-            <div v-if="isLoading" class="text-grey-7 q-mb-sm" role="status">
-                <q-spinner color="primary" class="q-mr-sm" />
-                {{ t('buildings.refreshing') }}
-            </div>
-            <building-details-editor v-model="draft" :disable="isSaving" />
-            <q-btn
-                type="submit"
-                :label="t('common.save')"
-                color="primary"
-                class="full-width q-mt-md"
-                unelevated
-                no-caps
-                :loading="isSaving"
-                :disable="!canSave"
-            />
-            <q-banner v-if="saveErrorMessage" class="bg-red-1 text-negative q-mt-md" role="alert">
-                {{ saveErrorMessage }}
-            </q-banner>
-        </q-form>
+            <template #pending>
+                <div aria-hidden="true">
+                    <q-skeleton type="text" width="60%" class="q-mb-md" />
+                    <q-skeleton height="56px" class="q-mb-md" />
+                    <q-skeleton height="200px" square />
+                </div>
+            </template>
+            <template #refreshing>
+                <div class="text-grey-7">
+                    <q-spinner color="primary" class="q-mr-sm" />
+                    {{ t('buildings.refreshing') }}
+                </div>
+            </template>
+            <template #success>
+                <q-form
+                    v-if="draft && !notFound"
+                    class="q-mb-lg"
+                    :aria-busy="isSaving"
+                    @submit="save"
+                >
+                    <h2 class="text-subtitle1 text-weight-bold q-mb-md">
+                        {{ t('buildings.localization') }}
+                    </h2>
+                    <building-details-editor v-model="draft" :disable="isSaving" />
+                    <q-btn
+                        type="submit"
+                        :label="t('common.save')"
+                        color="primary"
+                        class="full-width q-mt-md"
+                        unelevated
+                        no-caps
+                        :loading="isSaving"
+                        :disable="!canSave"
+                    />
+                    <q-banner
+                        v-if="saveErrorMessage"
+                        class="bg-red-1 text-negative q-mt-md"
+                        role="alert"
+                    >
+                        {{ saveErrorMessage }}
+                    </q-banner>
+                </q-form>
+            </template>
+        </QueryStateSwitcher>
 
         <section class="q-mb-lg" aria-disabled="true">
             <h2 class="text-subtitle1 text-weight-bold q-mb-md">
@@ -112,6 +131,7 @@
 </template>
 
 <script setup lang="ts">
+import QueryStateSwitcher from 'src/components/QueryStateSwitcher.vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { useRoute } from 'vue-router';
@@ -141,7 +161,6 @@ const {
 } = useUpdateBuildingMutation();
 const draft = ref<BuildingCreate | null>(null);
 const baseline = ref<BuildingCreate | null>(null);
-const isLoading = computed(() => asyncStatus.value === 'loading');
 const buildingName = computed(() =>
     building.value?.id === buildingId.value
         ? building.value.name.trim() || t('buildings.untitled')

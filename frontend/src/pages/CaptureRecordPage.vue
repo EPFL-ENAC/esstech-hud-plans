@@ -3,6 +3,7 @@
         <q-page-container>
             <q-page class="capture-record-page">
                 <camera-viewfinder ref="viewfinder" fullscreen />
+                <video-tips-modal v-model="showTips" />
 
                 <div
                     v-if="isRecording"
@@ -14,39 +15,65 @@
                     <span>{{ formattedElapsed }}</span>
                 </div>
 
-                <q-banner
-                    v-if="handoffError"
-                    class="record-status bg-red-1 text-negative q-py-sm"
-                    role="alert"
-                >
-                    {{ handoffError }}
-                </q-banner>
-
                 <div class="record-controls">
-                    <q-btn
-                        round
-                        class="record-btn-close"
-                        icon="close"
-                        :aria-label="t('capture.record.close')"
-                        @click="confirmDiscard"
-                    />
-                    <q-btn
-                        round
-                        class="record-btn-rec"
-                        :aria-label="
-                            isRecording ? t('capture.record.stop') : t('capture.record.record')
-                        "
-                        :disable="busy || !(isRecording || viewfinder?.canStartRecording)"
-                        :loading="busy || viewfinder?.isStopping"
-                        @click="toggleRecording"
+                    <q-banner
+                        v-if="handoffError"
+                        class="record-status bg-red-1 text-negative q-py-sm"
+                        role="alert"
                     >
-                        <template #default>
-                            <span
-                                class="record-btn-core"
-                                :class="{ 'record-btn-core--stop': isRecording }"
-                            />
-                        </template>
-                    </q-btn>
+                        {{ handoffError }}
+                    </q-banner>
+
+                    <div v-if="viewfinder?.cameras.length" class="record-camera-picker">
+                        <q-btn-toggle
+                            :model-value="viewfinder.selectedCameraId"
+                            :options="viewfinder.cameras"
+                            :disable="busy || !viewfinder.canSelectCamera"
+                            :aria-label="t('capture.camera.label')"
+                            color="grey-9"
+                            text-color="white"
+                            toggle-color="primary"
+                            unelevated
+                            no-caps
+                            no-wrap
+                            @update:model-value="viewfinder?.selectCamera($event)"
+                        />
+                    </div>
+
+                    <div class="record-actions">
+                        <q-btn
+                            round
+                            class="record-btn-close"
+                            icon="close"
+                            :aria-label="t('capture.record.close')"
+                            @click="confirmDiscard"
+                        />
+                        <q-btn
+                            round
+                            class="record-btn-rec"
+                            :aria-label="
+                                isRecording ? t('capture.record.stop') : t('capture.record.record')
+                            "
+                            :disable="busy || !(isRecording || viewfinder?.canStartRecording)"
+                            :loading="busy || viewfinder?.isStopping"
+                            @click="toggleRecording"
+                        >
+                            <template #default>
+                                <span
+                                    class="record-btn-core"
+                                    :class="{ 'record-btn-core--stop': isRecording }"
+                                />
+                            </template>
+                        </q-btn>
+                        <q-btn
+                            round
+                            class="record-btn-tips"
+                            icon="lightbulb_outline"
+                            :aria-label="t('capture.tipsTitle')"
+                            :disable="busy || isRecording || viewfinder?.isStopping"
+                            @click="showTips = true"
+                        />
+                    </div>
                 </div>
             </q-page>
         </q-page-container>
@@ -58,8 +85,10 @@ import { computed, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import CameraViewfinder from 'src/components/CameraViewfinder.vue';
+import VideoTipsModal from 'src/components/VideoTipsModal.vue';
 import { type RecordedVideo, toCapturedVideo } from 'src/lib/captured-video';
 import { useCaptureStore } from 'src/stores/capture';
+import { useLocalPreferencesStore } from 'src/stores/localPreferences';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
@@ -68,7 +97,12 @@ const viewfinder = useTemplateRef<InstanceType<typeof CameraViewfinder>>('viewfi
 const router = useRouter();
 const $q = useQuasar();
 const captureStore = useCaptureStore();
+// Preserve whether the recorder was opened from a form for history navigation.
+const returnTo = captureStore.returnTo;
+const draftReturnTo = captureStore.ensureDraft().returnTo;
+const localPreferencesStore = useLocalPreferencesStore();
 const busy = ref(false);
+const showTips = ref(!localPreferencesStore.hideVideoTips);
 const handoffError = ref('');
 const elapsedSeconds = ref(0);
 let disposed = false;
@@ -125,14 +159,12 @@ async function toggleRecording(): Promise<void> {
         if (disposed) return;
         // No automatic location ask after a stop: the video hands off
         // without a location and the capture form opens at once.
-        captureStore.setVideo(toCapturedVideo(recording, null));
-        const failure = await router.push('/capture/new');
+        captureStore.setDraftVideo(toCapturedVideo(recording, null));
+        const failure = returnTo ? await router.replace(returnTo) : await router.push('/capture');
         if (failure) {
-            captureStore.clearVideo();
             if (!disposed) handoffError.value = t('capture.handoffFailed');
         }
     } catch (error) {
-        captureStore.clearVideo();
         if (!disposed) {
             handoffError.value = error instanceof Error ? error.message : t('capture.openFailed');
         }
@@ -166,16 +198,25 @@ function confirmDiscard(): void {
 async function discardCapture(): Promise<void> {
     // An in-progress recorder is discarded by the viewfinder's unmount
     // cleanup when the page unloads.
-    captureStore.clearVideo();
-    if (router.options.history.state?.back) {
+    if (returnTo) {
+        try {
+            const failure = await router.replace(returnTo);
+            if (failure) handoffError.value = t('capture.openFailed');
+        } catch {
+            handoffError.value = t('capture.openFailed');
+        }
+    } else if (router.options.history.state?.back) {
         router.back();
     } else {
-        await router.push('/capture/video');
+        await router.push('/capture');
     }
 }
 
 onBeforeUnmount(() => {
     disposed = true;
+    if (router.currentRoute.value.fullPath !== draftReturnTo) {
+        captureStore.clearDraft();
+    }
     if (timerId !== null) {
         window.clearInterval(timerId);
         timerId = null;
@@ -226,39 +267,58 @@ onBeforeUnmount(() => {
     }
 }
 
-/* Status and error messages sit just above the control bar. */
 .record-status {
-    position: absolute;
-    left: 16px;
-    right: 16px;
-    bottom: 88px;
-    z-index: 10;
+    margin: 8px 16px;
 }
 
-/* Camera control bar: the record button stays centered and the close button
-   sits on the left, like a native camera app. */
 .record-controls {
     position: fixed;
     bottom: 0;
     left: 0;
     right: 0;
-    height: 72px;
     z-index: 10;
+    background: rgba(0, 0, 0, 0.9);
+    padding-bottom: env(safe-area-inset-bottom);
+}
+
+.record-camera-picker {
+    overflow-x: auto;
+    padding: 8px 16px;
+}
+
+.record-camera-picker :deep(.q-btn-toggle) {
+    display: flex;
+    flex-wrap: nowrap;
+    width: max-content;
+    margin-inline: auto;
+}
+
+/* Keep the record button centered between the close and tips buttons. */
+.record-actions {
+    position: relative;
+    height: 72px;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(0, 0, 0, 0.9);
 }
 
-.record-btn-close {
+.record-btn-close,
+.record-btn-tips {
     position: absolute;
-    left: 24px;
     width: 44px;
     height: 44px;
     padding: 0 !important;
     min-width: auto;
     color: #ffffff;
     background: rgba(255, 255, 255, 0.2);
+}
+
+.record-btn-close {
+    left: 24px;
+}
+
+.record-btn-tips {
+    right: 24px;
 }
 
 .record-btn-rec {

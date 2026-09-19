@@ -22,7 +22,7 @@
                 </span>
             </q-circular-progress>
 
-            <h1 class="text-h6 text-weight-bold q-mb-sm q-mt-lg">{{ chipMessage }}</h1>
+            <h2 class="text-h6 text-weight-bold q-mb-sm q-mt-lg">{{ chipMessage }}</h2>
 
             <q-btn
                 v-if="!isFailureState && !isCompletedState && !isCancelling"
