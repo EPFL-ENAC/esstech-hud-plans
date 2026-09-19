@@ -29,9 +29,9 @@
             <template #success="{ data: building }">
                 <template v-if="!notFound">
                     <section class="q-mb-lg q-px-md">
-                        <h1 class="building-name text-h6 text-weight-bold q-mt-none">
+                        <h2 class="building-name text-h6 text-weight-bold q-mt-none">
                             {{ buildingName }}
-                        </h1>
+                        </h2>
                         <p v-if="building.address" class="building-name">{{ building.address }}</p>
                         <div
                             v-if="building.latitude !== null && building.longitude !== null"

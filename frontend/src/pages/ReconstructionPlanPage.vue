@@ -5,9 +5,9 @@
         :aria-busy="showSplat && rendering"
     >
         <page-header :title="t('plans.threeDimensional')" />
-        <h1 class="text-h6 text-weight-bold q-mt-none">
+        <h2 class="text-h6 text-weight-bold q-mt-none">
             {{ t('reconstructions.named', { id: reconstructionId.slice(0, 8) }) }}
-        </h1>
+        </h2>
 
         <QueryStateSwitcher
             v-if="reconstructionId"

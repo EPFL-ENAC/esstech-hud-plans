@@ -176,7 +176,7 @@ function handleLogout() {
 
 @media (max-width: 599px) {
     .account-details {
-        grid-template-columns: minmax(0, 1fr);
+        flex-direction: column;
     }
 
     .account-divider {

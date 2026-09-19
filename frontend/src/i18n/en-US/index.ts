@@ -65,7 +65,7 @@ export default {
         chooseExistingVideo: 'Choose an existing video file',
         tipsTitle: 'Tips for best results',
         doNotShowTipsAgain: 'Do not show again',
-        wideAngleTip: 'Use Wide angle lens',
+        wideAngleTip: 'Use a wide-angle lens',
         wideAngleHint: 'Set to 0.5x or widest available',
         viewingAnglesTip: 'Provide as many viewing angles as possible',
         viewingAnglesHint:

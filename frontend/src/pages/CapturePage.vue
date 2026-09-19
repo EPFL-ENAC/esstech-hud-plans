@@ -15,7 +15,7 @@
                     no-caps
                     @click="openRecorder"
                 />
-                <span class="text-gray text-italic">{{ t('common.or') }}</span>
+                <span class="text-grey text-italic">{{ t('common.or') }}</span>
                 <file-picker-button
                     v-model="videoFile"
                     accept="video/*"
