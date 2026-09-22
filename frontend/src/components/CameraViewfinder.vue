@@ -1,21 +1,15 @@
 <template>
     <section :aria-label="t('capture.camera.viewfinder')" :aria-busy="state === 'requesting'">
-        <q-select
-            v-if="cameras.length && !fullscreen"
-            :model-value="selectedCameraId"
-            :options="cameras"
-            emit-value
-            map-options
-            outlined
-            :label="t('capture.camera.label')"
-            :aria-label="t('capture.camera.label')"
-            class="q-mb-md"
-            :disable="!canSelectCamera"
+        <camera-picker
+            v-if="!fullscreen"
+            :cameras="cameras"
+            :selected-camera-id="selectedCameraId"
+            :disabled="!canSelectCamera"
             :loading="loadingCameras"
-            @update:model-value="selectCamera"
-        >
-            <template #prepend><q-icon name="videocam" /></template>
-        </q-select>
+            class="q-mb-md"
+            @select-camera="selectCamera"
+            @select-side="selectSide"
+        />
         <q-banner v-if="cameraListError" class="bg-red-1 text-negative q-mb-md" role="alert">
             {{ cameraListError }}
             <template #action>
@@ -108,6 +102,8 @@ import {
     ref,
 } from 'vue';
 import type { RecordedVideo } from 'src/lib/captured-video';
+import CameraPicker from 'src/components/CameraPicker.vue';
+import { detectCameraSide, type CameraOption, type CameraSide } from 'src/lib/cameras';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
@@ -129,10 +125,12 @@ interface RecordingSession {
 }
 
 const cameraDevices = ref<MediaDeviceInfo[]>([]);
-const cameras = computed(() =>
+const lastCameraBySide: Partial<Record<CameraSide, string>> = {};
+const cameras = computed<CameraOption[]>(() =>
     cameraDevices.value.map((device, index) => ({
         label: device.label.trim() || t('capture.camera.numbered', { number: index + 1 }),
         value: device.deviceId,
+        side: detectCameraSide(device),
     })),
 );
 const selectedCameraId = ref<string | null>(null);
@@ -148,8 +146,13 @@ const recordingSupported = typeof MediaRecorder !== 'undefined';
 const recordingError = ref('');
 const isRecording = ref(false);
 const isStopping = ref(false);
+const pendingRequest = ref(false);
 const canSelectCamera = computed(
-    () => state.value !== 'requesting' && !isRecording.value && !isStopping.value,
+    () =>
+        !pendingRequest.value &&
+        state.value !== 'requesting' &&
+        !isRecording.value &&
+        !isStopping.value,
 );
 const canStartRecording = computed(
     () =>
@@ -165,7 +168,6 @@ let stream: MediaStream | null = null;
 let active = false;
 let disposed = false;
 let pageHidden = false;
-let pendingRequest = false;
 let resumeRequested = true;
 let generation = 0;
 let cameraListGeneration = 0;
@@ -317,6 +319,7 @@ async function refreshCameras(): Promise<void> {
         cameraDevices.value = devices.filter(
             (device) => device.kind === 'videoinput' && device.deviceId,
         );
+        rememberActiveCamera();
         cameraListError.value = '';
         if (
             selectedCameraId.value &&
@@ -337,17 +340,24 @@ async function refreshCameras(): Promise<void> {
 }
 
 async function selectCamera(deviceId: string): Promise<void> {
-    if (
-        deviceId === selectedCameraId.value ||
-        pendingRequest ||
-        isRecording.value ||
-        isStopping.value ||
-        !isVisible()
-    )
-        return;
+    if (deviceId === selectedCameraId.value || !canSelectCamera.value || !isVisible()) return;
     selectedCameraId.value = deviceId;
     releaseCamera();
     await startCamera();
+}
+
+function rememberActiveCamera(): void {
+    if (!stream) return;
+    const camera = cameras.value.find((camera) => camera.value === selectedCameraId.value);
+    if (camera?.side) lastCameraBySide[camera.side] = camera.value;
+}
+
+async function selectSide(side: CameraSide): Promise<void> {
+    if (!canSelectCamera.value) return;
+    const candidates = cameras.value.filter((camera) => camera.side === side);
+    const rememberedId = lastCameraBySide[side];
+    const target = candidates.find((camera) => camera.value === rememberedId) ?? candidates[0];
+    if (target) await selectCamera(target.value);
 }
 
 function onDevicesChanged(): void {
@@ -403,7 +413,7 @@ async function playPreview(): Promise<void> {
 }
 
 async function startCamera(): Promise<void> {
-    if (!isVisible() || pendingRequest || stream) return;
+    if (!isVisible() || pendingRequest.value || stream) return;
     if (!window.isSecureContext) {
         showError(t('capture.camera.secureConnectionRequired'), false);
         return;
@@ -414,7 +424,7 @@ async function startCamera(): Promise<void> {
     }
 
     const requestGeneration = ++generation;
-    pendingRequest = true;
+    pendingRequest.value = true;
     resumeRequested = false;
     errorMessage.value = '';
     state.value = 'requesting';
@@ -440,6 +450,7 @@ async function startCamera(): Promise<void> {
         }
         videoTrack.addEventListener('ended', onTrackEnded);
         selectedCameraId.value = videoTrack.getSettings().deviceId || selectedCameraId.value;
+        rememberActiveCamera();
         videoElement.value!.srcObject = stream;
         // Playback has its own generation guard and must not hold up a new
         // camera request if the page is hidden before play() settles.
@@ -452,7 +463,7 @@ async function startCamera(): Promise<void> {
             void refreshCameras();
         }
     } finally {
-        pendingRequest = false;
+        pendingRequest.value = false;
         if (resumeRequested && isVisible()) void startCamera();
     }
 }
@@ -463,7 +474,7 @@ function onTrackEnded(): void {
 }
 
 function suspendCamera(): void {
-    if (stream || pendingRequest) resumeRequested = true;
+    if (stream || pendingRequest.value) resumeRequested = true;
     releaseCamera();
     if (state.value !== 'error') state.value = 'paused';
 }
@@ -513,6 +524,7 @@ onBeforeUnmount(() => {
 
 defineExpose({
     cameras,
+    selectSide,
     selectedCameraId: readonly(selectedCameraId),
     canSelectCamera,
     selectCamera,
