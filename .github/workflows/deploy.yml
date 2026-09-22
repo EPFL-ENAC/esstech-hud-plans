@@ -13,7 +13,7 @@ env:
   IMAGE_NAME: ${{github.repository}}
 jobs:
   deploy:
-    uses: EPFL-ENAC/epfl-enac-build-push-deploy-action/.github/workflows/deploy.yml@v2.5.0
+    uses: EPFL-ENAC/epfl-enac-build-push-deploy-action/.github/workflows/deploy.yml@v3.8.0
     secrets:
       token: ${{ secrets.CD_TOKEN }}
     with:
