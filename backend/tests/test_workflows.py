@@ -270,13 +270,15 @@ def test_extract_frames_task_sends_ffmpeg_output_to_prefect_run_logger(
         splat_workflow, "run_frame_extraction", fake_run_frame_extraction
     )
 
-    result = splat_workflow.extract_frames_task.fn(
-        str(tmp_path),
-        "input",
-        str(tmp_path / "frames"),
-        2,
-        100,
-        100,
+    result = asyncio.run(
+        splat_workflow.extract_frames_task.fn(
+            str(tmp_path),
+            "input",
+            str(tmp_path / "frames"),
+            2,
+            100,
+            100,
+        )
     )
 
     assert result == str(tmp_path / "frames")
@@ -306,12 +308,14 @@ def test_pick_frames_task_sends_progress_to_prefect_run_logger(
     monkeypatch.setattr(splat_workflow, "get_run_logger", lambda: FakeRunLogger())
     monkeypatch.setattr(splat_workflow, "pick_frames", fake_pick_frames)
 
-    result = splat_workflow.pick_frames_task.fn(
-        str(tmp_path),
-        str(tmp_path / "input.mp4"),
-        str(tmp_path / "frames_raw"),
-        str(tmp_path / "frames"),
-        settings,
+    result = asyncio.run(
+        splat_workflow.pick_frames_task.fn(
+            str(tmp_path),
+            str(tmp_path / "input.mp4"),
+            str(tmp_path / "frames_raw"),
+            str(tmp_path / "frames"),
+            settings,
+        )
     )
 
     assert result == str((tmp_path / "frames").resolve())
@@ -344,12 +348,14 @@ def test_pick_frames_task_rejects_empty_selection(
     monkeypatch.setattr(splat_workflow, "pick_frames", lambda **kwargs: [])
 
     with pytest.raises(RuntimeError, match="without selecting any frames"):
-        splat_workflow.pick_frames_task.fn(
-            str(tmp_path),
-            str(tmp_path / "input.mp4"),
-            str(tmp_path / "frames_raw"),
-            str(tmp_path / "frames"),
-            FramePickerSettings(),
+        asyncio.run(
+            splat_workflow.pick_frames_task.fn(
+                str(tmp_path),
+                str(tmp_path / "input.mp4"),
+                str(tmp_path / "frames_raw"),
+                str(tmp_path / "frames"),
+                FramePickerSettings(),
+            )
         )
 
 
@@ -380,11 +386,13 @@ def test_reconstruct_with_colmap_task_sends_output_to_prefect_run_logger(
         fake_run_colmap_reconstruction,
     )
 
-    result = splat_workflow.reconstruct_with_colmap_task.fn(
-        str(tmp_path),
-        str(tmp_path / "frames"),
-        str(tmp_path / "colmap"),
-        settings,
+    result = asyncio.run(
+        splat_workflow.reconstruct_with_colmap_task.fn(
+            str(tmp_path),
+            str(tmp_path / "frames"),
+            str(tmp_path / "colmap"),
+            settings,
+        )
     )
 
     assert result == str(tmp_path / "colmap")
@@ -422,11 +430,13 @@ def test_train_with_brush_task_sends_output_to_prefect_run_logger(
         fake_run_brush_training,
     )
 
-    result = splat_workflow.train_with_brush_task.fn(
-        str(tmp_path),
-        str(tmp_path),
-        str(tmp_path / "splat.ply"),
-        settings,
+    result = asyncio.run(
+        splat_workflow.train_with_brush_task.fn(
+            str(tmp_path),
+            str(tmp_path),
+            str(tmp_path / "splat.ply"),
+            settings,
+        )
     )
 
     assert result == str(tmp_path / "splat.ply")
@@ -452,19 +462,19 @@ def test_splat_generation_flow_selects_gpu_environment(
         def info(self, *args) -> None:
             pass
 
-    def fake_extract_frames_task(**kwargs):
+    async def fake_extract_frames_task(**kwargs):
         calls.append(("ffmpeg", kwargs))
         return kwargs["frames_directory"]
 
-    def fake_picker_task(**kwargs):
+    async def fake_picker_task(**kwargs):
         calls.append(("frame-picker", kwargs))
         return str(tmp_path / "frames")
 
-    def fake_colmap_task(**kwargs):
+    async def fake_colmap_task(**kwargs):
         calls.append(("colmap", kwargs))
         return str(tmp_path / "colmap")
 
-    def fake_brush_task(**kwargs):
+    async def fake_brush_task(**kwargs):
         calls.append(("brush", kwargs))
         return str(tmp_path / "splat.ply")
 
@@ -552,6 +562,8 @@ def test_splat_generation_flow_selects_gpu_environment(
             ),
         ]
     )
+    for _, arguments in expected_calls:
+        arguments["report_progress"] = None
     assert calls == expected_calls
 
 

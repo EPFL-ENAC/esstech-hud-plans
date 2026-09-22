@@ -1,10 +1,36 @@
 from pathlib import Path, PurePosixPath
-from types import SimpleNamespace
 
 import pytest
 from api.lib.compute import scitas as scitas_compute
+from api.lib.compute.progress import BrushProgressEstimator
 from api.lib.utils import commands
 from api.lib.utils.commands.environments import scitas as scitas_commands
+
+
+def test_scitas_log_tail_feeds_incremental_progress_across_polls(
+    tmp_path: Path,
+) -> None:
+    log_path = tmp_path / "brush.log"
+    tail = scitas_commands._IncrementalLogTail()
+    estimator = BrushProgressEstimator()
+    updates: list[float] = []
+
+    def report(record: str) -> None:
+        if (progress := estimator.feed(record)) is not None:
+            updates.append(progress)
+
+    log_path.write_bytes(b"Completed loading\n\x1b[2K100/1000 Steps\r200/100")
+    tail.read(log_path, report)
+    assert updates == [0.1]
+    tail.read(log_path, report)
+    assert updates == [0.1]  # Re-reading must not replay old records.
+
+    with log_path.open("ab") as stream:
+        stream.write(b"0 Steps\r300/1000 Steps")
+    tail.read(log_path, report)
+    assert updates == [0.1, 0.2]
+    tail.finish(report)
+    assert updates == [0.1, 0.2, 0.3]
 
 
 def _stub_registry(

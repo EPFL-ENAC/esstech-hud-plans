@@ -1,6 +1,7 @@
 import io
 import logging
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -54,6 +55,9 @@ class _FakeLogger(logging.Logger):
 class _FailingStream:
     def read(self, size: int = -1) -> bytes:
         raise OSError("Could not read command output")
+
+    def close(self) -> None:
+        pass
 
 
 def test_iter_command_log_records_normalizes_stream_boundaries() -> None:
@@ -144,6 +148,7 @@ def test_local_environment_configures_capture_and_streams_before_waiting(
         "stdin": subprocess.DEVNULL,
         "stdout": expected_stdout,
         "stderr": expected_stderr,
+        "bufsize": 0,
     }
 
 
@@ -264,3 +269,67 @@ def test_local_environment_terminates_when_reading_fails(
 
     assert process.terminated
     assert process.waited
+
+
+@pytest.mark.parametrize("tool", ["ffmpeg", "brush"])
+def test_local_environment_delivers_small_records_while_process_is_running(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, tool: commands.CommandTool
+) -> None:
+    environment = commands.LocalCommandExecutionEnvironment()
+    monkeypatch.setattr(environment, "_resolve_tool", lambda tool: sys.executable)
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setenv("TERM", "dumb")
+    # The child only finishes after the callback acknowledges its first record.
+    # Brush additionally requires terminal output, like its actual progress bar.
+    script = """
+import os, pathlib, sys, time
+if sys.argv[1] == 'brush':
+    assert sys.stderr.isatty()
+    assert os.environ['TERM'] == 'xterm-256color'
+    assert 'NO_COLOR' not in os.environ
+sys.stderr.write('10/100 Steps\\r')
+sys.stderr.flush()
+deadline = time.monotonic() + 5
+while not pathlib.Path('acknowledged').exists():
+    if time.monotonic() > deadline:
+        raise RuntimeError('Progress was buffered until process exit')
+    time.sleep(0.01)
+sys.stderr.write('20/100 Steps')
+sys.stderr.flush()
+"""
+    records: list[str] = []
+
+    def on_log(record: str) -> None:
+        records.append(record)
+        (tmp_path / "acknowledged").touch()
+
+    result = environment.execute(
+        commands.Command(tool=tool, arguments=("-c", script, tool), capture="combined"),
+        workspace=tmp_path,
+        on_log=on_log,
+    )
+
+    assert result.return_code == 0
+    assert records == ["10/100 Steps", "20/100 Steps"]
+
+
+def test_local_brush_preserves_failure_exit_code(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    environment = commands.LocalCommandExecutionEnvironment()
+    monkeypatch.setattr(environment, "_resolve_tool", lambda tool: sys.executable)
+    records: list[str] = []
+
+    with pytest.raises(commands.CommandExecutionError) as error:
+        environment.execute(
+            commands.Command(
+                tool="brush",
+                arguments=("-c", "print('before failure', flush=True); exit(3)"),
+                capture="combined",
+            ),
+            workspace=tmp_path,
+            on_log=records.append,
+        )
+
+    assert records == ["before failure"]
+    assert error.value.return_code == 3
