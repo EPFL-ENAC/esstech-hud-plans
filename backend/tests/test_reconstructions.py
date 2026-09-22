@@ -1173,6 +1173,18 @@ def test_reconstruction_flow_records_milestones_and_artifacts(
         assert received_id == reconstruction_id
         updates.append((progress, artifacts))
 
+    async def fake_extract_frames(**kwargs):
+        return kwargs["frames_directory"]
+
+    async def fake_pick_frames(**kwargs):
+        return str(tmp_path / "frames")
+
+    async def fake_colmap(**kwargs):
+        return str(tmp_path / "colmap")
+
+    async def fake_brush(**kwargs):
+        return str(tmp_path / "splat.ply")
+
     monkeypatch.setattr(splat_workflow, "get_run_logger", lambda: FakeRunLogger())
     monkeypatch.setattr(
         splat_workflow,
@@ -1182,22 +1194,22 @@ def test_reconstruction_flow_records_milestones_and_artifacts(
     monkeypatch.setattr(
         splat_workflow,
         "extract_frames_task",
-        lambda **kwargs: kwargs["frames_directory"],
+        fake_extract_frames,
     )
     monkeypatch.setattr(
         splat_workflow,
         "pick_frames_task",
-        lambda **kwargs: str(tmp_path / "frames"),
+        fake_pick_frames,
     )
     monkeypatch.setattr(
         splat_workflow,
         "reconstruct_with_colmap_task",
-        lambda **kwargs: str(tmp_path / "colmap"),
+        fake_colmap,
     )
     monkeypatch.setattr(
         splat_workflow,
         "train_with_brush_task",
-        lambda **kwargs: str(tmp_path / "splat.ply"),
+        fake_brush,
     )
 
     result = asyncio.run(
