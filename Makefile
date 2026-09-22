@@ -16,8 +16,7 @@ run-workflows:
 	cd backend && make run-workflows
 
 run-frontend:
-	echo "Frontend not set up yet"
-	cd frontend && npm run dev
+	cd frontend && bash -c 'trap "exit 0" INT TERM HUP; while true; do npm run dev; code=$$?; if [ "$$code" -eq 0 ] || [ "$$code" -ge 128 ]; then break; fi; echo "npm run dev exited unexpectedly (code $$code), restarting..."; sleep 1; done'
 
 run-db:
 	docker compose up -d
