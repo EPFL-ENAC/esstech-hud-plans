@@ -24,21 +24,15 @@
                         {{ handoffError }}
                     </q-banner>
 
-                    <div v-if="viewfinder?.cameras.length" class="record-camera-picker">
-                        <q-btn-toggle
-                            :model-value="viewfinder.selectedCameraId"
-                            :options="viewfinder.cameras"
-                            :disable="busy || !viewfinder.canSelectCamera"
-                            :aria-label="t('capture.camera.label')"
-                            color="grey-9"
-                            text-color="white"
-                            toggle-color="primary"
-                            unelevated
-                            no-caps
-                            no-wrap
-                            @update:model-value="viewfinder?.selectCamera($event)"
-                        />
-                    </div>
+                    <camera-picker
+                        v-if="viewfinder"
+                        :cameras="viewfinder.cameras"
+                        :selected-camera-id="viewfinder.selectedCameraId"
+                        :disabled="busy || !viewfinder.canSelectCamera"
+                        fullscreen
+                        @select-camera="viewfinder.selectCamera($event)"
+                        @select-side="viewfinder.selectSide($event)"
+                    />
 
                     <div class="record-actions">
                         <q-btn
@@ -85,6 +79,7 @@ import { computed, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import CameraViewfinder from 'src/components/CameraViewfinder.vue';
+import CameraPicker from 'src/components/CameraPicker.vue';
 import VideoTipsModal from 'src/components/VideoTipsModal.vue';
 import { type RecordedVideo, toCapturedVideo } from 'src/lib/captured-video';
 import { useCaptureStore } from 'src/stores/capture';
@@ -279,18 +274,6 @@ onBeforeUnmount(() => {
     z-index: 10;
     background: rgba(0, 0, 0, 0.9);
     padding-bottom: env(safe-area-inset-bottom);
-}
-
-.record-camera-picker {
-    overflow-x: auto;
-    padding: 8px 16px;
-}
-
-.record-camera-picker :deep(.q-btn-toggle) {
-    display: flex;
-    flex-wrap: nowrap;
-    width: max-content;
-    margin-inline: auto;
 }
 
 /* Keep the record button centered between the close and tips buttons. */

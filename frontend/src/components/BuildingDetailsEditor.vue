@@ -8,7 +8,11 @@
             :disable="disable"
         />
         <div>
-            <div class="row q-col-gutter-md">
+            <div
+                class="row q-col-gutter-md"
+                @focusin="showCoordinateValidation = false"
+                @focusout="onCoordinatesFocusOut"
+            >
                 <q-input
                     v-model="latitude"
                     class="col-12 col-sm-6"
@@ -45,7 +49,11 @@
                 @click="useCurrentLocation"
             />
         </div>
-        <p v-if="!isValidBuildingCreate(details)" class="text-negative q-mb-none" role="alert">
+        <p
+            v-if="showCoordinateValidation && !isValidBuildingCreate(details)"
+            class="text-negative q-mb-none"
+            role="alert"
+        >
             {{ t('buildings.fields.invalidCoordinates') }}
         </p>
         <p v-else class="text-caption text-grey-7 q-mb-none">
@@ -99,6 +107,14 @@ function coordinateModel(field: 'latitude' | 'longitude') {
 
 const latitude = coordinateModel('latitude');
 const longitude = coordinateModel('longitude');
+const showCoordinateValidation = ref(false);
+
+function onCoordinatesFocusOut(event: FocusEvent) {
+    const group = event.currentTarget as HTMLElement;
+    // Moving between the coordinate fields is still part of the same edit.
+    if (event.relatedTarget instanceof Node && group.contains(event.relatedTarget)) return;
+    showCoordinateValidation.value = true;
+}
 
 function onMapCoordsChange(newLatitude: number, newLongitude: number) {
     details.value = {
