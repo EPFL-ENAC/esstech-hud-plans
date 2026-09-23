@@ -5,3 +5,5 @@
 *.egg-info/
 __pycache__/
 backend/data/
+.spatiallm-workspace/
+.roomformer-workspace/
