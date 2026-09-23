@@ -4,3 +4,5 @@
 .vscode/
 *.egg-info/
 __pycache__/
+.spatiallm-workspace/
+.roomformer-workspace/
