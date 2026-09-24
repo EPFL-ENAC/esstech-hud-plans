@@ -24,16 +24,6 @@
                         {{ handoffError }}
                     </q-banner>
 
-                    <camera-picker
-                        v-if="viewfinder"
-                        :cameras="viewfinder.cameras"
-                        :selected-camera-id="viewfinder.selectedCameraId"
-                        :disabled="busy || !viewfinder.canSelectCamera"
-                        fullscreen
-                        @select-camera="viewfinder.selectCamera($event)"
-                        @select-side="viewfinder.selectSide($event)"
-                    />
-
                     <div class="record-actions">
                         <q-btn
                             round
@@ -68,6 +58,18 @@
                             @click="showTips = true"
                         />
                     </div>
+
+                    <!-- Numbered camera buttons float above the record
+                         button, over the video, outside the dark panel. -->
+                    <camera-picker
+                        v-if="viewfinder"
+                        class="record-camera-strip"
+                        :cameras="viewfinder.cameras"
+                        :selected-camera-id="viewfinder.selectedCameraId"
+                        :disabled="busy || !viewfinder.canSelectCamera"
+                        fullscreen
+                        @select-camera="viewfinder.selectCamera($event)"
+                    />
                 </div>
             </q-page>
         </q-page-container>
@@ -264,6 +266,15 @@ onBeforeUnmount(() => {
 
 .record-status {
     margin: 8px 16px;
+}
+
+/* The camera choice strip floats above the record button and shows the
+   video behind it, so it has no background color of its own. */
+.record-camera-strip {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 0;
+    right: 0;
 }
 
 .record-controls {

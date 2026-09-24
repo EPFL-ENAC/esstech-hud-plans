@@ -89,11 +89,6 @@ export default {
             viewfinder: 'Camera viewfinder',
             label: 'Camera',
             numbered: 'Camera {number}',
-            front: 'Front cameras',
-            rear: 'Rear cameras',
-            switchToFront: 'Switch to front camera',
-            switchToRear: 'Switch to rear camera',
-            otherCameras: 'Other cameras',
             refresh: 'Refresh cameras',
             recordingUnsupported:
                 'Video recording is not supported by this browser. Try another browser.',

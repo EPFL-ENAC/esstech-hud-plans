@@ -8,7 +8,6 @@
             :loading="loadingCameras"
             class="q-mb-md"
             @select-camera="selectCamera"
-            @select-side="selectSide"
         />
         <q-banner v-if="cameraListError" class="bg-red-1 text-negative q-mb-md" role="alert">
             {{ cameraListError }}
@@ -103,7 +102,7 @@ import {
 } from 'vue';
 import type { RecordedVideo } from 'src/lib/captured-video';
 import CameraPicker from 'src/components/CameraPicker.vue';
-import { detectCameraSide, type CameraOption, type CameraSide } from 'src/lib/cameras';
+import { type CameraOption } from 'src/lib/cameras';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
@@ -125,12 +124,10 @@ interface RecordingSession {
 }
 
 const cameraDevices = ref<MediaDeviceInfo[]>([]);
-const lastCameraBySide: Partial<Record<CameraSide, string>> = {};
 const cameras = computed<CameraOption[]>(() =>
     cameraDevices.value.map((device, index) => ({
         label: device.label.trim() || t('capture.camera.numbered', { number: index + 1 }),
         value: device.deviceId,
-        side: detectCameraSide(device),
     })),
 );
 const selectedCameraId = ref<string | null>(null);
@@ -319,7 +316,6 @@ async function refreshCameras(): Promise<void> {
         cameraDevices.value = devices.filter(
             (device) => device.kind === 'videoinput' && device.deviceId,
         );
-        rememberActiveCamera();
         cameraListError.value = '';
         if (
             selectedCameraId.value &&
@@ -344,20 +340,6 @@ async function selectCamera(deviceId: string): Promise<void> {
     selectedCameraId.value = deviceId;
     releaseCamera();
     await startCamera();
-}
-
-function rememberActiveCamera(): void {
-    if (!stream) return;
-    const camera = cameras.value.find((camera) => camera.value === selectedCameraId.value);
-    if (camera?.side) lastCameraBySide[camera.side] = camera.value;
-}
-
-async function selectSide(side: CameraSide): Promise<void> {
-    if (!canSelectCamera.value) return;
-    const candidates = cameras.value.filter((camera) => camera.side === side);
-    const rememberedId = lastCameraBySide[side];
-    const target = candidates.find((camera) => camera.value === rememberedId) ?? candidates[0];
-    if (target) await selectCamera(target.value);
 }
 
 function onDevicesChanged(): void {
@@ -450,7 +432,6 @@ async function startCamera(): Promise<void> {
         }
         videoTrack.addEventListener('ended', onTrackEnded);
         selectedCameraId.value = videoTrack.getSettings().deviceId || selectedCameraId.value;
-        rememberActiveCamera();
         videoElement.value!.srcObject = stream;
         // Playback has its own generation guard and must not hold up a new
         // camera request if the page is hidden before play() settles.
@@ -524,7 +505,6 @@ onBeforeUnmount(() => {
 
 defineExpose({
     cameras,
-    selectSide,
     selectedCameraId: readonly(selectedCameraId),
     canSelectCamera,
     selectCamera,

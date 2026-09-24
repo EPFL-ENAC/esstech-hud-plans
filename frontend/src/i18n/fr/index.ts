@@ -93,11 +93,6 @@ export default {
             viewfinder: 'Viseur de la caméra',
             label: 'Caméra',
             numbered: 'Caméra {number}',
-            front: 'Caméras avant',
-            rear: 'Caméras arrière',
-            switchToFront: 'Passer à la caméra avant',
-            switchToRear: 'Passer à la caméra arrière',
-            otherCameras: 'Autres caméras',
             refresh: 'Actualiser les caméras',
             recordingUnsupported:
                 'L’enregistrement vidéo n’est pas pris en charge par ce navigateur. Essayez un autre navigateur.',
