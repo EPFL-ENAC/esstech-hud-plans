@@ -61,6 +61,42 @@ DEFAULT_MODEL = "manycore-research/SpatialLM1.1-Qwen-0.5B"
 # Sonata encoder uses flash-attn by default. FA2 has no Blackwell build, so the
 # default is patched to the SDPA fallback (maintainer-endorsed via patch).
 
+# The non-flash fallback materializes an (N', H, K, K) attn tensor (~19 GiB on
+# a dense cloud); the fused SDPA call keeps the same math without the buffer.
+PATCH_SONATA_OLD = (
+    "            # attn\n"
+    "            if self.upcast_attention:\n"
+    "                q = q.float()\n"
+    "                k = k.float()\n"
+    "            attn = (q * self.scale) @ k.transpose(-2, -1)  # (N', H, K, K)\n"
+    "            if self.enable_rpe:\n"
+    "                attn = attn + self.rpe(self.get_rel_pos(point, order))\n"
+    "            if self.upcast_softmax:\n"
+    "                attn = attn.float()\n"
+    "            attn = self.softmax(attn)\n"
+    "            attn = self.attn_drop(attn).to(qkv.dtype)\n"
+    "            feat = (attn @ v).transpose(1, 2).reshape(-1, C)\n"
+)
+PATCH_SONATA_NEW = (
+    "            # SLAM_PLAN_COMPAT: fused SDPA path instead of the explicit\n"
+    "            # (N', H, K, K) attention, which runs out of VRAM on dense\n"
+    "            # point clouds (K = 1024, ~19 GiB attn on a dense cloud).\n"
+    "            # SDPA fuses softmax and matmul without materializing attn.\n"
+    "            rpe_bias = (\n"
+    "                self.rpe(self.get_rel_pos(point, order)) if self.enable_rpe else None\n"
+    "            )\n"
+    "            if self.upcast_attention or self.upcast_softmax:\n"
+    "                q = q.float()\n"
+    "                k = k.float()\n"
+    "                v = v.float()\n"
+    "            feat = torch.nn.functional.scaled_dot_product_attention(\n"
+    "                q, k, v,\n"
+    "                attn_mask=rpe_bias,\n"
+    "                dropout_p=self.attn_drop.p if self.training else 0.0,\n"
+    "                scale=self.scale,\n"
+    "            ).to(qkv.dtype).transpose(1, 2).reshape(-1, C)\n"
+)
+
 
 def _log(msg: str) -> None:
     typer.echo(f"[spatiallm-plan] {msg}")
@@ -235,6 +271,24 @@ def _patch_flash(workspace: Path) -> None:
     _log(f"flash-attn fallback patch applied to: {', '.join(patched) if patched else 'none (already patched)'}")
 
 
+def _patch_sonata_sdpa(workspace: Path) -> None:
+    """Fuse the Sonata non-flash attention with SDPA (the explicit (N, H, K, K)
+    attn materialization OOMs on dense point clouds)."""
+    path = workspace / "SpatialLM" / "spatiallm" / "model" / "sonata_encoder.py"
+    if not path.is_file():
+        raise RuntimeError(f"missing file for patch: {path}")
+    text = path.read_text()
+    # SLAM_PLAN_COMPAT / SDPA never occur upstream; their presence marks a
+    # file already patched (the exact replacement text may differ per session)
+    if "SLAM_PLAN_COMPAT: fused SDPA" in text or "scaled_dot_product_attention" in text:
+        _log("sonata SDPA patch already applied")
+        return
+    if PATCH_SONATA_OLD not in text:
+        raise RuntimeError(f"sonata SDPA patch target not found in {path}; upstream changed")
+    path.write_text(text.replace(PATCH_SONATA_OLD, PATCH_SONATA_NEW))
+    _log("sonata encoder SDPA attention patch applied")
+
+
 def _patch_streamer_timeout(workspace: Path) -> None:
     """Give the generation streamer 600 s; stock 20 s can lapse before the
     first token on a cold CUDA context (encoder + prefill warmup)."""
@@ -286,6 +340,7 @@ def _ensure_workspace(workspace: Path, model_id: str, uv_bin: str) -> None:
     _deps_install(workspace, uv_bin)
     _spatiallm_install(workspace, uv_bin)
     _patch_flash(workspace)
+    _patch_sonata_sdpa(workspace)
     _patch_streamer_timeout(workspace)
     _model_fetch(workspace, model_id, uv_bin)
 
