@@ -3,7 +3,7 @@
         <page-header :back="false" :title="t('capture.newCapture')" />
 
         <section class="q-mb-xl">
-            <h2 class="text-h5">{{ t('capture.sourceVideo') }}</h2>
+            <h2 class="text-h6 text-weight-bold">{{ t('capture.sourceVideo') }}</h2>
 
             <div class="video-source-actions">
                 <q-btn
@@ -33,7 +33,7 @@
         </section>
 
         <section class="q-mb-xl">
-            <h2 class="text-h5">{{ t('capture.destinationBuilding') }}</h2>
+            <h2 class="text-h6 text-weight-bold">{{ t('capture.destinationBuilding') }}</h2>
             <building-picker
                 v-model="buildingSelection"
                 :disable="submitting || destinationBuildingId !== null"
@@ -43,7 +43,7 @@
         </section>
 
         <section class="q-mb-xl">
-            <h2 class="text-h5">{{ t('capture.reconstructionSettings') }}</h2>
+            <h2 class="text-h6 text-weight-bold">{{ t('capture.reconstructionSettings') }}</h2>
             <q-select
                 v-model="preset"
                 outlined

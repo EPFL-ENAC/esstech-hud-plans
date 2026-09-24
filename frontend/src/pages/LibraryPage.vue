@@ -1,15 +1,13 @@
 <template>
     <q-page class="bg-white text-dark q-pb-xl" style="padding-top: 64px">
         <page-header :back="false" :title="t('navigation.library')">
-            <template #rightActions>
-                <q-btn
-                    flat
-                    no-caps
-                    color="primary"
-                    :label="t('capture.newCapture')"
-                    @click="$router.push('/capture')"
-                />
-            </template>
+            <q-btn
+                flat
+                no-caps
+                color="primary"
+                :label="t('capture.newCapture')"
+                @click="$router.push('/capture')"
+            />
         </page-header>
 
         <q-tabs

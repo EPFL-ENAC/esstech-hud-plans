@@ -3,7 +3,7 @@
         <page-header :title="t('more.settings')" />
 
         <section class="q-mb-xl">
-            <h2 class="text-h5">{{ t('more.languageSettings') }}</h2>
+            <h2 class="text-h6 text-weight-bold">{{ t('more.languageSettings') }}</h2>
             <q-select
                 v-model="locale"
                 :options="languageOptions"

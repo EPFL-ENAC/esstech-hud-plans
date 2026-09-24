@@ -200,10 +200,12 @@ function closeDrawer() {
     left: 0 !important;
 }
 
-/* Footer and header sit at z-index 2000, the right drawer at 3000 and the
-   left drawer at 1000. With z-index 1999 the scrim dims everything outside
-   the right drawer except the footer, which paints over it and stays fully
-   visible and usable on mobile. */
+/* The footer sits at z-index 2000, the page header at 1500, the right
+   drawer at 3000 and the left drawer at 1000. With z-index 1999 the scrim
+   dims everything outside the right drawer except the footer, which paints
+   over it and stays fully visible and usable on mobile. The page header
+   sits below the scrim too, so an underlying page header dims with its
+   body while a detail drawer is open. */
 .detail-drawer-scrim {
     position: fixed;
     inset: 0;

@@ -74,7 +74,7 @@ const statusText = computed(() => {
         <!-- Overall Header -->
         <div class="q-pa-md">
             <div class="row items-center q-mb-lg">
-                <h3 class="q-my-none">
+                <h3 class="text-h6 text-weight-bold q-my-none">
                     {{ statusText }}
                 </h3>
 

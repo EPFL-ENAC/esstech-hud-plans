@@ -1,15 +1,13 @@
 <template>
     <q-page class="q-pa-md" style="padding-top: 64px">
         <page-header :title="t('buildings.pluralTitle')">
-            <template #rightActions>
-                <q-btn
-                    round
-                    color="primary"
-                    icon="add"
-                    :aria-label="t('buildings.new')"
-                    to="/buildings/new"
-                />
-            </template>
+            <q-btn
+                round
+                color="primary"
+                icon="add"
+                :aria-label="t('buildings.new')"
+                to="/buildings/new"
+            />
         </page-header>
         <div class="page-content q-gutter-y-md">
             <div class="text-caption text-grey-7">{{ t('buildings.ownedByCurrentUser') }}</div>

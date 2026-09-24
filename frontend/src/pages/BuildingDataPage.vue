@@ -42,7 +42,7 @@
                     :aria-busy="isSaving"
                     @submit="save"
                 >
-                    <h2 class="text-subtitle1 text-weight-bold q-mb-md">
+                    <h2 class="text-h6 text-weight-bold q-mb-md">
                         {{ t('buildings.localization') }}
                     </h2>
                     <building-details-editor v-model="draft" :disable="isSaving" />
@@ -68,7 +68,7 @@
         </QueryStateSwitcher>
 
         <section class="q-mb-lg" aria-disabled="true">
-            <h2 class="text-subtitle1 text-weight-bold q-mb-md">
+            <h2 class="text-h6 text-weight-bold q-mb-md">
                 {{ t('buildings.classification') }}
             </h2>
             <q-select

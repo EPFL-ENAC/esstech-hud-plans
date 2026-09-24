@@ -1,12 +1,12 @@
 <template>
     <q-layout view="lHh LpR lFf">
         <q-page-container>
-            <q-page class="row items-center justify-center" style="padding-top: 64px">
-                <page-header :back="false" :title="t('auth.appTitle')" />
+            <q-page class="row items-center justify-center">
                 <div class="column items-center q-gutter-y-md">
                     <q-avatar rounded size="96px" color="primary" text-color="white">
                         <q-icon name="camera_indoor" />
                     </q-avatar>
+                    <h1 class="text-h4 text-bold q-ma-none q-mt-lg">{{ t('auth.appTitle') }}</h1>
                     <p class="text-subtitle1 text-grey-8 q-ma-none">
                         {{ t('auth.appDescription') }}
                     </p>
@@ -26,7 +26,6 @@
 </template>
 
 <script setup lang="ts">
-import PageHeader from 'src/components/PageHeader.vue';
 import { buildKeycloakLoginUrl } from 'src/lib/auth';
 import { useI18n } from 'vue-i18n';
 

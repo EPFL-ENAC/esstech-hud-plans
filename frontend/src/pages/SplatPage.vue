@@ -90,10 +90,12 @@ function downloadPly(splatData: ArrayBuffer): void {
                 <generation-feedback-form :generation-id="generationId" class="q-mb-lg" />
 
                 <template v-if="settings?.blueprint">
-                    <h3>Blueprints</h3>
+                    <h3 class="text-h6 text-weight-bold q-mb-md">Blueprints</h3>
                     <div v-for="direction in directions" :key="direction">
                         <div class="q-mb-md">
-                            <h4 class="q-mb-xs">{{ direction.toUpperCase() }}</h4>
+                            <h4 class="text-subtitle1 text-weight-bold q-mb-xs">
+                                {{ direction.toUpperCase() }}
+                            </h4>
                             <img
                                 :src="`${baseUrl}/splats/blueprints/${generationId}/${direction}`"
                                 :alt="`Blueprint view from the ${direction}`"
@@ -140,7 +142,7 @@ function downloadPly(splatData: ArrayBuffer): void {
                 </div>
             </template>
             <template v-slot:error="{ error }">
-                <h3>Error!</h3>
+                <h3 class="text-h6 text-weight-bold q-mb-md">Error!</h3>
                 <pre>{{ JSON.stringify(error, undefined, 4) }}</pre>
             </template>
         </SplatLoader>
