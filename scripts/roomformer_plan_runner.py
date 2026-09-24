@@ -59,6 +59,17 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--z-min", type=float, default=None)
     p.add_argument("--z-max", type=float, default=None)
     p.add_argument("--min-area-px", type=float, default=100.0)
+    p.add_argument("--density-only", action="store_true",
+                   help="Export the density image at the requested share and stop, "
+                        "without the model or inference.")
+    p.add_argument("--bright-fraction", type=float, default=0.05,
+                   help="Initial share of all pixels brighter than 128 (0.05 = 5 percent). "
+                        "0 disables the search and uses the official max normalization.")
+    p.add_argument("--target-rooms", type=int, default=1,
+                   help="Room count the iterative brightness search stops at.")
+    p.add_argument("--max-density-iters", type=int, default=9,
+                   help="Maximum search attempts; the share halves toward 0 (= official max "
+                        "normalization) and stops.")
     p.add_argument("--gpu-index-used", type=int, default=0,
                    help="Physical GPU index picked by the facade, for the result record.")
     p.add_argument("--corner-threshold", type=float, default=0.5,
@@ -98,9 +109,9 @@ def _generate_density(points_xy, width: int = MAP_SIZE, height: int = MAP_SIZE):
     """Replica of data_preprocess/stru3d/stru3d_utils.py:generate_density.
 
     Orthographic histogram of the xy coordinates over the padded bounding box:
-    10 percent padding on each side, round to a (width, height) grid, clamp,
-    then normalize bin counts by their maximum. Returns the density map and the
-    padded bbox needed to map pixels back to meters.
+    10 percent padding on each side, round to a (width, height) grid, clamp.
+    Returns the raw bin-count map and the padded bbox needed to map pixels back
+    to meters. Contrast normalization happens in _tune_density.
     """
     import numpy as np
 
@@ -122,9 +133,115 @@ def _generate_density(points_xy, width: int = MAP_SIZE, height: int = MAP_SIZE):
     unique_coordinates, counts = np.unique(coordinates, return_counts=True, axis=0)
     unique_coordinates = unique_coordinates.astype("int32")
     density[unique_coordinates[:, 1], unique_coordinates[:, 0]] = counts
-    density = density / np.max(density)
     norm = {"min_coords": min_coords, "max_coords": max_coords, "image_res": image_res}
     return density, norm
+
+
+def _tune_density(density, bright_target: float = 0.05, blur_sigma: float = 1.0,
+                  tol: float = 0.1):
+    """Tune the density map contrast for the model.
+
+    The official preprocessing normalizes counts by their maximum, which leaves
+    only the wall peaks bright when a COLMAP cloud is sparse (about 0.1 percent
+    of the pixels brighter than 128). Tune instead: blur the histogram to
+    spread wall thickness, then pick the scale that puts the requested share of
+    all pixels (bright_target, default 5 percent) at intensity 128 and the wall
+    peaks at 255. Falls back to the official max normalization when the target
+    is unreachable, that is when the occupied area is smaller than the target.
+    """
+    import numpy as np
+    from scipy.ndimage import gaussian_filter
+
+    total = int(density.size)
+    target = int(round(total * bright_target))
+    for sigma in (blur_sigma, blur_sigma * 2.0, blur_sigma * 4.0):
+        blurred = gaussian_filter(density.astype("float32"), sigma=sigma, mode="constant")
+        flat = blurred.ravel()
+        if int((flat > 0).sum()) < target:
+            continue  # not enough occupied area even after blur
+        idx = min(target, flat.size) - 1
+        t = float(np.sort(flat)[::-1][idx])
+        if t <= 0:
+            continue
+        # pixel intensity is exactly 128 at the target rank, 255 at the peaks
+        scale = t * 255.0 / 128.0
+        out = np.clip(flat / scale, 0.0, 1.0).reshape(density.shape).astype("float32")
+        bright = int(((out * 255.0) >= 128.0).sum()) / total
+        mode = "tuned" if abs(bright - bright_target) <= tol * bright_target else "tuned-unverified"
+        return out, {
+            "mode": mode,
+            "blur_sigma": float(sigma),
+            "scale": float(scale),
+            "bright_fraction": float(bright),
+        }
+    mx = max(float(np.max(density)), 1.0)
+    out = np.clip(density / mx, 0.0, 1.0).astype("float32")
+    return out, {
+        "mode": "max",
+        "blur_sigma": 0.0,
+        "scale": mx,
+        "bright_fraction": int(((out * 255.0) >= 128.0).sum()) / total,
+    }
+
+
+def _decode_polys(outputs, norm, min_area_px: float, corner_threshold: float):
+    """Polygon decode, following engine.py:evaluate_floor."""
+    import numpy as np
+    import torch
+    from shapely.geometry import Polygon
+
+    pred_logits = outputs["pred_logits"][0]  # [num_polys, num_queries_per_poly]
+    pred_corners = outputs["pred_coords"][0]  # [num_polys, num_queries_per_poly, 2]
+    fg_mask = torch.sigmoid(pred_logits) > corner_threshold
+    semantic = "pred_room_logits" in outputs
+    room_labels = None
+    if semantic:
+        prob = torch.nn.functional.softmax(outputs["pred_room_logits"][0], dim=-1)
+        room_labels = prob[..., :-1].argmax(-1).cpu().numpy()  # last slot is not a class
+
+    min_xy, max_xy = norm["min_coords"], norm["max_coords"]
+    extent = max_xy - min_xy
+    image_res = float(MAP_SIZE)
+
+    def to_meters(b):
+        # b holds bin indices from round(normalized * 255): m = min + b * extent / 256
+        return np.asarray(min_xy) + np.asarray(b, dtype="float64") * np.asarray(extent) / image_res
+
+    rooms, doors, windows = [], [], []
+    for j in range(pred_corners.shape[0]):
+        valid = pred_corners[j][fg_mask[j]]
+        if valid.shape[0] == 0:
+            continue
+        b = np.around(valid.cpu().numpy() * 255).astype("int32")
+        b = np.clip(b, 0, MAP_SIZE - 1)
+        label = int(room_labels[j]) if semantic else None
+        if label is not None and label == 16:
+            type_name = "door"
+        elif label is not None and label == 17:
+            type_name = "window"
+        elif label is not None and label < len(ROOM_TYPES):
+            type_name = ROOM_TYPES[label]
+        else:
+            type_name = "undefined"
+
+        if semantic and label in (16, 17):
+            if b.shape[0] == 2:  # door / window: open segment with 2 corners
+                (doors if label == 16 else windows).append(
+                    {"id": len(doors if label == 16 else windows), "type": type_name,
+                     "p0_px": b[0], "p1_px": b[1],
+                     "p0_px_m": tuple(to_meters(b[0])), "p1_px_m": tuple(to_meters(b[1]))}
+                )
+        else:
+            if b.shape[0] >= 4:
+                poly = Polygon(b)
+                if poly.area >= min_area_px:
+                    rooms.append(
+                        {"id": len(rooms), "type": None if not semantic else type_name,
+                         "corners_px": b,
+                         "corners_px_m": [tuple(to_meters(c)) for c in b],
+                         "area_m2": float(poly.area) * float(extent[0]) * float(extent[1]) / (image_res ** 2)}
+                    )
+    return rooms, doors, windows, semantic
 
 
 def _attr(points) -> str:
@@ -216,7 +333,8 @@ def _write_svg(path: Path, rooms, doors, windows) -> None:
     path.write_text("\n".join(s))
 
 
-def _write_json(path: Path, rooms, doors, windows, norm, args, meta: dict, points: dict) -> None:
+def _write_json(path: Path, rooms, doors, windows, norm, args, meta: dict, points: dict,
+                tune_meta: dict) -> None:
     """Pixel coords on the grid map to meters as: m = min_xy + px * (max_xy - min_xy) / 256."""
     data = {
         "schema": "esstech-hud-plans/roomformer-plan-2d",
@@ -236,10 +354,12 @@ def _write_json(path: Path, rooms, doors, windows, norm, args, meta: dict, point
             # padded bounding box used for the projection; pixel-to-meter basis
             "min_xy": [float(norm["min_coords"][0]), float(norm["min_coords"][1])],
             "max_xy": [float(norm["max_coords"][0]), float(norm["max_coords"][1])],
+            "brighter_than_128": round(tune_meta["bright_fraction"], 4),
         },
         "min_area_px": args.min_area_px,
         "corner_threshold": args.corner_threshold,
         "density_gamma": args.density_gamma,
+        "target_rooms": args.target_rooms,
         "rooms": [
             {
                 "id": r["id"],
@@ -380,77 +500,118 @@ def main() -> None:
         print(f"[runner] points: input={n_input}, after cleanup={n_clean}", flush=True)
 
         # density projection: orthographic histogram of xy over a padded bbox
-        density, norm = _generate_density(pts[:, :2])
-        if args.density_gamma != 1.0:
-            # contrast adaptation for sparse clouds; the trained density maps are
-            # wall-dominant, our cloud histogram is not
-            density = density.astype("float32") ** float(args.density_gamma)
-        # PNG round-trip value basis (export writes uint8, dataset reload gives /255)
-        img_uint8 = (density * 255).astype("uint8")
+        counts, norm = _generate_density(pts[:, :2])
+
+        if args.density_only:
+            # export the density image at the requested share and stop
+            if args.bright_fraction > 0:
+                density, tune_meta = _tune_density(counts, bright_target=float(args.bright_fraction))
+            else:
+                mx = max(float(np.max(counts)), 1.0)
+                density = np.clip(counts / mx, 0.0, 1.0).astype("float32")
+                tune_meta = {"mode": "max", "blur_sigma": 0.0, "scale": mx,
+                             "bright_fraction": float(((density * 255.0) >= 128.0).sum()) / density.size}
+            img_uint8 = (density * 255).astype("uint8")
+            density_png = output_dir / "density.png"
+            _pillow_save(density_png, img_uint8)
+            print(
+                f"[runner] density-only: mode={tune_meta['mode']}, "
+                f"bright={tune_meta['bright_fraction']*100:.1f}% -> {density_png}",
+                flush=True,
+            )
+            print(RESULT_PREFIX + json.dumps({
+                "density_png": str(density_png.resolve()),
+                "mode": tune_meta["mode"],
+                "bright_fraction": tune_meta["bright_fraction"],
+                "points": {"input": n_input, "after_cleanup": n_clean},
+            }), flush=True)
+            return
+
+        # iterative contrast search: start at --bright-fraction, run the model,
+        # halve the share while the model splits the scene into more rooms than
+        # --target-rooms, raise it (capped at the start value) when it finds
+        # none, and stop at the target. 0 skips the search and uses the
+        # official max normalization.
+        t_inf = time.perf_counter()
+        best = None  # (score, tune_meta, img_uint8, rooms, doors, windows, semantic)
+        attempts = []
+        share = float(args.bright_fraction)
+        lo = None  # share whose attempt found fewer rooms than the target
+        hi = None  # share whose attempt found more rooms than the target
+        max_mode_tried = False
+        while len(attempts) < args.max_density_iters:
+            if share <= 0.0:
+                # official max normalization ( RoomFormer data_preprocess)
+                mx = max(float(np.max(counts)), 1.0)
+                density = np.clip(counts / mx, 0.0, 1.0).astype("float32")
+                tune_meta = {"mode": "max", "blur_sigma": 0.0, "scale": mx,
+                             "bright_fraction": float(((density * 255.0) >= 128.0).sum()) / density.size}
+            else:
+                density, tune_meta = _tune_density(counts, bright_target=share)
+            if args.density_gamma != 1.0:
+                # extra contrast adaptation on top of the tuning
+                density = np.clip(density.astype("float32") ** float(args.density_gamma), 0.0, 1.0)
+            # PNG round-trip value basis (export writes uint8, dataset reload gives /255)
+            img_uint8 = (density * 255).astype("uint8")
+            image_t = (1 / 255) * torch.as_tensor(np.ascontiguousarray(np.expand_dims(img_uint8, 0)))
+            with torch.no_grad():
+                outputs = model([image_t.to("cuda")])
+                torch.cuda.synchronize()
+            rooms, doors, windows, semantic = _decode_polys(
+                outputs, norm, args.min_area_px, args.corner_threshold
+            )
+            attempts.append({"bright": tune_meta["bright_fraction"], "rooms": len(rooms)})
+            # keep the attempt closest to the target; treat an empty plan as worse
+            score = abs(len(rooms) - args.target_rooms) + (1 if len(rooms) == 0 else 0)
+            if best is None or score < best[0]:
+                best = (score, tune_meta, img_uint8, rooms, doors, windows, semantic)
+            if len(rooms) == args.target_rooms:
+                break
+            if len(rooms) > args.target_rooms:
+                hi = share
+            else:
+                lo = share
+            # choose the next share: bisect between the known bounds
+            if lo is None and hi is not None:
+                share = hi / 2.0  # too many rooms at the initial share
+            elif hi is None and lo is not None:
+                # fewer rooms already at the initial (brightest tuned) share
+                if max_mode_tried:
+                    break
+                share = 0.0  # official normalization as the last candidate
+                max_mode_tried = True
+            elif lo is not None and hi is not None:
+                if hi - lo <= 0.005 or len(attempts) >= args.max_density_iters - 1:
+                    # bisection stalled or the attempt budget is nearly out
+                    if max_mode_tried:
+                        break  # keep the best attempt
+                    share = 0.0  # official normalization as the final candidate
+                    max_mode_tried = True
+                else:
+                    share = (lo + hi) / 2.0
+            else:
+                break
+        inference_seconds = time.perf_counter() - t_inf
+        _, tune_meta, img_uint8, rooms, doors, windows, semantic = best
+        print(
+            f"[runner] bright-search: target_rooms={args.target_rooms}, "
+            f"chosen bright={tune_meta['bright_fraction']*100:.1f}% "
+            f"(mode={tune_meta['mode']}, attempts={len(attempts)})",
+            flush=True,
+        )
+        for a in attempts:
+            print(
+                f"[runner] attempt bright={a['bright']*100:.1f}% -> rooms={a['rooms']}",
+                flush=True,
+            )
         density_png = output_dir / "density.png"
         _pillow_save(density_png, img_uint8)
-
-        image_t = (1 / 255) * torch.as_tensor(np.ascontiguousarray(np.expand_dims(img_uint8, 0)))
-        samples = [image_t.to("cuda")]
-
-        t_inf = time.perf_counter()
-        with torch.no_grad():
-            outputs = model(samples)
-            torch.cuda.synchronize()
-        inference_seconds = time.perf_counter() - t_inf
-
-        # polygon decode, following engine.py:evaluate_floor
-        pred_logits = outputs["pred_logits"][0]  # [num_polys, num_queries_per_poly]
-        pred_corners = outputs["pred_coords"][0]  # [num_polys, num_queries_per_poly, 2]
-        fg_mask = torch.sigmoid(pred_logits) > args.corner_threshold
-        semantic = "pred_room_logits" in outputs
-        room_labels = None
-        if semantic:
-            prob = torch.nn.functional.softmax(outputs["pred_room_logits"][0], dim=-1)
-            room_labels = prob[..., :-1].argmax(-1).cpu().numpy()  # last slot is not a class
-
-        min_xy, max_xy = norm["min_coords"], norm["max_coords"]
-        extent = max_xy - min_xy
-        image_res = float(MAP_SIZE)
-
-        def to_meters(b):
-            # b holds bin indices from round(normalized * 255): m = min + b * extent / 256
-            return np.asarray(min_xy) + np.asarray(b, dtype="float64") * np.asarray(extent) / image_res
-
-        rooms, doors, windows = [], [], []
-        for j in range(pred_corners.shape[0]):
-            valid = pred_corners[j][fg_mask[j]]
-            if valid.shape[0] == 0:
-                continue
-            b = np.around(valid.cpu().numpy() * 255).astype("int32")
-            b = np.clip(b, 0, MAP_SIZE - 1)
-            label = int(room_labels[j]) if semantic else None
-            if label is not None and label == 16:
-                type_name = "door"
-            elif label is not None and label == 17:
-                type_name = "window"
-            elif label is not None and label < len(ROOM_TYPES):
-                type_name = ROOM_TYPES[label]
-            else:
-                type_name = "undefined"
-
-            if semantic and label in (16, 17):
-                if b.shape[0] == 2:  # door / window: open segment with 2 corners
-                    (doors if label == 16 else windows).append(
-                        {"id": len(doors if label == 16 else windows), "type": type_name,
-                         "p0_px": b[0], "p1_px": b[1],
-                         "p0_px_m": tuple(to_meters(b[0])), "p1_px_m": tuple(to_meters(b[1]))}
-                    )
-            else:
-                if b.shape[0] >= 4:
-                    poly = Polygon(b)
-                    if poly.area >= args.min_area_px:
-                        rooms.append(
-                            {"id": len(rooms), "type": None if not semantic else type_name,
-                             "corners_px": b,
-                             "corners_px_m": [tuple(to_meters(c)) for c in b],
-                             "area_m2": float(poly.area) * float(extent[0]) * float(extent[1]) / (image_res ** 2)}
-                        )
+        tune_meta = dict(tune_meta)
+        tune_meta["search"] = {
+            "initial_bright": float(args.bright_fraction),
+            "target_rooms": int(args.target_rooms),
+            "attempts": attempts,
+        }
 
         print(
             f"[runner] rooms={len(rooms)} doors={len(doors)} windows={len(windows)} "
@@ -471,6 +632,7 @@ def main() -> None:
         _write_json(
             json_path, rooms, doors, windows, norm, args, meta,
             {"input": n_input, "after_cleanup": n_clean},
+            tune_meta,
         )
 
         result = {

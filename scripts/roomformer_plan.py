@@ -384,7 +384,21 @@ def plan(
         0.5, help="Corner validity threshold, same as eval.py. Lower to 0.2-0.3 for sparse clouds."
     ),
     density_gamma: float = typer.Option(
-        1.0, help="Gamma exponent on the density map for contrast; try 0.5 when the default decode finds no rooms."
+        1.0, help="Gamma exponent on the density map for fine control after tuning."
+    ),
+    bright_fraction: float = typer.Option(
+        0.05, help="Initial share of pixels brighter than 128 as a value from 0 to 1 "
+        "(0.05 = 5 percent). The search halves it while the model finds more rooms than "
+        "--target-rooms, and raises it when it finds none. 0 disables the search and "
+        "uses the official max normalization."
+    ),
+    target_rooms: int = typer.Option(
+        1, help="Room count the iterative brightness search stops at."
+    ),
+    density_only: bool = typer.Option(
+        False, "--density-only",
+        help="Export the density image at the requested share and stop, "
+        "without the model or inference.",
     ),
     gpu_match: str = typer.Option("5070 Ti", help="GPU name substring to pick."),
     gpu_index: int = typer.Option(-1, help="Explicit GPU index; -1 uses --gpu-match."),
@@ -401,6 +415,10 @@ def plan(
         raise typer.BadParameter("--corner-threshold must stay in [0, 1]")
     if density_gamma <= 0:
         raise typer.BadParameter("--density-gamma must stay positive")
+    if not 0 <= bright_fraction <= 1:
+        raise typer.BadParameter("--bright-fraction must stay in [0, 1] (0 disables the search)")
+    if target_rooms < 1:
+        raise typer.BadParameter("--target-rooms must stay at least 1")
     uv_bin = shutil.which("uv")
     if not uv_bin:
         raise typer.BadParameter("uv not found on PATH; install https://docs.astral.sh/uv/")
@@ -430,8 +448,10 @@ def plan(
         "--min-area-px", str(min_area_px),
         "--corner-threshold", str(corner_threshold),
         "--density-gamma", str(density_gamma),
+        "--bright-fraction", str(bright_fraction),
+        "--target-rooms", str(target_rooms),
         "--gpu-index-used", str(gpu_index_used),
-    ]
+    ] + (["--density-only"] if density_only else [])
     if z_min is not None:
         cmd += ["--z-min", str(z_min)]
     if z_max is not None:

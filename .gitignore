@@ -6,3 +6,5 @@
 __pycache__/
 .spatiallm-workspace/
 .roomformer-workspace/
+.slam3r-workspace/
+.mast3r-slam-workspace/
