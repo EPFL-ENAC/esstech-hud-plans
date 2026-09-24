@@ -180,7 +180,8 @@ export default {
         latitude: 'Latitude : {latitude}',
         longitude: 'Longitude : {longitude}',
         coordinatesNotSet: 'Coordonnées non renseignées',
-        dataTitle: '{name} - Données du bâtiment',
+        buildingInformation: 'Informations sur le bâtiment',
+        dataTitle: '{name} – Informations sur le bâtiment',
         localization: 'Localisation',
         saved: 'Informations du bâtiment enregistrées.',
         savedNavigationFailed:

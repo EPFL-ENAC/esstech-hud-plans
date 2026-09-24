@@ -170,7 +170,8 @@ export default {
         latitude: 'Latitude: {latitude}',
         longitude: 'Longitude: {longitude}',
         coordinatesNotSet: 'Coordinates not set',
-        dataTitle: '{name} - Building Data',
+        buildingInformation: 'Building information',
+        dataTitle: '{name} – Building Information',
         localization: 'Localization',
         saved: 'Building details saved.',
         savedNavigationFailed:

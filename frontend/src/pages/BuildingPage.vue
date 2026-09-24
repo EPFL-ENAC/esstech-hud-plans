@@ -29,45 +29,55 @@
             <template #success="{ data: building }">
                 <template v-if="!notFound">
                     <section class="q-mb-lg q-px-md">
-                        <h2 class="building-name text-h6 text-weight-bold q-mt-none">
-                            {{ buildingName }}
-                        </h2>
-                        <p v-if="building.address" class="building-name">{{ building.address }}</p>
-                        <div
-                            v-if="building.latitude !== null && building.longitude !== null"
-                            class="row wrap items-center q-gutter-sm"
+                        <q-expansion-item
+                            :label="t('buildings.buildingInformation')"
+                            icon="info"
+                            expand-separator
+                            class="building-info"
                         >
-                            <q-chip outline color="primary" class="bg-teal-1">
-                                {{
-                                    t('buildings.latitude', {
-                                        latitude: building.latitude.toFixed(6),
-                                    })
-                                }}
-                            </q-chip>
-                            <q-chip outline color="primary" class="bg-teal-1">
-                                {{
-                                    t('buildings.longitude', {
-                                        longitude: building.longitude.toFixed(6),
-                                    })
-                                }}
-                            </q-chip>
-                        </div>
-                        <p v-else class="text-grey-7">{{ t('buildings.coordinatesNotSet') }}</p>
-                        <building-location-map
-                            class="q-my-md"
-                            :latitude="building.latitude"
-                            :longitude="building.longitude"
-                        />
+                            <div class="q-pa-md">
+                                <p v-if="building.address" class="building-address">
+                                    {{ building.address }}
+                                </p>
+                                <div
+                                    v-if="building.latitude !== null && building.longitude !== null"
+                                    class="row wrap items-center q-gutter-sm"
+                                >
+                                    <q-chip outline color="primary" class="bg-teal-1">
+                                        {{
+                                            t('buildings.latitude', {
+                                                latitude: building.latitude.toFixed(6),
+                                            })
+                                        }}
+                                    </q-chip>
+                                    <q-chip outline color="primary" class="bg-teal-1">
+                                        {{
+                                            t('buildings.longitude', {
+                                                longitude: building.longitude.toFixed(6),
+                                            })
+                                        }}
+                                    </q-chip>
+                                </div>
+                                <p v-else class="text-grey-7">
+                                    {{ t('buildings.coordinatesNotSet') }}
+                                </p>
+                                <building-location-map
+                                    class="q-my-md"
+                                    :latitude="building.latitude"
+                                    :longitude="building.longitude"
+                                />
 
-                        <q-btn
-                            :label="t('common.edit')"
-                            icon="edit"
-                            color="primary"
-                            class="full-width q-mb-md"
-                            unelevated
-                            no-caps
-                            @click="$router.push(`/building/${buildingId}/data`)"
-                        />
+                                <q-btn
+                                    :label="t('common.edit')"
+                                    icon="edit"
+                                    color="primary"
+                                    class="full-width"
+                                    unelevated
+                                    no-caps
+                                    @click="$router.push(`/building/${buildingId}/data`)"
+                                />
+                            </div>
+                        </q-expansion-item>
                     </section>
 
                     <building-reconstructions :key="buildingId" :building-id="buildingId" />
@@ -111,7 +121,15 @@ const errorMessage = computed(() =>
     margin-inline: 1rem;
 }
 
-.building-name {
+.building-address {
     overflow-wrap: anywhere;
+    margin-top: 0;
+}
+
+/* Folded panel with the light grey border used by list separators elsewhere. */
+.building-info {
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 4px;
+    overflow: hidden;
 }
 </style>

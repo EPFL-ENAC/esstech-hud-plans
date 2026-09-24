@@ -175,7 +175,8 @@ export default {
         latitude: 'Latitud: {latitude}',
         longitude: 'Longitud: {longitude}',
         coordinatesNotSet: 'Coordenadas sin especificar',
-        dataTitle: '{name} - Datos del edificio',
+        buildingInformation: 'Información del edificio',
+        dataTitle: '{name} – Información del edificio',
         localization: 'Ubicación',
         saved: 'Datos del edificio guardados.',
         savedNavigationFailed:
