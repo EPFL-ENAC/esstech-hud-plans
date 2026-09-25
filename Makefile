@@ -18,6 +18,9 @@ run-workflows:
 run-frontend:
 	cd frontend && bash -c 'trap "exit 0" INT TERM HUP; while true; do npm run dev; code=$$?; if [ "$$code" -eq 0 ] || [ "$$code" -ge 128 ]; then break; fi; echo "npm run dev exited unexpectedly (code $$code), restarting..."; sleep 1; done'
 
+run-frontend-pwa:
+	cd frontend && bash -c 'trap "exit 0" INT TERM HUP; while true; do npm run dev:pwa; code=$$?; if [ "$$code" -eq 0 ] || [ "$$code" -ge 128 ]; then break; fi; echo "npm run dev:pwa exited unexpectedly (code $$code), restarting..."; sleep 1; done'
+
 run-db:
 	docker compose up -d
 
@@ -38,6 +41,9 @@ db-revision:
 
 run-all:
 	make run-db && make db-upgrade && trap 'kill $(jobs -p) 2>/dev/null; make stop-db' INT && { make run-workflows & make run-backend & make run-frontend & wait; }
+
+run-all-pwa:
+	make run-db && make db-upgrade && trap 'kill $(jobs -p) 2>/dev/null; make stop-db' INT && { make run-workflows & make run-backend & make run-frontend-pwa & wait; }
 
 test:
 	cd backend && make test

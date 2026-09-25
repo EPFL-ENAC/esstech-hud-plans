@@ -12,7 +12,10 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{github.repository}}
 jobs:
+  frontend:
+    uses: ./.github/workflows/frontend.yml
   deploy:
+    needs: frontend
     uses: EPFL-ENAC/epfl-enac-build-push-deploy-action/.github/workflows/deploy.yml@v3.8.0
     secrets:
       token: ${{ secrets.CD_TOKEN }}

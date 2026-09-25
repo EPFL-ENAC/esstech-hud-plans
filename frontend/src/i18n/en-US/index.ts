@@ -1,4 +1,15 @@
 export default {
+    pwa: {
+        install: 'Install HUD Plans',
+        installIos:
+            'Open the Share menu and choose “Add to Home Screen”. If this option is unavailable, open this site in Safari. You can also keep using HUD Plans in your browser.',
+        installSafari:
+            'In Safari, choose File → Add to Dock. You can also keep using HUD Plans in your browser.',
+        installBrowser:
+            'Look for “Install app” or “Add to Home Screen” in your browser’s menu. If your browser does not offer installation, you can keep using HUD Plans here.',
+        offline:
+            'You’re offline. Reconnect to load data or upload. Keep this window open to retain your recording and form.',
+    },
     common: {
         or: 'Or',
         back: 'Back',

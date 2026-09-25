@@ -41,6 +41,7 @@
             </QueryStateSwitcher>
         </section>
 
+        <pwa-install-button class="q-mb-md" />
         <q-list class="more-links">
             <q-card flat bordered class="link-card">
                 <q-item clickable v-ripple :to="{ name: 'settings' }">
@@ -86,6 +87,7 @@
 
 <script setup lang="ts">
 import PageHeader from 'src/components/PageHeader.vue';
+import PwaInstallButton from 'src/components/PwaInstallButton.vue';
 import { useRouter } from 'vue-router';
 import QueryStateSwitcher from 'src/components/QueryStateSwitcher.vue';
 import { logout } from 'src/lib/auth';

@@ -72,6 +72,11 @@ make run-frontend
 
 The website will be available at [http://localhost:9000](http://localhost:9000).
 
+For an installable PWA, run `make run-pwa` (port 9001).
+Production containers default to PWA mode and still support normal browser tabs.
+See the [frontend PWA guide](frontend/README.md#browser-and-installed-app) for build
+modes, HTTPS requirements, offline behavior, and the release checklist.
+
 
 ## Build and push Docker images
 

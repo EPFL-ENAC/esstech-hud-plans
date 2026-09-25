@@ -46,6 +46,9 @@ const router = useRouter();
 }
 
 .page-header {
+    padding-top: calc(8px + env(safe-area-inset-top));
+    padding-left: calc(16px + env(safe-area-inset-left));
+    padding-right: calc(16px + env(safe-area-inset-right));
     background-color: #ffffff;
     border-bottom: 1px solid #e5e5ea;
 }

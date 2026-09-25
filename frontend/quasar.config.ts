@@ -12,7 +12,7 @@ export default defineConfig((ctx) => {
         // app boot file (/src/boot)
         // --> boot files are part of "main.js"
         // https://v2.quasar.dev/quasar-cli-vite/boot-files
-        boot: ['sentry', 'i18n', 'colada'],
+        boot: ['sentry', 'i18n', 'colada', ...(ctx.modeName === 'pwa' ? ['pwa'] : [])],
 
         // https://v2.quasar.dev/quasar-cli-vite/quasar-config-file#css
         css: ['app.scss'],
@@ -166,6 +166,32 @@ export default defineConfig((ctx) => {
         // https://v2.quasar.dev/quasar-cli-vite/developing-pwa/configuring-pwa
         pwa: {
             workboxMode: 'GenerateSW', // 'GenerateSW' or 'InjectManifest'
+            swFilename: 'sw.js',
+            manifestFilename: 'manifest.json',
+            // Supply only the metadata/icons we maintain, rather than Quasar's sample icons.
+            injectPwaMetaTags: false,
+            extendGenerateSWOptions(options) {
+                // Installation-first: never cache runtime configuration or private app data.
+                options.globPatterns = ['offline.html'];
+                delete options.navigateFallback;
+                delete options.navigateFallbackDenylist;
+                // Let existing windows finish recording/uploading before worker activation.
+                options.skipWaiting = false;
+                options.clientsClaim = false;
+                options.runtimeCaching = [
+                    {
+                        urlPattern: ({ request, url }) =>
+                            request.mode === 'navigate' &&
+                            url.origin === self.location.origin &&
+                            ['/', '/index.html'].includes(url.pathname),
+                        handler: 'NetworkOnly',
+                        options: {
+                            fetchOptions: { cache: 'no-store' },
+                            precacheFallback: { fallbackURL: 'offline.html' },
+                        },
+                    },
+                ];
+            },
             // swFilename: 'sw.js',
             // manifestFilename: 'manifest.json',
             // extendManifestJson (json) {},

@@ -176,12 +176,18 @@ function closeDrawer() {
 /* Shared footer height so the right drawer stops above the tab bar.
    Matches how high the footer actually renders (tab min-height + border). */
 .app-layout {
-    --footer-height: 56px;
+    --footer-height: calc(56px + env(safe-area-inset-bottom));
 }
 
 .footer-tabs .q-tabs,
 .footer-tabs .q-tab {
-    min-height: var(--footer-height);
+    min-height: 56px;
+}
+
+.footer-tabs {
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
 }
 
 /* The right detail drawer's q-page-container inherits the layout's drawer

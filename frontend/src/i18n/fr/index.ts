@@ -1,6 +1,17 @@
 import type enUS from '../en-US';
 
 export default {
+    pwa: {
+        install: 'Installer HUD Plans',
+        installIos:
+            'Ouvrez le menu Partager et choisissez « Sur l’écran d’accueil ». Si cette option est absente, ouvrez ce site dans Safari. Vous pouvez aussi continuer à utiliser HUD Plans dans votre navigateur.',
+        installSafari:
+            'Dans Safari, choisissez Fichier → Ajouter au Dock. Vous pouvez aussi continuer à utiliser HUD Plans dans votre navigateur.',
+        installBrowser:
+            'Cherchez « Installer l’application » ou « Ajouter à l’écran d’accueil » dans le menu de votre navigateur. Si l’installation n’est pas proposée, vous pouvez continuer à utiliser HUD Plans ici.',
+        offline:
+            'Vous êtes hors ligne. Reconnectez-vous pour charger ou envoyer des données. Gardez cette fenêtre ouverte pour conserver votre vidéo et votre formulaire.',
+    },
     common: {
         or: 'Ou',
         back: 'Retour',

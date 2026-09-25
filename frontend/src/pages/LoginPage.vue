@@ -19,6 +19,7 @@
                         class="q-mt-xl"
                         @click="signIn"
                     />
+                    <pwa-install-button />
                 </div>
             </q-page>
         </q-page-container>
@@ -27,6 +28,7 @@
 
 <script setup lang="ts">
 import PageHeader from 'src/components/PageHeader.vue';
+import PwaInstallButton from 'src/components/PwaInstallButton.vue';
 import { buildKeycloakLoginUrl } from 'src/lib/auth';
 import { useI18n } from 'vue-i18n';
 
