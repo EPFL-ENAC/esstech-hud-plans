@@ -281,6 +281,12 @@ def main(
         False, "--no-xy-align",
         help="Skip the final z-axis rotation that aligns walls with x and y.",
     ),
+    flip_up: bool = typer.Option(
+        False, "--flip-up",
+        help="Turn the fitted gravity axis 180 degrees. Use when the whole "
+        "reconstruction is upside down, e.g. when the source frames were "
+        "upside down because the decoder ignored the container rotation flag.",
+    ),
     step_deg: float = typer.Option(
         0.5, "--step-deg", help="Wall angle scan step in degrees."
     ),
@@ -317,6 +323,12 @@ def main(
         path_center, world_rotation, camera_centers = compute_camera_path_rotation(
             sparse_dir
         )
+
+    if flip_up:
+        # 180-degree turn about the y axis of the fitted frame: negate the
+        # tangent and up columns so the rotation stays proper (det = +1) and
+        # the height along the fitted normal changes sign.
+        world_rotation = world_rotation * np.array([-1.0, 1.0, -1.0])
 
     # Rotate the scene so z points up along the camera path normal.
     rotated_points = (points - path_center) @ world_rotation
@@ -371,6 +383,8 @@ def main(
     print(f"Scale:               {scale:.4f}")
     print(f"Wall angle rot:      {wall_deg:.2f} deg (x/y alignment)")
     print(f"Camera height out:   {scale * span:.4f}")
+    if flip_up:
+        print("Up axis:             flipped (--flip-up)")
     print(f"Wrote:               {output}")
 
 

@@ -16,7 +16,9 @@ Notes from the repo:
 - The CUDA backend (mast3r_slam_backends) and the lietorch fork must compile;
   a system nvcc >= 12.8 is a hard prerequisite. The gn_kernels/matching
   patches mirror upstream PR #86 for sm_90/sm_120 and torch >= 2.6.
-- torchcodec is skipped; the built-in cv2 video decoder fallback runs the mp4.
+- torchcodec==0.8.1 is installed (SLAM_PLAN_COMPAT): the dataloader prefers
+  torchcodec frame indexing; the cv2 fallback's seek+read fails on some HEVC
+  files. 0.8.1 pairs with the pinned torch 2.9.x (0.16+ is ABI-incompatible).
 
 Needs: uv on PATH, git (with submodule support), ffmpeg on PATH, nvcc >= 12.8
 (CUDA_HOME or /opt/cuda or /usr/local/cuda*), one NVIDIA GPU.
@@ -42,6 +44,8 @@ TORCH_INDEX = "https://download.pytorch.org/whl/cu130"
 TORCH_SPEC = ["torch==2.9.1+cu130", "torchvision==0.24.1+cu130"]
 # setuptools 70.0.0 + numpy feed the --no-build-isolation package builds below
 BASE_DEPS_SPEC = ["setuptools==70.0.0", "wheel", "numpy==1.26.4"]
+# torchcodec 0.8.1 pairs with the pinned torch 2.9.x; newer wheels need torch >= 2.10
+TORCHCODEC_SPEC = "torchcodec==0.8.1"
 # validated Blackwell/cu128+ fork of lietorch (upstream unpatched for new torch)
 LIETORCH_URL = "https://github.com/nicogorlo/lietorch"
 MAST3R_CKPT_URL = (
@@ -437,6 +441,21 @@ def _base_deps_install(workspace: Path, uv_bin: str) -> None:
     _stream_run(check)
 
 
+def _torchcodec_install(workspace: Path, uv_bin: str) -> None:
+    """torchcodec==0.8.1: the dataloader prefers it over the cv2 fallback whose
+    CAP_PROP_POS_FRAMES seek+read fails on some HEVC files (SLAM_PLAN_COMPAT)."""
+    venv_py = _venv_python(workspace)
+    check = [venv_py, "-c", "import torchcodec"]
+    try:
+        _stream_run(check)
+        _log("torchcodec present, skip install")
+        return
+    except RuntimeError:
+        pass
+    _stream_run([uv_bin, "pip", "install", "--python", venv_py, TORCHCODEC_SPEC])
+    _stream_run(check)
+
+
 def _lietorch_install(workspace: Path, uv_bin: str) -> None:
     """Build the validated lietorch fork against the venv torch (needs nvcc).
 
@@ -572,6 +591,7 @@ def _ensure_workspace(workspace: Path, uv_bin: str) -> None:
     _mast3r_install(workspace, uv_bin)
     _in3d_install(workspace, uv_bin)
     _slam_install(workspace, uv_bin)
+    _torchcodec_install(workspace, uv_bin)
     _checkpoint_fetch(workspace)
 
 
@@ -602,6 +622,58 @@ def _pick_gpu(match: str, index: int) -> tuple[int, str]:
             return int(idx), name
     _log(f"no GPU name contains {match!r}, falling back to index 0: {rows[0][1]}")
     return 0, rows[0][1]
+
+
+def _probe_video_rotation(video_path: Path) -> float:
+    """Return the first video stream's display-matrix rotation in degrees."""
+    ffprobe = shutil.which("ffprobe")
+    if ffprobe is None:
+        raise RuntimeError("ffprobe not found on PATH; needed to check video rotation")
+    proc = subprocess.run(
+        [ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries",
+         "stream_side_data_list=rotation", "-of", "json", str(video_path)],
+        capture_output=True, text=True, check=True,
+    )
+    try:
+        data = json.loads(proc.stdout or "{}")
+        for entry in data.get("streams", [{}])[0].get("side_data_list", []):
+            if "rotation" in entry:
+                return float(entry["rotation"])
+    except (ValueError, IndexError, KeyError):
+        pass
+    return 0.0
+
+
+def _ensure_upright_video(video_path: Path) -> Path:
+    """Bake the container display matrix into the frames when it is nonzero.
+
+    Phone videos carry a display-matrix rotation flag. The cv2 and torchcodec
+    decoders ignore it, so upside-down frames would reach the SLAM and flip
+    the whole reconstruction. ffmpeg applies the flag on decode (autorotate),
+    so a re-encode bakes it in and drops the flag from the container.
+    """
+    rotation = _probe_video_rotation(video_path)
+    if abs(rotation % 360.0) < 1.0:
+        return video_path
+    target = video_path.parent / f"{video_path.stem}_upright{video_path.suffix}"
+    if target.is_file():
+        _log(f"video has display rotation {rotation:.0f} deg; upright re-encode "
+             f"present, reuse: {target}")
+        return target
+    encoders = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-encoders"], capture_output=True, text=True,
+        check=True,
+    ).stdout
+    codec = ["-c:v", "libx265"] if " libx265 " in encoders else ["-c:v", "libx264"]
+    _log(f"video has display rotation {rotation:.0f} deg; re-encoding upright: {target}")
+    _stream_run([
+        "ffmpeg", "-y", "-v", "error", "-i", str(video_path),
+        "-an", "-sn", "-dn", *codec, "-crf", "18", "-preset", "veryfast",
+        str(target),
+    ])
+    if not target.is_file():
+        raise RuntimeError(f"upright re-encode failed: {target}")
+    return target
 
 
 def _find_saved_ply(logs_dir: Path, video_stem: str) -> Path:
@@ -641,13 +713,14 @@ def ply(
     out_path = output if output else video_path.parent / f"{video_path.stem}_mast3rslam.ply"
     run_name = save_as if save_as else f"{video_path.stem}_mast3rslam"
 
+    effective_video = _ensure_upright_video(video_path)
     _ensure_workspace(workspace, uv_bin)
     gpu_index_used, gpu_name = _pick_gpu(gpu_match, gpu_index)
     _log(f"GPU {gpu_index_used}: {gpu_name}")
 
     cmd = [
         _venv_python(workspace), "main.py",
-        "--dataset", str(video_path.resolve()),
+        "--dataset", str(effective_video.resolve()),
         "--config", config,
         "--no-viz",
         "--save-as", run_name,
@@ -662,7 +735,7 @@ def ply(
     _stream_run(cmd, env=env, cwd=repo)
     elapsed = time.perf_counter() - t_run
 
-    src_ply = _find_saved_ply(repo / "logs" / run_name, video_path.stem)
+    src_ply = _find_saved_ply(repo / "logs" / run_name, effective_video.stem)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src_ply, out_path)
 
