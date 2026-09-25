@@ -1,0 +1,7 @@
+node_modules
+dist
+.quasar
+.git
+test-results
+playwright-report
+npm-debug.log*

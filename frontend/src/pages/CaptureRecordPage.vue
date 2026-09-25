@@ -231,7 +231,7 @@ onBeforeUnmount(() => {
    running and how long it has been running. */
 .record-timer {
     position: absolute;
-    top: 16px;
+    top: calc(16px + env(safe-area-inset-top));
     left: 50%;
     transform: translateX(-50%);
     z-index: 10;
@@ -285,6 +285,8 @@ onBeforeUnmount(() => {
     z-index: 10;
     background: rgba(0, 0, 0, 0.9);
     padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
 }
 
 /* Keep the record button centered between the close and tips buttons. */

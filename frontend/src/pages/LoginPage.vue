@@ -19,6 +19,7 @@
                         class="q-mt-xl"
                         @click="signIn"
                     />
+                    <pwa-install-button />
                 </div>
             </q-page>
         </q-page-container>
@@ -26,6 +27,7 @@
 </template>
 
 <script setup lang="ts">
+import PwaInstallButton from 'src/components/PwaInstallButton.vue';
 import { buildKeycloakLoginUrl } from 'src/lib/auth';
 import { useI18n } from 'vue-i18n';
 

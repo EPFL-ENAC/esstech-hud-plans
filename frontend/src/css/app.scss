@@ -15,3 +15,20 @@
 .link-card:hover {
     background-color: rgba(0, 0, 0, 0.09);
 }
+
+// Pages with a sticky PageHeader reserve its height, including the status bar.
+// Scope to these pages so full-screen camera/viewer content can remain edge-to-edge.
+.q-page:has(.page-header-sticky) {
+    padding-top: calc(64px + env(safe-area-inset-top)) !important;
+}
+
+.q-drawer__content {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+}
+
+.q-header {
+    padding-top: env(safe-area-inset-top);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+}

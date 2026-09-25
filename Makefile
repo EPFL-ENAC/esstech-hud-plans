@@ -16,7 +16,7 @@ run-workflows:
 	cd backend && make run-workflows
 
 run-frontend:
-	cd frontend && bash -c 'trap "exit 0" INT TERM HUP; while true; do npm run dev; code=$$?; if [ "$$code" -eq 0 ] || [ "$$code" -ge 128 ]; then break; fi; echo "npm run dev exited unexpectedly (code $$code), restarting..."; sleep 1; done'
+	cd frontend && bash -c 'trap "exit 0" INT TERM HUP; while true; do npm run dev:pwa; code=$$?; if [ "$$code" -eq 0 ] || [ "$$code" -ge 128 ]; then break; fi; echo "npm run dev:pwa exited unexpectedly (code $$code), restarting..."; sleep 1; done'
 
 tusd-dir:
 	@dir=$$(sed -n 's/^TUSD_UPLOAD_DIR=//p' .env 2>/dev/null); dir=$${dir:-/tmp/hud-tusd-uploads}; mkdir -p "$$dir"; test -w "$$dir" || echo "WARNING: $$dir is not writable by the current user; fix ownership (see README)" >&2
