@@ -56,6 +56,15 @@ RETRIEVAL_CKPT_URL = (
 RETRIEVAL_CKPT_NAME = (
     "MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric_retrieval_trainingfree.pth"
 )
+# Codebook needed by the trainingfree retrieval (loop closure helper); without
+# it the helper process dies at startup and retrieval loop closure is inactive
+CODEBOOK_URL = (
+    "https://download.europe.naverlabs.com/ComputerVision/MASt3R/"
+    "MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric_retrieval_codebook.pkl"
+)
+CODEBOOK_NAME = (
+    "MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric_retrieval_codebook.pkl"
+)
 RESULT_PREFIX = "MAST3RSLAM_PLY_RESULT "
 
 # Blackwell + torch >= 2.9 compat patches, mirroring upstream PR #86 (unmerged
@@ -530,7 +539,8 @@ def _slam_install(workspace: Path, uv_bin: str) -> None:
 
 
 def _checkpoint_fetch(workspace: Path) -> None:
-    """Download the two Naver checkpoints main.py loads (~2.6 GiB total)."""
+    """Download the Naver checkpoints Main.py loads (2.6 GiB) plus the retrieval
+    codebook (256 MiB, needed for the loop-closure helper)."""
     if shutil.which("curl") is None:
         raise RuntimeError("curl not found on PATH; needed for the checkpoint download")
     ckpt_dir = workspace / "MASt3R-SLAM" / "checkpoints"
@@ -538,12 +548,13 @@ def _checkpoint_fetch(workspace: Path) -> None:
     targets = {
         MAST3R_CKPT_URL: (ckpt_dir / MAST3R_CKPT_NAME, 1e8),
         RETRIEVAL_CKPT_URL: (ckpt_dir / RETRIEVAL_CKPT_NAME, 1e6),
+        CODEBOOK_URL: (ckpt_dir / CODEBOOK_NAME, 1e6),
     }
     for url, (dest, min_size) in targets.items():
         if dest.is_file() and dest.stat().st_size > min_size:
             _log(f"checkpoint present, skip download: {dest.name}")
             continue
-        _log(f"downloading {dest.name} (~{0.8 if min_size > 1e6 else 2570} MiB)")
+        _log(f"downloading {dest.name}")
         _stream_run(["curl", "-fL", "-C", "-", "--progress-bar", url, "-o", str(dest)])
         if not dest.is_file() or dest.stat().st_size <= min_size:
             raise RuntimeError(f"checkpoint download incomplete: {dest}")
