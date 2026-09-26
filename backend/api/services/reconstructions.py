@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import logging
-from typing import Literal
+import os
+import shutil
+from functools import partial
+from pathlib import Path
+from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
 from api.config import config
@@ -19,6 +23,10 @@ from fastapi import UploadFile
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 from starlette.concurrency import run_in_threadpool
+
+if TYPE_CHECKING:
+    from api.lib.workflows.splat_generation import SplatGenerationArtifact
+
 
 logger = logging.getLogger(__name__)
 
@@ -104,19 +112,11 @@ class ReconstructionService:
     ) -> Reconstruction:
         """Persist an uploaded video and schedule its reconstruction workflow."""
 
-        reconstruction = Reconstruction(
-            building_id=building.id,
-            settings=settings.model_dump(mode="json"),
-        )
-        self._session.add(reconstruction)
-        await self._commit_and_refresh(reconstruction)
+        reconstruction = await self._create_preparing_reconstruction(building, settings)
 
         # Imports stay local so the Prefect flow can call this service to publish
         # lifecycle updates without creating a module import cycle.
-        from api.lib.workflows.splat_generation import (
-            SplatGenerationArtifact,
-            schedule_splat_generation,
-        )
+        from api.lib.workflows.splat_generation import SplatGenerationArtifact
 
         try:
             artifact = await SplatGenerationArtifact.from_uploaded_file(
@@ -134,6 +134,77 @@ class ReconstructionService:
                 "Failed to store reconstruction video",
                 failed,
             ) from exc
+
+        return await self._finalize_scheduling(
+            building, reconstruction, settings, artifact
+        )
+
+    async def create_from_storage(
+        self,
+        *,
+        building: Building,
+        video_path: Path,
+        settings: SplatGenerationWorkflowSettings,
+        video_format: str,
+    ) -> Reconstruction:
+        """Copy a staged video into the artifact directory and schedule its workflow."""
+
+        reconstruction = await self._create_preparing_reconstruction(building, settings)
+
+        # Imports stay local so the Prefect flow can call this service to publish
+        # lifecycle updates without creating a module import cycle.
+        from api.lib.workflows.splat_generation import SplatGenerationArtifact
+
+        try:
+            artifact = await run_in_threadpool(
+                partial(
+                    SplatGenerationArtifact.create,
+                    workflow_common.WORKFLOW_DATA_DIRECTORY,
+                    video_format,
+                    artifact_id=reconstruction.id,
+                )
+            )
+            await run_in_threadpool(self._copy_atomic, video_path, artifact.video_path)
+        except Exception as exc:
+            SplatGenerationArtifact.load(
+                reconstruction.id,
+                workflow_common.WORKFLOW_DATA_DIRECTORY,
+            ).remove()
+            failed = await self._mark_failed_best_effort(reconstruction.id, exc)
+            raise ReconstructionVideoStorageError(
+                "Failed to store reconstruction video",
+                failed,
+            ) from exc
+
+        return await self._finalize_scheduling(
+            building, reconstruction, settings, artifact
+        )
+
+    async def _create_preparing_reconstruction(
+        self,
+        building: Building,
+        settings: SplatGenerationWorkflowSettings,
+    ) -> Reconstruction:
+        reconstruction = Reconstruction(
+            building_id=building.id,
+            settings=settings.model_dump(mode="json"),
+        )
+        self._session.add(reconstruction)
+        await self._commit_and_refresh(reconstruction)
+        return reconstruction
+
+    async def _finalize_scheduling(
+        self,
+        building: Building,
+        reconstruction: Reconstruction,
+        settings: SplatGenerationWorkflowSettings,
+        artifact: SplatGenerationArtifact,
+    ) -> Reconstruction:
+        """Record the stored video, schedule the workflow, and mark it scheduled."""
+
+        # Imports stay local so the Prefect flow can call this service to publish
+        # lifecycle updates without creating a module import cycle.
+        from api.lib.workflows.splat_generation import schedule_splat_generation
 
         reconstruction = await self.record_progress(
             reconstruction.id,
@@ -163,6 +234,19 @@ class ReconstructionService:
             ) from exc
 
         return await self._record_scheduled_workflow(reconstruction, workflow_id)
+
+    @staticmethod
+    def _copy_atomic(source: Path, destination: Path) -> None:
+        """Stream-copy a file, then rename it into place atomically."""
+
+        clone = destination.with_name(destination.name + ".tmp")
+        try:
+            with source.open("rb") as src, clone.open("wb") as dst:
+                shutil.copyfileobj(src, dst)
+            os.replace(clone, destination)
+        except BaseException:
+            clone.unlink(missing_ok=True)
+            raise
 
     async def delete(self, reconstruction: Reconstruction) -> None:
         """Cancel a pending workflow, remove stored artifacts, and drop the row."""

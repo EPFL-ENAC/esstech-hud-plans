@@ -804,6 +804,26 @@ def test_reconstruction_assets_support_byte_ranges(
     assert response.headers["content-range"] == f"*/{len(content)}"
 
 
+def test_reconstruction_assets_send_etag_for_resume(
+    reconstruction_asset: tuple[TestClient, UUID, str, Path],
+) -> None:
+    """Range resume needs an ETag sentinel for If-Range requests."""
+
+    client, reconstruction_id, artifact, path = reconstruction_asset
+    response = client.get(_asset_url(reconstruction_id, artifact))
+
+    assert response.status_code == 200
+    assert response.headers["etag"]
+    assert response.headers["accept-ranges"] == "bytes"
+
+    etag = response.headers["etag"]
+    resumed = client.get(
+        _asset_url(reconstruction_id, artifact),
+        headers={"Range": f"bytes={path.stat().st_size}-", "If-Range": etag},
+    )
+    assert resumed.status_code == 416
+
+
 @pytest.mark.parametrize(
     "case",
     [
