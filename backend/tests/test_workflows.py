@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -7,10 +8,15 @@ from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
+from api.config import config
+from api.db import get_session
+from api.lib.uploads import paths
 from api.lib.workflows import __main__ as workflow_runner
 from api.lib.workflows import common as workflow_common
 from api.lib.workflows import counter as counter_workflow
 from api.lib.workflows import splat_generation as splat_workflow
+from api.lib.workflows import uploads_cleanup
+from api.models.uploads import UploadSession, UploadSessionStatus
 from api.models.user import User
 from api.models.workflows import (
     BrushSettings,
@@ -25,6 +31,9 @@ from api.views import workflows as workflow_views
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from prefect.client.schemas.objects import Log, StateType
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlmodel import SQLModel
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 USER_ID = UUID("00000000-0000-0000-0000-000000000001")
 OTHER_USER_ID = UUID("00000000-0000-0000-0000-000000000002")
@@ -234,16 +243,25 @@ def test_workflow_runner_serves_splat_generation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict = {}
+    cleanup_captured: dict = {}
 
     class FakeFlow:
         def serve(self, **kwargs) -> None:
             captured.update(kwargs)
 
+    class FakeCleanupFlow:
+        def serve(self, **kwargs) -> None:
+            cleanup_captured.update(kwargs)
+
     monkeypatch.setattr(workflow_runner, "splat_generation_flow", FakeFlow())
+    monkeypatch.setattr(
+        workflow_runner, "purge_expired_upload_sessions", FakeCleanupFlow()
+    )
 
     workflow_runner.serve_workflows()
 
     assert captured == {"name": "default", "limit": 1}
+    assert cleanup_captured == {"interval": config.UPLOAD_CLEANUP_INTERVAL_MINUTES * 60}
 
 
 def test_extract_frames_task_sends_ffmpeg_output_to_prefect_run_logger(
@@ -1442,3 +1460,114 @@ def test_reconstruction_terminal_hooks_tolerate_deleted_reconstruction(
 
     hook = getattr(splat_workflow, hook_name)
     asyncio.run(hook(None, flow_run, state))
+
+
+class _FakeFlowLogger:
+    def info(self, *args: object) -> None:
+        pass
+
+
+async def _seed_upload_session(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+    status: UploadSessionStatus = UploadSessionStatus.UPLOADING,
+    expires_at: datetime | None = None,
+    updated_at: datetime | None = None,
+) -> UploadSession:
+    from api.models.uploads import UploadChunk
+
+    row = UploadSession(
+        user_id=user_id,
+        settings={},
+        filename="video.mp4",
+        file_extension="mp4",
+        total_size=8,
+        chunk_size=8,
+        total_chunks=1,
+        expires_at=expires_at or datetime.now(UTC) + timedelta(hours=1),
+        updated_at=updated_at or datetime.now(UTC),
+    )
+    row.status = status
+    session.add(row)
+    session.add(
+        UploadChunk(
+            session_id=row.id,
+            chunk_index=0,
+            byte_offset=0,
+            expected_size=8,
+            expected_digest="a" * 64,
+        )
+    )
+    await session.commit()
+
+    return row
+
+
+def test_purge_expired_upload_sessions_flow(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(config, "UPLOAD_TEMP_DIR", str(tmp_path / "staging"))
+    monkeypatch.setattr(uploads_cleanup, "get_run_logger", _FakeFlowLogger)
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path}/uploads.db")
+    monkeypatch.setattr(uploads_cleanup, "get_engine", lambda: engine)
+
+    async def seed() -> tuple[UploadSession, UploadSession, UploadSession]:
+        async with engine.begin() as connection:
+            await connection.run_sync(SQLModel.metadata.create_all)
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            expired = await _seed_upload_session(
+                session,
+                user_id=USER_ID,
+                expires_at=datetime.now(UTC) - timedelta(hours=1),
+            )
+            active = await _seed_upload_session(
+                session,
+                user_id=USER_ID,
+                # A wide TTL keeps the sqlite string comparison unambiguous.
+                expires_at=datetime.now(UTC) + timedelta(days=2),
+            )
+            finalized = await _seed_upload_session(
+                session,
+                user_id=USER_ID,
+                status=UploadSessionStatus.FINALIZED,
+                updated_at=datetime.now(UTC) - timedelta(hours=2),
+            )
+            return expired, active, finalized
+
+    expired, active, finalized = asyncio.run(seed())
+
+    staging_root = paths.upload_root()
+    for row, stale in (
+        (expired, True),
+        (active, False),
+        (finalized, True),
+    ):
+        directory = paths.make_session_temp_dir(row.id)
+        if stale:
+            past = datetime.now(UTC).timestamp() - 7200
+            os.utime(directory, (past, past))
+
+    orphan = staging_root / uuid4().hex
+    orphan.mkdir()
+    past = datetime.now(UTC).timestamp() - 7200
+    os.utime(orphan, (past, past))
+
+    asyncio.run(uploads_cleanup.purge_expired_upload_sessions.fn())
+
+    async def read_rows() -> set[UUID]:
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            rows = await session.get(UploadSession, active.id)
+            assert rows is not None
+            return {rows.id}
+
+    remaining = asyncio.run(read_rows())
+    assert remaining == {active.id}
+    assert not paths.session_dir(expired.id).exists()
+    assert not paths.session_dir(finalized.id).exists()
+    assert not orphan.exists()
+    assert paths.session_dir(active.id).exists()
+
+    asyncio.run(engine.dispose())

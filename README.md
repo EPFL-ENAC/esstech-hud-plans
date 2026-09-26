@@ -60,6 +60,20 @@ locally with the frame picker, then runs COLMAP and Brush. It is submitted throu
 raw frames when selection is enabled), sparse COLMAP reconstructions, and generated
 `splat.ply` files are retained there until removed manually.
 
+Chunked video uploads use a configurable staging directory (`UPLOAD_TEMP_DIR`,
+default `/tmp`). `POST /uploads` creates a session, `PUT
+/uploads/{id}/chunks/{index}` stores each chunk, and `POST /uploads/{id}/finalize`
+assembles the parts, copies the video from the staging directory into the workflow
+data directory, submits the reconstruction, and deletes the session rows and staged
+files. The `purge-expired-upload-sessions` Prefect deployment runs every
+`UPLOAD_CLEANUP_INTERVAL_MINUTES` minutes and removes sessions older than
+`UPLOAD_SESSION_TTL_HOURS` together with orphaned staging directories. Upload parts
+larger than `UPLOAD_CHUNK_SIZE_BYTES` are cut into chunks of that size; smaller
+videos keep the single-shot upload endpoints.
+
+Download resume for `.ply` splats works over the existing `FileResponse` byte ranges;
+the API already sends `Accept-Ranges` and `ETag` headers on these routes.
+
 The interactive API documentation will be available at [http://localhost:8000/docs](http://localhost:8000/docs).
 
 ### Frontend
