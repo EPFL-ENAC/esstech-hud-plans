@@ -448,4 +448,30 @@ export default {
     errors: {
         connection: 'No se pudo conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.',
     },
+    transfers: {
+        cancel: 'Cancelar',
+        pause: 'Pausar',
+        resume: 'Reanudar',
+        retry: 'Reintentar',
+        sessionExpired: 'La sesión de subida caducó. Inicie la subida de nuevo.',
+        networkReconnected: 'Conexión restablecida. La transferencia continúa.',
+        upload: {
+            idle: 'En espera',
+            creating: 'Preparando la subida…',
+            uploading: 'Subiendo…',
+            finalizing: 'Finalizando la subida…',
+            done: 'Subida completa',
+            failed: 'Subida fallida',
+            paused: 'En pausa',
+        },
+        uploadChunks: 'Bloque {received} de {total}',
+        download: {
+            idle: 'En espera',
+            downloading: 'Descargando…',
+            paused: 'En pausa',
+            assembling: 'Preparando el archivo…',
+            done: 'Descarga completa',
+            failed: 'Descarga fallida',
+        },
+    },
 } satisfies typeof enUS;

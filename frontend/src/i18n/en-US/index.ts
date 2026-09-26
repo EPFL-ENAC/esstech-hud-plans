@@ -435,4 +435,30 @@ export default {
     errors: {
         connection: 'Could not reach the server. Check your connection and try again.',
     },
+    transfers: {
+        cancel: 'Cancel',
+        pause: 'Pause',
+        resume: 'Resume',
+        retry: 'Retry',
+        sessionExpired: 'The upload session expired. Please start the upload again.',
+        networkReconnected: 'Connection restored. The transfer continues.',
+        upload: {
+            idle: 'Waiting',
+            creating: 'Preparing upload…',
+            uploading: 'Uploading…',
+            finalizing: 'Finishing upload…',
+            done: 'Upload complete',
+            failed: 'Upload failed',
+            paused: 'Paused',
+        },
+        uploadChunks: 'Chunk {received} of {total}',
+        download: {
+            idle: 'Waiting',
+            downloading: 'Downloading…',
+            paused: 'Paused',
+            assembling: 'Preparing file…',
+            done: 'Download complete',
+            failed: 'Download failed',
+        },
+    },
 };

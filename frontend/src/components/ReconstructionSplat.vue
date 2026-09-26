@@ -39,7 +39,9 @@
 
 <script setup lang="ts">
 import { defineAsyncComponent, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
-import { ApiError, getReconstructionSplat } from 'src/lib/buildings';
+import { ApiError } from 'src/lib/buildings';
+import { downloadSplatChunked } from 'src/lib/downloads/chunkedDownload';
+import { useSplatDownloadStore } from 'src/stores/splatDownload';
 
 const SplatRenderer = defineAsyncComponent(() => import('src/components/SplatRenderer.vue'));
 const props = defineProps<{
@@ -51,6 +53,7 @@ const splatData = shallowRef<ArrayBuffer | null>(null);
 const loading = ref(false);
 const rendering = ref(false);
 const errorMessage = ref('');
+const splatDownload = useSplatDownloadStore();
 let pendingRequest: AbortController | null = null;
 
 function reset(): void {
@@ -67,14 +70,18 @@ async function load(): Promise<void> {
     const controller = new AbortController();
     pendingRequest = controller;
     loading.value = true;
+    // The store resume control restarts this loader; chunked state in the
+    // download store makes it continue from the stored offset.
+    splatDownload.setResumer(() => void load());
 
     try {
-        const data = await getReconstructionSplat(
+        const data = await downloadSplatChunked(
             props.buildingId,
             props.reconstructionId,
             controller.signal,
         );
         if (!controller.signal.aborted) {
+            splatDownload.setState('done');
             rendering.value = true;
             splatData.value = data;
         }
@@ -82,10 +89,13 @@ async function load(): Promise<void> {
         if (controller.signal.aborted) return;
         if (error instanceof ApiError && error.status === 404) {
             errorMessage.value = 'The splat is not available.';
+            splatDownload.fail(errorMessage.value);
         } else if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
             errorMessage.value = 'Unable to access this splat. Please sign in again.';
+            splatDownload.fail(errorMessage.value);
         } else {
             errorMessage.value = 'Unable to load the splat. Please try again.';
+            splatDownload.fail(errorMessage.value);
         }
     } finally {
         if (pendingRequest === controller) {

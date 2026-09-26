@@ -12,8 +12,9 @@ import {
 import { getAuthSubject } from 'src/lib/auth';
 import type { FetchProgress } from 'src/lib/utils/fetchProgress';
 import { useSplatDownloadStore } from 'src/stores/splatDownload';
+import { downloadSplatChunked } from 'src/lib/downloads/chunkedDownload';
+import { waitForResume } from 'src/lib/localTransfers';
 import {
-    getReconstructionSplat,
     getReconstructionStep,
     getReconstructionVideo,
     listReconstructions,
@@ -216,12 +217,40 @@ export function useReconstructionSplatQuery(
         enabled: () => subject !== null && buildingId.value !== '' && reconstructionId.value !== '',
         query: ({ signal }) => {
             splatDownload.reset();
-            return getReconstructionSplat(
-                buildingId.value,
-                reconstructionId.value,
-                signal,
-                reportProgress,
-            );
+            return (async (): Promise<ArrayBuffer> => {
+                let controller = new AbortController();
+                for (;;) {
+                    const forwardCancel = (): void => controller.abort();
+                    signal.addEventListener('abort', forwardCancel, { once: true });
+                    try {
+                        splatDownload.attach(controller);
+                        splatDownload.setState('downloading');
+                        const data = await downloadSplatChunked(
+                            buildingId.value,
+                            reconstructionId.value,
+                            controller.signal,
+                            reportProgress,
+                        );
+                        splatDownload.setState('done');
+                        return data;
+                    } catch (error) {
+                        if (signal.aborted) throw error;
+                        if (error instanceof DOMException && error.name === 'AbortError') {
+                            const outcome = await waitForResume(() => splatDownload.state, signal);
+                            if (outcome === 'cancelled') {
+                                splatDownload.reset();
+                                throw error;
+                            }
+                            controller = new AbortController();
+                            continue;
+                        }
+                        splatDownload.fail('Download failed');
+                        throw error;
+                    } finally {
+                        signal.removeEventListener('abort', forwardCancel);
+                    }
+                }
+            })();
         },
         staleTime: Infinity,
         refetchOnWindowFocus: false,

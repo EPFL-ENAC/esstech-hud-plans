@@ -456,4 +456,30 @@ export default {
     errors: {
         connection: 'Impossible de joindre le serveur. Vérifiez votre connexion et réessayez.',
     },
+    transfers: {
+        cancel: 'Annuler',
+        pause: 'Pause',
+        resume: 'Reprendre',
+        retry: 'Réessayer',
+        sessionExpired: "La session d'envoi a expiré. Relancez l'envoi.",
+        networkReconnected: 'Connexion rétablie. Le transfert continue.',
+        upload: {
+            idle: 'En attente',
+            creating: "Préparation de l'envoi…",
+            uploading: 'Envoi en cours…',
+            finalizing: "Finalisation de l'envoi…",
+            done: 'Envoi terminé',
+            failed: 'Envoi échoué',
+            paused: 'En pause',
+        },
+        uploadChunks: 'Bloc {received} sur {total}',
+        download: {
+            idle: 'En attente',
+            downloading: 'Téléchargement…',
+            paused: 'En pause',
+            assembling: 'Préparation du fichier…',
+            done: 'Téléchargement terminé',
+            failed: 'Téléchargement échoué',
+        },
+    },
 } satisfies typeof enUS;
