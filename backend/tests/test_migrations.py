@@ -33,10 +33,21 @@ def test_application_migrations_preserve_parent_and_unmanaged_tables() -> None:
     latest_reconstruction_revision = _load_revision(
         "2026_09_08_0004-b51e8c2d7a90_index_latest_reconstruction.py"
     )
+    building_address_revision = _load_revision(
+        "2026_09_08_0005-c82a6f419d03_add_building_address.py"
+    )
+    upload_sessions_revision = _load_revision(
+        "2026_09_09_0006-f3a9c1d24b78_create_upload_sessions.py"
+    )
     assert (
         latest_reconstruction_revision.down_revision
         == optional_metadata_revision.revision
     )
+    assert (
+        building_address_revision.down_revision
+        == latest_reconstruction_revision.revision
+    )
+    assert upload_sessions_revision.down_revision == building_address_revision.revision
     engine = create_engine("sqlite://")
 
     unmanaged_metadata = MetaData()
@@ -55,6 +66,8 @@ def test_application_migrations_preserve_parent_and_unmanaged_tables() -> None:
             reconstructions_revision.upgrade()
             optional_metadata_revision.upgrade()
             latest_reconstruction_revision.upgrade()
+            building_address_revision.upgrade()
+            upload_sessions_revision.upgrade()
 
     inspector = inspect(engine)
     indexes = {
@@ -86,8 +99,42 @@ def test_application_migrations_preserve_parent_and_unmanaged_tables() -> None:
     building_columns = {
         column["name"]: column for column in inspector.get_columns("buildings")
     }
-    assert building_columns["latitude"]["nullable"] is True
-    assert building_columns["longitude"]["nullable"] is True
+    assert building_columns["address"]["nullable"] is True
+    upload_indexes = {
+        index["name"]: index["column_names"]
+        for index in inspector.get_indexes("upload_sessions")
+    }
+    assert upload_indexes["ix_upload_sessions_user_id"] == ["user_id"]
+    assert upload_indexes["ix_upload_sessions_expires_at"] == ["expires_at"]
+    chunk_foreign_keys = inspector.get_foreign_keys("upload_chunks")
+    assert chunk_foreign_keys[0]["referred_table"] == "upload_sessions"
+    assert chunk_foreign_keys[0]["options"] == {"ondelete": "CASCADE"}
+    session_foreign_keys = {
+        key["referred_table"]: key
+        for key in inspector.get_foreign_keys("upload_sessions")
+    }
+    assert set(session_foreign_keys) == {"users", "buildings"}
+    assert "ondelete" not in session_foreign_keys["users"]["options"]
+    upload_checks = {
+        constraint["name"]
+        for constraint in inspector.get_check_constraints("upload_sessions")
+    }
+    assert upload_checks == {
+        "ck_upload_sessions_total_chunks",
+        "ck_upload_sessions_received_bytes",
+        "ck_upload_sessions_status",
+    }
+    assert {"upload_sessions", "upload_chunks"} <= set(inspector.get_table_names())
+
+    # Upload tables upgrade and downgrade cleanly while the parent chain stays
+    # applied.
+    with engine.begin() as connection:
+        context = MigrationContext.configure(connection)
+        with Operations.context(context):
+            upload_sessions_revision.downgrade()
+
+    inspector = inspect(engine)
+    assert not {"upload_sessions", "upload_chunks"} <= set(inspector.get_table_names())
     building_constraints = {
         constraint["name"]
         for constraint in inspector.get_check_constraints("buildings")

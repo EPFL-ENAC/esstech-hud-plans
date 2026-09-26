@@ -41,6 +41,20 @@ class Config(BaseSettings):
             path if path.is_absolute() else Path(__file__).resolve().parents[1] / path
         )
 
+    # Directory where chunked upload part files and the assembled video are
+    # staged before finalization copies them into the workflow data directory.
+    UPLOAD_TEMP_DIR: str = "/tmp"
+    UPLOAD_CHUNK_SIZE_BYTES: int = 8_388_608
+    UPLOAD_SESSION_TTL_HOURS: int = 48
+    UPLOAD_CLEANUP_INTERVAL_MINUTES: int = 60
+
+    @property
+    def UPLOAD_ROOT_PATH(self) -> Path:
+        path = Path(self.UPLOAD_TEMP_DIR)
+        return (
+            path if path.is_absolute() else Path(__file__).resolve().parents[1] / path
+        ) / "uploads"
+
     @property
     def PREFECT_API_URL(self) -> str:
         return f"http://{self.PREFECT_HOST}:{self.PREFECT_PORT}/api"
