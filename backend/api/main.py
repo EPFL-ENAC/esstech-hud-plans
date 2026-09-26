@@ -16,6 +16,7 @@ from api.views.auth import router as auth_router
 from api.views.buildings import router as buildings_router
 from api.views.reconstructions import router as reconstructions_router
 from api.views.splats import router as splats_router
+from api.views.uploads import router as uploads_router
 from api.views.users import router as users_router
 from api.views.workflows import router as workflows_router
 
@@ -48,8 +49,8 @@ app.add_middleware(
     allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["Accept-Ranges", "Content-Range"],
+    allow_headers=["Content-Type", "Authorization", "Range", "If-Range"],
+    expose_headers=["Accept-Ranges", "Content-Range", "ETag"],
 )
 
 
@@ -107,6 +108,12 @@ app.include_router(
     reconstructions_router,
     prefix="/buildings/{building_id}/reconstructions",
     tags=["Reconstructions"],
+)
+
+app.include_router(
+    uploads_router,
+    prefix="/uploads",
+    tags=["Uploads"],
 )
 
 app.include_router(
