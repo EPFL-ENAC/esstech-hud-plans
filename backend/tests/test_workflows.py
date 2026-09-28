@@ -7,6 +7,10 @@ from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from prefect.client.schemas.objects import Log, StateType
+
 from api.lib.workflows import __main__ as workflow_runner
 from api.lib.workflows import common as workflow_common
 from api.lib.workflows import counter as counter_workflow
@@ -22,9 +26,6 @@ from api.models.workflows import (
 from api.services.auth import require_user
 from api.services.reconstructions import ReconstructionNotFoundError
 from api.views import workflows as workflow_views
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from prefect.client.schemas.objects import Log, StateType
 
 USER_ID = UUID("00000000-0000-0000-0000-000000000001")
 OTHER_USER_ID = UUID("00000000-0000-0000-0000-000000000002")
@@ -234,16 +235,26 @@ def test_workflow_runner_serves_splat_generation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict = {}
+    cleanup_captured: dict = {}
 
     class FakeFlow:
-        def serve(self, **kwargs) -> None:
-            captured.update(kwargs)
+        def __init__(self, sink: dict) -> None:
+            self._sink = sink
 
-    monkeypatch.setattr(workflow_runner, "splat_generation_flow", FakeFlow())
+        def serve(self, **kwargs) -> None:
+            self._sink.update(kwargs)
+
+    monkeypatch.setattr(workflow_runner, "splat_generation_flow", FakeFlow(captured))
+    monkeypatch.setattr(workflow_runner, "tus_cleanup_flow", FakeFlow(cleanup_captured))
 
     workflow_runner.serve_workflows()
 
     assert captured == {"name": "default", "limit": 1}
+    assert cleanup_captured == {
+        "name": "tus-cleanup",
+        "interval": 86400,
+        "limit": 1,
+    }
 
 
 def test_extract_frames_task_sends_ffmpeg_output_to_prefect_run_logger(
