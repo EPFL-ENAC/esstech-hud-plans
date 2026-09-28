@@ -7,6 +7,12 @@ from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
+from fastapi import Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.routing import APIRouter
+from sqlalchemy.exc import SQLAlchemyError
+from starlette.concurrency import run_in_threadpool
+
 from api.config import config
 from api.lib.compute import scitas as scitas_compute
 from api.lib.compute.colmap_geometric_data import colmap_compute_geometric_data
@@ -33,14 +39,11 @@ from api.services.reconstructions import (
 from api.utils.responses import inline_file_response
 from api.views.buildings import get_current_building
 from api.views.reconstruction_submission import (
+    ResumableReconstructionSubmission,
     get_reconstruction_service,
     validate_reconstruction_submission,
+    validate_tus_upload,
 )
-from fastapi import Depends, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-from fastapi.routing import APIRouter
-from sqlalchemy.exc import SQLAlchemyError
-from starlette.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +188,46 @@ async def create_reconstruction(
             building=building,
             video=file,
             settings=workflow_settings,
+        )
+    except ReconstructionCreationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "message": str(exc),
+                "reconstruction_id": str(exc.reconstruction.id),
+            },
+        ) from exc
+    except (OSError, SQLAlchemyError) as exc:
+        raise _database_unavailable(exc) from exc
+
+
+@router.post(
+    "/resumable",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=ReconstructionRead,
+)
+async def create_reconstruction_from_tus(
+    payload: ResumableReconstructionSubmission,
+    building: Annotated[Building, Depends(get_current_building)],
+    reconstructions: Annotated[
+        ReconstructionService,
+        Depends(get_reconstruction_service),
+    ],
+) -> Reconstruction:
+    """Schedule the reconstruction of a video uploaded through tus.
+
+    The upload was already streamed to tusd; this endpoint validates the
+    completed upload, creates the reconstruction row, and schedules the
+    workflow, whose first task copies the video into the artifact layout.
+    """
+    tus_upload_path, tus_video_filename = validate_tus_upload(payload.tus_upload_id)
+
+    try:
+        return await reconstructions.create_from_tus(
+            building=building,
+            tus_upload_path=str(tus_upload_path),
+            tus_video_filename=tus_video_filename,
+            settings=payload.settings,
         )
     except ReconstructionCreationError as exc:
         raise HTTPException(

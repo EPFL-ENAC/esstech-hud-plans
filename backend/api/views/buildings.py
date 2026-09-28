@@ -4,6 +4,20 @@ import logging
 from typing import Annotated
 from uuid import UUID
 
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
+from pydantic import ValidationError
+from sqlalchemy.exc import SQLAlchemyError
+from sqlmodel.ext.asyncio.session import AsyncSession
+
 from api.db import get_session
 from api.models.building import (
     Building,
@@ -28,22 +42,11 @@ from api.services.reconstructions import (
     ReconstructionService,
 )
 from api.views.reconstruction_submission import (
+    ResumableBuildingFromReconstructionSubmission,
     get_reconstruction_service,
     validate_reconstruction_submission,
+    validate_tus_upload,
 )
-from fastapi import (
-    APIRouter,
-    Depends,
-    File,
-    Form,
-    HTTPException,
-    Query,
-    UploadFile,
-    status,
-)
-from pydantic import ValidationError
-from sqlalchemy.exc import SQLAlchemyError
-from sqlmodel.ext.asyncio.session import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +173,77 @@ async def create_building_from_reconstruction(
             building=created_building,
             video=file,
             settings=workflow_settings,
+        )
+    except ReconstructionCreationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "message": str(exc),
+                "building_id": str(building_read.id),
+                "reconstruction_id": str(exc.reconstruction.id),
+            },
+        ) from exc
+    except (OSError, SQLAlchemyError) as exc:
+        logger.exception("Reconstruction database operation failed", exc_info=exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "message": "Reconstruction database is unavailable",
+                "building_id": str(building_read.id),
+            },
+        ) from exc
+
+    return BuildingFromReconstructionRead(
+        building=building_read,
+        reconstruction=ReconstructionRead.model_validate(reconstruction),
+    )
+
+
+@router.post(
+    "/from-reconstruction/resumable",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=BuildingFromReconstructionRead,
+    responses={
+        400: {"description": "The tus upload is missing, incomplete, or not a video."},
+        401: {"description": "Authentication is required."},
+        422: {"description": "Missing fields or invalid building/workflow settings."},
+        503: {
+            "model": BuildingFromReconstructionError,
+            "description": (
+                "Database, video storage, or scheduling failure. Once created, the "
+                "building is retained and building_id is returned. A persisted "
+                "failed reconstruction is also retained and its ID is included."
+            ),
+        },
+    },
+)
+async def create_building_from_reconstruction_resumable(
+    payload: ResumableBuildingFromReconstructionSubmission,
+    current_user: Annotated[User, Depends(require_user)],
+    buildings: Annotated[BuildingService, Depends(get_building_service)],
+    reconstructions: Annotated[
+        ReconstructionService, Depends(get_reconstruction_service)
+    ],
+) -> BuildingFromReconstructionRead:
+    """Create an owned building, then submit its first reconstruction from a
+    completed tus upload."""
+    tus_upload_path, tus_video_filename = validate_tus_upload(payload.tus_upload_id)
+
+    try:
+        created_building = await buildings.create(
+            user_id=current_user.id, payload=payload.building
+        )
+    except (OSError, SQLAlchemyError) as exc:
+        raise _database_unavailable(exc) from exc
+
+    # Keep response data available even if reconstruction rollback expires ORM rows.
+    building_read = BuildingRead.model_validate(created_building)
+    try:
+        reconstruction = await reconstructions.create_from_tus(
+            building=created_building,
+            tus_upload_path=str(tus_upload_path),
+            tus_video_filename=tus_video_filename,
+            settings=payload.settings,
         )
     except ReconstructionCreationError as exc:
         raise HTTPException(

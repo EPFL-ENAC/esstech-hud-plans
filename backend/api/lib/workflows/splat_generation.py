@@ -1,5 +1,6 @@
 import logging
 import math
+import os
 import shutil
 import time
 from collections.abc import AsyncIterator
@@ -11,6 +12,15 @@ from typing import Any, Self
 from uuid import UUID, uuid4
 
 from anyio import from_thread
+from fastapi import UploadFile
+from prefect import flow, get_run_logger, task
+from prefect.cache_policies import DEFAULT
+from prefect.client.schemas.objects import FlowRun
+from prefect.deployments import arun_deployment
+from prefect.states import State
+from sqlmodel.ext.asyncio.session import AsyncSession
+from starlette.concurrency import run_in_threadpool
+
 from api.config import config
 from api.db import get_engine
 from api.lib.compute import scitas as scitas_compute
@@ -40,14 +50,6 @@ from api.services.reconstructions import (
     ReconstructionNotFoundError,
     ReconstructionService,
 )
-from fastapi import UploadFile
-from prefect import flow, get_run_logger, task
-from prefect.cache_policies import DEFAULT
-from prefect.client.schemas.objects import FlowRun
-from prefect.deployments import arun_deployment
-from prefect.states import State
-from sqlmodel.ext.asyncio.session import AsyncSession
-from starlette.concurrency import run_in_threadpool
 
 SPLAT_GENERATION_DEPLOYMENT = "splat-generation/default"
 LOCAL_EXECUTION_ENVIRONMENT = LocalCommandExecutionEnvironment()
@@ -374,6 +376,45 @@ class SplatGenerationArtifact:
         shutil.rmtree(self.root_directory, ignore_errors=True)
 
 
+@task(name="copy-uploaded-video", cache_policy=DEFAULT - "report_progress")
+async def copy_video_from_tus_upload(
+    tus_upload_path: str,
+    tus_video_filename: str,
+    video_path: str,
+) -> str:
+    """Copy a completed tus upload into its final artifact location.
+
+    Runs in the worker process on the host: the tusd staging directory is a
+    local path shared with the tusd container, while the destination may live
+    on the workflow data mount.
+    """
+
+    run_logger = get_run_logger()
+    await run_in_threadpool(
+        _copy_tus_upload, tus_upload_path, tus_video_filename, video_path
+    )
+    run_logger.info("Copied uploaded video %s to %s", tus_video_filename, video_path)
+    return video_path
+
+
+def _copy_tus_upload(
+    tus_upload_path: str, tus_video_filename: str, video_path: str
+) -> None:
+    source = Path(tus_upload_path)
+    destination = Path(video_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = destination.with_name(destination.name + ".tmp")
+    try:
+        shutil.copyfile(source, temp_path)
+        os.replace(temp_path, destination)
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
+    info_path = source.with_name(source.name + ".info")
+    source.unlink(missing_ok=True)
+    info_path.unlink(missing_ok=True)
+
+
 # Reporting is an execution detail, not an input to the cached computation.
 @task(name="extract-video-frames", cache_policy=DEFAULT - "report_progress")
 async def extract_frames_task(
@@ -526,6 +567,8 @@ async def splat_generation_flow(
     settings: SplatGenerationWorkflowSettings,
     owner_id: UUID,
     reconstruction_id: UUID | None = None,
+    tus_upload_path: str | None = None,
+    tus_video_filename: str | None = None,
 ) -> str:
     run_logger = get_run_logger()
     run_logger.info("Starting splat generation for artifact %s", artifact_id)
@@ -535,6 +578,17 @@ async def splat_generation_flow(
         if config.USE_SCITAS
         else LOCAL_EXECUTION_ENVIRONMENT
     )
+
+    if tus_upload_path is not None:
+        if tus_video_filename is None:
+            raise ValueError("A tus upload requires its path and filename")
+        # The uploaded video exists only in the tusd staging directory; the
+        # pipeline starts by moving it into the artifact layout.
+        await copy_video_from_tus_upload(
+            tus_upload_path=tus_upload_path,
+            tus_video_filename=tus_video_filename,
+            video_path=video_path,
+        )
 
     frame_picker_settings = settings.frame_picker
     extraction_directory = (
@@ -611,13 +665,12 @@ async def splat_generation_flow(
     return generated_splat_path
 
 
-async def schedule_splat_generation(
+def _splat_generation_parameters(
     artifact: SplatGenerationArtifact,
     settings: SplatGenerationWorkflowSettings,
     owner_id: UUID,
-    reconstruction_id: UUID | None = None,
-) -> UUID:
-    parameters: dict[str, object] = {
+) -> dict[str, object]:
+    return {
         "artifact_id": str(artifact.artifact_id),
         "workspace_directory": str(artifact.root_directory.resolve()),
         "video_path": str(artifact.video_path.resolve()),
@@ -628,6 +681,12 @@ async def schedule_splat_generation(
         "settings": settings.model_dump(mode="json"),
         "owner_id": str(owner_id),
     }
+
+
+async def _submit_splat_generation_run(
+    parameters: dict[str, object],
+    reconstruction_id: UUID | None = None,
+) -> UUID:
     extra_options: dict[str, object] = {}
     if reconstruction_id is not None:
         parameters["reconstruction_id"] = str(reconstruction_id)
@@ -641,3 +700,41 @@ async def schedule_splat_generation(
         **extra_options,
     )
     return flow_run.id
+
+
+async def schedule_splat_generation(
+    artifact: SplatGenerationArtifact,
+    settings: SplatGenerationWorkflowSettings,
+    owner_id: UUID,
+    reconstruction_id: UUID | None = None,
+) -> UUID:
+    parameters: dict[str, object] = _splat_generation_parameters(
+        artifact, settings, owner_id
+    )
+    return await _submit_splat_generation_run(parameters, reconstruction_id)
+
+
+async def schedule_splat_generation_from_tus(
+    artifact: SplatGenerationArtifact,
+    tus_upload_path: str,
+    tus_video_filename: str,
+    settings: SplatGenerationWorkflowSettings,
+    owner_id: UUID,
+    reconstruction_id: UUID | None = None,
+) -> UUID:
+    """Schedule the splat generation of an already-uploaded tus video.
+
+    The video still lives in the tusd staging directory; the flow's first
+    task copies it into the artifact layout before frame extraction.
+    """
+
+    parameters: dict[str, object] = _splat_generation_parameters(
+        artifact, settings, owner_id
+    )
+    parameters.update(
+        {
+            "tus_upload_path": tus_upload_path,
+            "tus_video_filename": tus_video_filename,
+        }
+    )
+    return await _submit_splat_generation_run(parameters, reconstruction_id)

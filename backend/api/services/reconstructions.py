@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Literal
 from uuid import UUID
+
+from fastapi import UploadFile
+from sqlmodel import col, select
+from sqlmodel.ext.asyncio.session import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
 from api.config import config
 from api.lib.compute import scitas as scitas_compute
@@ -15,10 +21,6 @@ from api.models.reconstruction import (
 )
 from api.models.user import utc_now
 from api.models.workflows import SplatGenerationWorkflowSettings
-from fastapi import UploadFile
-from sqlmodel import col, select
-from sqlmodel.ext.asyncio.session import AsyncSession
-from starlette.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +149,75 @@ class ReconstructionService:
         try:
             workflow_id = await schedule_splat_generation(
                 artifact=artifact,
+                settings=settings,
+                owner_id=building.user_id,
+                reconstruction_id=reconstruction.id,
+            )
+        except Exception as exc:
+            failed = await self._mark_failed_best_effort(
+                reconstruction.id,
+                exc,
+                only_if_preparing=True,
+            )
+            raise ReconstructionSchedulingError(
+                "Failed to schedule reconstruction workflow",
+                failed,
+            ) from exc
+
+        return await self._record_scheduled_workflow(reconstruction, workflow_id)
+
+    async def create_from_tus(
+        self,
+        *,
+        building: Building,
+        tus_upload_path: str,
+        tus_video_filename: str,
+        settings: SplatGenerationWorkflowSettings,
+    ) -> Reconstruction:
+        """Schedule the reconstruction of a video uploaded through tus.
+
+        The video already lives in the tusd staging directory; no bytes are
+        stored at submission time. The flow's first task copies it into the
+        artifact layout.
+        """
+
+        reconstruction = Reconstruction(
+            building_id=building.id,
+            settings=settings.model_dump(mode="json"),
+        )
+        self._session.add(reconstruction)
+        await self._commit_and_refresh(reconstruction)
+
+        # Imports stay local so the Prefect flow can call this service to publish
+        # lifecycle updates without creating a module import cycle.
+        from api.lib.workflows.splat_generation import (
+            SplatGenerationArtifact,
+            schedule_splat_generation_from_tus,
+        )
+
+        video_format = (
+            Path(tus_video_filename).suffix.removeprefix(".").lower() or "mp4"
+        )
+        artifact = SplatGenerationArtifact(
+            reconstruction.id,
+            workflow_common.WORKFLOW_DATA_DIRECTORY,
+            video_format,
+        )
+
+        reconstruction = await self.record_progress(
+            reconstruction.id,
+            progress=0.0,
+            artifact_changes=ReconstructionArtifactUpdate(
+                workspace_directory=str(artifact.root_directory.resolve()),
+                input_video_path=str(artifact.video_path.resolve()),
+            ),
+        )
+
+        try:
+            workflow_id = await schedule_splat_generation_from_tus(
+                artifact=artifact,
+                tus_upload_path=tus_upload_path,
+                tus_video_filename=tus_video_filename,
                 settings=settings,
                 owner_id=building.user_id,
                 reconstruction_id=reconstruction.id,
