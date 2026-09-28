@@ -40,6 +40,32 @@ services:
       retries: 3
       start_period: 60s
 
+  tusd:
+    image: tusproject/tusd:v2.10.1
+    # The image runs USER tusd; on dev machines where bind mounts appear
+    # root-owned inside containers, tusd must run as root to write the mount
+    user: "0:0"
+    ports:
+      - '1080:1080'
+    volumes:
+      - ${TUSD_UPLOAD_DIR:-/tmp/hud-tusd-uploads}:/data
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    command:
+      - -upload-dir
+      - /data
+      - -port
+      - '1080'
+      - -hooks-http
+      - ${TUSD_HOOKS_HTTP_URL:-http://host.docker.internal:8000/api/tus/hooks}
+      - -hooks-enabled-events
+      - pre-create
+      - -cors-allow-origin
+      - ${APP_URL:-http://localhost:9000}
+      - -cors-allow-headers
+      - Authorization
+      - -disable-download
+
 volumes:
   postgres:
     driver: local

@@ -67,6 +67,15 @@ class Config(BaseSettings):
     SCITAS_SBATCH_ARGS_COLMAP: str = ""
     SCITAS_SBATCH_ARGS_BRUSH: str = ""
 
+    # Host directory where the tusd container stores upload chunks and .info files.
+    # Bind-mounted into the tusd container. Must stay on a local disk
+    # (tusd needs hard links; never on the SCITAS mount).
+    TUSD_UPLOAD_DIR: str = "/tmp/hud-tusd-uploads"
+    # Age threshold for the tus cleanup flow
+    TUSD_UPLOAD_RETENTION_DAYS: int = 7
+    # Hook endpoint URL tusd calls for pre-create validation (used by the compose command)
+    TUSD_HOOKS_HTTP_URL: str = "http://host.docker.internal:8000/api/tus/hooks"
+
 
 @lru_cache()
 def get_config():

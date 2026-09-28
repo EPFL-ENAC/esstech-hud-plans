@@ -53,6 +53,15 @@ The Prefect container enables live log publishing and websocket streaming for
 workflow log subscribers. Recreate or restart the Prefect container after
 changing these settings.
 
+The compose stack also includes a tusd container for chunked, resumable video
+uploads. tusd stores upload chunks and `.info` files in `TUSD_UPLOAD_DIR`
+(default `/tmp/hud-tusd-uploads`). This directory must be shared between the
+tusd container and the backend, and must stay on a local disk. On machines
+where `/tmp` is not shared with the docker daemon, set `TUSD_UPLOAD_DIR` to a
+path under the repo (for example `backend/data/tusd-uploads`). Upload requests
+are validated by a `pre-create` hook that calls the API at
+`TUSD_HOOKS_HTTP_URL`.
+
 The API and workflow process must share the `backend/data/workflows` directory.
 The `splat-generation/default` deployment runs FFmpeg, optionally selects frames
 locally with the frame picker, then runs COLMAP and Brush. It is submitted through
