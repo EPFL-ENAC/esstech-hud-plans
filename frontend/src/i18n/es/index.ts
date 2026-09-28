@@ -88,6 +88,7 @@ export default {
         startProcessing: 'Iniciar el procesamiento (10–60 min)',
         uploading: 'Subiendo el vídeo ({loaded} MB / {total} MB)',
         uploadingUnknown: 'Subiendo el vídeo ({loaded} MB)',
+        resumingUpload: 'Reanudando la subida del vídeo...',
         camera: {
             viewfinder: 'Visor de la cámara',
             label: 'Cámara',

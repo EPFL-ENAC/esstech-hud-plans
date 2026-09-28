@@ -8,14 +8,7 @@
             :animation-speed="150"
         />
         <div class="text-caption text-grey-7 q-mt-xs">
-            {{
-                total > 0
-                    ? t('capture.uploading', {
-                          loaded: formatMb(loaded),
-                          total: formatMb(total),
-                      })
-                    : t('capture.uploadingUnknown', { loaded: formatMb(loaded) })
-            }}
+            {{ caption }}
         </div>
     </div>
 </template>
@@ -32,4 +25,13 @@ const progress = computed(() => videoUpload.progress ?? { loaded: 0, total: 0 })
 const loaded = computed(() => progress.value.loaded);
 const total = computed(() => progress.value.total);
 const ratio = computed(() => (total.value > 0 ? Math.min(loaded.value / total.value, 1) : 0));
+const caption = computed(() => {
+    if (videoUpload.resumed) return t('capture.resumingUpload');
+    return total.value > 0
+        ? t('capture.uploading', {
+              loaded: formatMb(loaded.value),
+              total: formatMb(total.value),
+          })
+        : t('capture.uploadingUnknown', { loaded: formatMb(loaded.value) });
+});
 </script>

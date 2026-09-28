@@ -1,7 +1,8 @@
 import { i18n } from 'src/i18n/instance';
 import { baseUrl } from 'boot/api';
 import { authFetch } from 'src/lib/auth';
-import { downloadWithProgress, type FetchProgress } from 'src/lib/utils/fetchProgress';
+import type { FetchProgress } from 'src/lib/utils/fetchProgress';
+import { downloadResumable, type ResumableDownloadOptions } from 'src/lib/utils/resumableDownload';
 import { uploadWithProgress } from 'src/lib/utils/xhrUpload';
 
 export interface CurrentUser {
@@ -289,23 +290,15 @@ export function deleteReconstruction(buildingId: string, reconstructionId: strin
     );
 }
 
-export async function getReconstructionVideo(
+export function getReconstructionVideo(
     buildingId: string,
     reconstructionId: string,
     signal: AbortSignal,
 ): Promise<Blob> {
-    const response = await authFetch(
+    return downloadResumable(
         `${baseUrl}/buildings/${encodeURIComponent(buildingId)}/reconstructions/${encodeURIComponent(reconstructionId)}/video`,
         { signal },
     );
-    if (!response.ok) {
-        throw new ApiError(
-            `Video request failed with HTTP ${response.status}`,
-            response.status,
-            null,
-        );
-    }
-    return response.blob();
 }
 
 export async function getReconstructionSplat(
@@ -314,11 +307,14 @@ export async function getReconstructionSplat(
     signal: AbortSignal,
     onProgress?: (progress: FetchProgress) => void,
 ): Promise<ArrayBuffer> {
-    return downloadWithProgress(
+    const options: ResumableDownloadOptions = {};
+    if (onProgress) options.onProgress = onProgress;
+    const blob = await downloadResumable(
         `${baseUrl}/buildings/${encodeURIComponent(buildingId)}/reconstructions/${encodeURIComponent(reconstructionId)}/splat`,
         { signal },
-        onProgress,
+        options,
     );
+    return blob.arrayBuffer();
 }
 
 async function uploadJson<T>(
@@ -366,6 +362,35 @@ export function createBuildingFromReconstruction(
     formData.append('building', JSON.stringify(building));
     formData.append('settings', JSON.stringify(submission.settings));
     return uploadJson('/buildings/from-reconstruction', formData, onProgress);
+}
+
+/** Submit a video already uploaded through the tus sidecar for reconstruction. */
+export function createReconstructionResumable(
+    buildingId: string,
+    tusUploadId: string,
+    settings: SplatGenerationSettings,
+): Promise<Reconstruction> {
+    return requestJson(
+        `/buildings/${encodeURIComponent(buildingId)}/reconstructions/resumable`,
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tus_upload_id: tusUploadId, settings }),
+        },
+    );
+}
+
+/** Submit a tus-uploaded video and create the building in the same call. */
+export function createBuildingFromReconstructionResumable(
+    building: BuildingCreate,
+    tusUploadId: string,
+    settings: SplatGenerationSettings,
+): Promise<BuildingFromReconstruction> {
+    return requestJson('/buildings/from-reconstruction/resumable', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tus_upload_id: tusUploadId, building, settings }),
+    });
 }
 
 export function getFailedBuildingId(error: unknown): string | null {

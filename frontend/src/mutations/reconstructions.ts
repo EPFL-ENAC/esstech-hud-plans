@@ -6,12 +6,13 @@ import {
     type BuildingSelection,
     type Reconstruction,
     type ReconstructionSubmission,
-    createBuildingFromReconstruction,
-    createReconstruction,
+    createBuildingFromReconstructionResumable,
+    createReconstructionResumable,
     getFailedBuildingId,
     getFailedReconstructionId,
     getReconstructionSubmissionErrorMessage,
 } from 'src/lib/buildings';
+import { uploadVideoResumable } from 'src/lib/utils/tusUpload';
 
 export type SubmitReconstructionVariables = ReconstructionSubmission & BuildingSelection;
 
@@ -32,15 +33,29 @@ export function useSubmitReconstructionMutation() {
     const mutation = useMutation<Reconstruction, SubmitReconstructionVariables, unknown>({
         mutation: async (variables) => {
             videoUpload.reset();
+            // Step 1: resumable upload to the tusd sidecar, reporting true
+            // network bytes. Step 2: submit the finished upload for scheduling;
+            // the pipeline copies the video out of the tusd staging directory.
+            const { uploadId } = await uploadVideoResumable(variables.video, {
+                onProgress: videoUpload.update,
+                onResumed: () => videoUpload.setResumed(true),
+            });
+            // The upload step is done; the caption must not claim a resumed
+            // upload during the step-2 submission.
+            videoUpload.setResumed(false);
             if (variables.buildingId === null) {
-                const result = await createBuildingFromReconstruction(
+                const result = await createBuildingFromReconstructionResumable(
                     variables.building,
-                    variables,
-                    videoUpload.update,
+                    uploadId,
+                    variables.settings,
                 );
                 return result.reconstruction;
             }
-            return createReconstruction(variables.buildingId, variables, videoUpload.update);
+            return createReconstructionResumable(
+                variables.buildingId,
+                uploadId,
+                variables.settings,
+            );
         },
         onSettled(data, error, variables) {
             const buildingId = data?.building_id ?? retainedBuildingId(error, variables);

@@ -89,6 +89,7 @@ export default {
         startProcessing: 'Démarrer le traitement (10–60 min)',
         uploading: 'Envoi de la vidéo ({loaded} Mo / {total} Mo)',
         uploadingUnknown: 'Envoi de la vidéo ({loaded} Mo)',
+        resumingUpload: 'Reprise de l’envoi de la vidéo...',
         camera: {
             viewfinder: 'Viseur de la caméra',
             label: 'Caméra',

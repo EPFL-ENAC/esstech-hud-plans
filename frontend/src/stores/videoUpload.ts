@@ -6,14 +6,21 @@ import type { FetchProgress } from 'src/lib/utils/fetchProgress';
 export const useVideoUploadStore = defineStore('videoUpload', () => {
     /** null while idle or before the first progress event arrives. */
     const progress = ref<FetchProgress | null>(null);
+    /** True while a previously started upload is being continued. */
+    const resumed = ref(false);
 
     function update(value: FetchProgress): void {
         progress.value = value;
     }
 
-    function reset(): void {
-        progress.value = null;
+    function setResumed(value: boolean): void {
+        resumed.value = value;
     }
 
-    return { progress, update, reset };
+    function reset(): void {
+        progress.value = null;
+        resumed.value = false;
+    }
+
+    return { progress, resumed, update, setResumed, reset };
 });
