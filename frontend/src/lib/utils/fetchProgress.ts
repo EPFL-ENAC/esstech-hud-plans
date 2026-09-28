@@ -6,7 +6,7 @@ export interface FetchProgress {
     total: number; // bytes
 }
 
-function readTotal(response: Response): number {
+export function readTotal(response: Response): number {
     const raw = response.headers.get('x-file-size') ?? response.headers.get('content-length');
     const total = Number(raw);
     return Number.isFinite(total) && total > 0 ? total : 0;
