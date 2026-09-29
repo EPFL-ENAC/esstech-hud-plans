@@ -3,6 +3,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from api.services.auth import require_user
 from api.views import tus_proxy
 
 UPSTREAM_BASE = "http://tusd:8080"
@@ -43,6 +44,7 @@ def _install_transport(
 def tus_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     app = FastAPI()
     app.include_router(tus_proxy.router, prefix="/tus")
+    app.dependency_overrides[require_user] = lambda: None
     with TestClient(app) as client:
         yield client
 
@@ -128,6 +130,7 @@ def test_create_with_root_path_rewrites_location_under_prefix(
 
     app = FastAPI(root_path="/api")
     app.include_router(tus_proxy.router, prefix="/tus")
+    app.dependency_overrides[require_user] = lambda: None
     with TestClient(app) as client:
         response = client.post("/api/tus/files/", headers={"Tus-Resumable": "1.0.0"})
 
@@ -273,3 +276,11 @@ def test_proxy_returns_502_when_tusd_is_unreachable(
     response = tus_client.post("/tus/files/", headers={"Tus-Resumable": "1.0.0"})
 
     assert response.status_code == 502
+
+
+def test_proxy_requires_authenticated_user() -> None:
+    app = FastAPI()
+    app.include_router(tus_proxy.router, prefix="/tus")
+    with TestClient(app) as client:
+        assert client.patch(f"/tus/files/{'e' * 32}").status_code == 401
+        assert client.delete(f"/tus/files/{'e' * 32}").status_code == 401

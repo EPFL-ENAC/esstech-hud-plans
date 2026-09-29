@@ -307,6 +307,43 @@ def test_validate_tus_upload_rejects_unsafe_ids(
     assert exc_info.value.status_code == 400
 
 
+def test_validate_tus_upload_accepts_zero_offset(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # tusd v2 filestore never rewrites the .info Offset after chunk writes,
+    # so a finished upload keeps Offset 0 on disk while the binary file holds
+    # all bytes.
+    monkeypatch.setattr(config, "TUSD_UPLOAD_DIR", str(tmp_path))
+    upload_id = uuid4().hex
+    _make_tus_upload(tmp_path, upload_id)
+    info = json.loads((tmp_path / f"{upload_id}.info").read_text())
+    info["Offset"] = 0
+    (tmp_path / f"{upload_id}.info").write_text(json.dumps(info))
+
+    binary_path, filename = validate_tus_upload(upload_id)
+
+    assert binary_path == tmp_path / upload_id
+    assert filename == "scan.mp4"
+
+
+def test_validate_tus_upload_accepts_missing_offset(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(config, "TUSD_UPLOAD_DIR", str(tmp_path))
+    upload_id = uuid4().hex
+    _make_tus_upload(tmp_path, upload_id)
+    info = json.loads((tmp_path / f"{upload_id}.info").read_text())
+    del info["Offset"]
+    (tmp_path / f"{upload_id}.info").write_text(json.dumps(info))
+
+    binary_path, filename = validate_tus_upload(upload_id)
+
+    assert binary_path == tmp_path / upload_id
+    assert filename == "scan.mp4"
+
+
 @pytest.fixture
 def tus_api(
     monkeypatch: pytest.MonkeyPatch,
@@ -580,6 +617,25 @@ def test_remove_expired_uploads_deletes_old_pairs_and_orphans(
     assert fresh_orphan.exists()
 
 
+def test_remove_expired_uploads_keeps_recently_touched_binaries(
+    tmp_path: Path,
+) -> None:
+    upload_dir = tmp_path / "tus"
+    upload_dir.mkdir()
+    old = time.time() - 8 * 24 * 60 * 60
+    recent = time.time()
+
+    copied_binary = _make_tus_upload(upload_dir, "copiedupload")
+    os.utime(copied_binary, (recent, recent))
+    os.utime(upload_dir / "copiedupload.info", (old, old))
+
+    removed = tus_cleanup.remove_expired_uploads(upload_dir, retention_days=7)
+
+    assert removed == []
+    assert copied_binary.exists()
+    assert (upload_dir / "copiedupload.info").exists()
+
+
 def test_tus_cleanup_flow_uses_configured_directory(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -590,6 +646,9 @@ def test_tus_cleanup_flow_uses_configured_directory(
     monkeypatch.setattr(config, "TUSD_UPLOAD_DIR", str(upload_dir))
     monkeypatch.setattr(config, "TUSD_UPLOAD_RETENTION_DAYS", 0)
     _make_tus_upload(upload_dir, "expired")
+    expired = time.time() - 2 * 24 * 60 * 60
+    os.utime(upload_dir / "expired", (expired, expired))
+    os.utime(upload_dir / "expired.info", (expired, expired))
 
     removed = tus_cleanup.tus_cleanup_flow.fn()
 

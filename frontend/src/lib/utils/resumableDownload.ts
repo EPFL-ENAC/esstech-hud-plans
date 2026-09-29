@@ -33,7 +33,8 @@ function resumableDownloadsSupported(): boolean {
     return (
         typeof navigator !== 'undefined' &&
         navigator.storage?.getDirectory !== undefined &&
-        typeof indexedDB !== 'undefined'
+        typeof indexedDB !== 'undefined' &&
+        crypto?.subtle?.digest !== undefined
     );
 }
 
@@ -87,14 +88,12 @@ function listDownloadRecords(): Promise<DownloadRecord[]> {
 
 // --- OPFS part files --------------------------------------------------------
 
-function hashUrl(url: string): string {
-    // Part file names only need collision resistance within the store, not
-    // cryptographic strength; a 32-bit string hash keeps them short.
-    let hash = 0;
-    for (let i = 0; i < url.length; i += 1) {
-        hash = (hash * 31 + url.charCodeAt(i)) | 0;
-    }
-    return (hash >>> 0).toString(36);
+async function hashUrl(url: string): Promise<string> {
+    // Part file names are recomputed from the URL on every resume and app
+    // start, so they must stay deterministic; SHA-256 keeps colliding URLs
+    // from sharing one .part file.
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(url));
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 async function getPartDirectory(): Promise<FileSystemDirectoryHandle> {
@@ -175,7 +174,7 @@ export async function downloadResumable(
     }
 
     const directory = await getPartDirectory();
-    const partName = `${hashUrl(urlText)}${PART_SUFFIX}`;
+    const partName = `${await hashUrl(urlText)}${PART_SUFFIX}`;
     const partHandle = await directory.getFileHandle(partName, { create: true });
 
     const freshRecord = (): DownloadRecord => ({
@@ -311,7 +310,7 @@ export async function cleanupStaleDownloads(): Promise<void> {
         if (name.endsWith(PART_SUFFIX)) partNames.add(name);
     }
     for (const record of await listDownloadRecords()) {
-        const partName = `${hashUrl(record.url)}${PART_SUFFIX}`;
+        const partName = `${await hashUrl(record.url)}${PART_SUFFIX}`;
         if (!partNames.has(partName)) {
             // The part file disappeared; a new attempt must start from zero.
             await putDownloadRecord({ ...record, offset: 0 });

@@ -46,7 +46,26 @@ def remove_expired_uploads(upload_dir: Path, retention_days: int) -> list[str]:
             continue
         if not info_path.is_file():
             continue
+        try:
+            binary_stat = binary_path.stat()
+        except OSError:
+            binary_stat = None
+        if (
+            binary_stat is not None
+            and now - binary_stat.st_mtime <= ORPHAN_BINARY_RETENTION_SECONDS
+        ):
+            continue
         info_path.unlink(missing_ok=True)
+        if binary_stat is not None:
+            try:
+                current_stat = binary_path.stat()
+            except OSError:
+                current_stat = None
+            if current_stat is not None and (
+                current_stat.st_ino,
+                current_stat.st_mtime,
+            ) != (binary_stat.st_ino, binary_stat.st_mtime):
+                continue
         binary_path.unlink(missing_ok=True)
         removed.append(binary_path.name)
 

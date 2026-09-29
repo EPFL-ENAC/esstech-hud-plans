@@ -2,18 +2,20 @@
 
 The frontend only talks to this API. Upload requests under /tus/files are
 forwarded to tusd at TUSD_INTERNAL_URL, so tusd stays on an internal network
-and is never exposed. The pre-create hook (/tus/hooks) remains the single
-point that checks the bearer token.
+and is never exposed. Proxy methods require an authenticated user; the
+pre-create hook (/tus/hooks) checks the bearer token forwarded at upload
+creation.
 """
 
 from __future__ import annotations
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 
 from api.config import config
+from api.services.auth import require_user
 from api.views.reconstruction_submission import TUS_UPLOAD_ID_PATTERN
 
 # The browser must not send anything else to tusd. The whitelist keeps
@@ -54,7 +56,7 @@ def _get_client() -> httpx.AsyncClient:
     if _client is None:
         _client = httpx.AsyncClient(
             base_url=config.TUSD_INTERNAL_URL,
-            timeout=httpx.Timeout(10.0, read=None, write=None, pool=10.0),
+            timeout=httpx.Timeout(10.0, read=120.0, write=120.0, pool=10.0),
         )
     return _client
 
@@ -154,22 +156,22 @@ async def proxy_options(request: Request) -> Response:
     return await _forward(request, "/files/")
 
 
-@router.post("/files")
-@router.post("/files/")
+@router.post("/files", dependencies=[Depends(require_user)])
+@router.post("/files/", dependencies=[Depends(require_user)])
 async def proxy_create(request: Request) -> Response:
     return await _forward(request, "/files/")
 
 
-@router.head("/files/{upload_id}")
+@router.head("/files/{upload_id}", dependencies=[Depends(require_user)])
 async def proxy_head(request: Request, upload_id: str) -> Response:
     return await _forward(request, f"/files/{_checked_upload_id(upload_id)}")
 
 
-@router.patch("/files/{upload_id}")
+@router.patch("/files/{upload_id}", dependencies=[Depends(require_user)])
 async def proxy_patch(request: Request, upload_id: str) -> Response:
     return await _forward(request, f"/files/{_checked_upload_id(upload_id)}")
 
 
-@router.delete("/files/{upload_id}")
+@router.delete("/files/{upload_id}", dependencies=[Depends(require_user)])
 async def proxy_delete(request: Request, upload_id: str) -> Response:
     return await _forward(request, f"/files/{_checked_upload_id(upload_id)}")
