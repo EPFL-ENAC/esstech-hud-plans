@@ -62,17 +62,13 @@
 <script setup lang="ts">
 import PageHeader from 'src/components/PageHeader.vue';
 import { useI18n } from 'vue-i18n';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useQuasar } from 'quasar';
 import { useRouter } from 'vue-router';
 import ReconstructionSubmissionForm from 'src/components/ReconstructionSubmissionForm.vue';
 import VideoUploadProgress from 'src/components/VideoUploadProgress.vue';
-import {
-    type ReconstructionSubmission,
-    createBuilding,
-    createReconstruction,
-    getFailedReconstructionId,
-} from 'src/lib/buildings';
+import { type ReconstructionSubmission } from 'src/lib/buildings';
+import { useSubmitReconstructionMutation } from 'src/mutations/reconstructions';
 
 const { t } = useI18n();
 
@@ -81,45 +77,46 @@ const quasar = useQuasar();
 const name = ref('');
 const latitude = ref<number | null>(null);
 const longitude = ref<number | null>(null);
-const submitting = ref(false);
-const errorMessage = ref('');
+const validationError = ref('');
+const {
+    mutateAsync: submitReconstruction,
+    isLoading: submitting,
+    errorMessage: submissionError,
+    destinationBuildingId,
+} = useSubmitReconstructionMutation();
+const errorMessage = computed(() => validationError.value || submissionError.value);
 
 async function submit(submission: ReconstructionSubmission): Promise<void> {
     const hasLatitude = typeof latitude.value === 'number' && Number.isFinite(latitude.value);
     const hasLongitude = typeof longitude.value === 'number' && Number.isFinite(longitude.value);
+    validationError.value = '';
     if (hasLatitude !== hasLongitude) {
-        errorMessage.value = 'Latitude and longitude must both be set or both be empty.';
+        validationError.value = 'Latitude and longitude must both be set or both be empty.';
         return;
     }
 
-    submitting.value = true;
-    errorMessage.value = '';
-    let buildingId: string | null = null;
-    try {
-        const building = await createBuilding({
+    // Resumable upload through the API upload proxy, then one call that
+    // creates the building and schedules the reconstruction. The mutation
+    // drives the upload progress shown by VideoUploadProgress.
+    await submitReconstruction({
+        ...submission,
+        buildingId: null,
+        building: {
             name: name.value,
             latitude: hasLatitude ? Number(latitude.value) : null,
             longitude: hasLongitude ? Number(longitude.value) : null,
+        },
+    }).catch(() => undefined);
+
+    const buildingId = destinationBuildingId.value;
+    if (buildingId === null) return;
+    if (submissionError.value) {
+        quasar.notify({
+            type: 'negative',
+            message: submissionError.value,
         });
-        buildingId = building.id;
-        await createReconstruction(building.id, submission);
-        await router.push(`/buildings/${building.id}`);
-    } catch (error) {
-        if (buildingId) {
-            const failedId = getFailedReconstructionId(error);
-            quasar.notify({
-                type: 'negative',
-                message: failedId
-                    ? `Reconstruction ${failedId} could not be scheduled.`
-                    : 'The building was created, but reconstruction submission failed.',
-            });
-            await router.push(`/buildings/${buildingId}`);
-        } else {
-            errorMessage.value = error instanceof Error ? error.message : String(error);
-        }
-    } finally {
-        submitting.value = false;
     }
+    await router.push(`/buildings/${buildingId}`);
 }
 </script>
 

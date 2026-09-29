@@ -42,9 +42,6 @@ services:
 
   tusd:
     image: tusproject/tusd:v2.10.1
-    # The image runs USER tusd; on dev machines where bind mounts appear
-    # root-owned inside containers, tusd must run as root to write the mount
-    user: "0:0"
     ports:
       - '127.0.0.1:8080:8080'
     volumes:
@@ -57,7 +54,7 @@ services:
       - -port
       - '8080'
       - -hooks-http
-      - ${TUSD_HOOKS_HTTP_URL:-http://host.docker.internal:8000/api/tus/hooks}
+      - ${TUSD_HOOKS_HTTP_URL:-http://host.docker.internal:8000/tus/hooks}
       - -hooks-enabled-events
       - pre-create
       - -disable-download
