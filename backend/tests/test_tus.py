@@ -57,7 +57,7 @@ def _hook_payload(
             "HTTPRequest": {
                 "Method": "POST",
                 "URI": "/files/",
-                "Headers": (
+                "Header": (
                     {"Authorization": ["Bearer forwarded-token"]}
                     if headers is None
                     else headers
@@ -151,7 +151,15 @@ def test_hook_rejects_missing_authorization(
 ) -> None:
     response = tus_hook_api.post("/tus/hooks", json=_hook_payload(headers={}))
 
-    assert response.status_code == 401
+    assert response.status_code == 200
+    assert response.json() == {
+        "RejectUpload": True,
+        "HTTPResponse": {
+            "StatusCode": 401,
+            "Body": '{"detail": "Missing bearer token"}',
+            "Header": {"Content-Type": "application/json"},
+        },
+    }
 
 
 def test_hook_rejects_invalid_token(
@@ -165,7 +173,13 @@ def test_hook_rejects_invalid_token(
 
     response = tus_hook_api.post("/tus/hooks", json=_hook_payload())
 
-    assert response.status_code == 401
+    assert response.status_code == 200
+    body = response.json()
+    assert body["RejectUpload"] is True
+    assert body["HTTPResponse"]["StatusCode"] == 401
+    assert json.loads(body["HTTPResponse"]["Body"]) == {
+        "detail": "Invalid or expired token"
+    }
 
 
 def test_hook_rejects_non_video_filename(
@@ -177,7 +191,11 @@ def test_hook_rejects_non_video_filename(
 
     response = tus_hook_api.post("/tus/hooks", json=_hook_payload(filename="notes.pdf"))
 
-    assert response.status_code == 400
+    assert response.status_code == 200
+    body = response.json()
+    assert body["RejectUpload"] is True
+    assert body["HTTPResponse"]["StatusCode"] == 400
+    assert len(received) == 1
 
 
 @pytest.mark.parametrize(
@@ -198,7 +216,10 @@ def test_hook_rejects_unknown_or_empty_size(
         json=_hook_payload(size=size, size_is_deferred=size_is_deferred),
     )
 
-    assert response.status_code == 400
+    assert response.status_code == 200
+    body = response.json()
+    assert body["RejectUpload"] is True
+    assert body["HTTPResponse"]["StatusCode"] == 400
 
 
 def test_hook_acknowledges_other_hook_types(tus_hook_api: TestClient) -> None:

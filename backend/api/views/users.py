@@ -1,8 +1,9 @@
 from typing import Annotated
 
+from fastapi import APIRouter, Depends
+
 from api.models.user import User, UserRead
 from api.services.auth import require_user
-from fastapi import APIRouter, Depends
 
 router = APIRouter()
 

@@ -3,12 +3,13 @@ from types import SimpleNamespace
 
 import jwt
 import pytest
-from api.models.auth import AuthenticatedUser
-from api.models.user import User
-from api.services import auth
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.exc import OperationalError
+
+from api.models.auth import AuthenticatedUser
+from api.models.user import User
+from api.services import auth
 
 
 def test_authenticate_user_parses_and_normalizes_claims(

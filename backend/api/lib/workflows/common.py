@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Literal, Self
 from uuid import UUID
 
-from api.config import config
 from prefect import get_client
 from prefect.client.schemas.filters import (
     LogFilter,
@@ -28,6 +27,8 @@ from prefect.events.subscribers import FlowRunSubscriber
 from prefect.exceptions import ObjectNotFound
 from prefect.types import DateTime
 from pydantic import TypeAdapter
+
+from api.config import config
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW_DATA_DIRECTORY = config.DATA_PATH / "workflows"

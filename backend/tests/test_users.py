@@ -4,11 +4,6 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from api.models.auth import AuthenticatedUser
-from api.models.user import User, UserCreate, UserRead, UserUpdate
-from api.services.auth import require_user
-from api.services.users import UserService
-from api.views import users as user_views
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
@@ -16,6 +11,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
+
+from api.models.auth import AuthenticatedUser
+from api.models.user import User, UserCreate, UserRead, UserUpdate
+from api.services.auth import require_user
+from api.services.users import UserService
+from api.views import users as user_views
 
 
 @asynccontextmanager

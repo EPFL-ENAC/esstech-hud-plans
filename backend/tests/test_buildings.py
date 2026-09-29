@@ -10,6 +10,16 @@ from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from alembic.script import ScriptDirectory
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from pydantic import BaseModel, ValidationError
+from sqlalchemy import create_engine, event, inspect, text
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.pool import StaticPool
+from sqlmodel import SQLModel, select
+from sqlmodel.ext.asyncio.session import AsyncSession
+
 from api.db import get_session
 from api.models.building import (
     Building,
@@ -32,15 +42,6 @@ from api.services.buildings import (
     SortOrder,
 )
 from api.views import buildings as building_views
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from pydantic import BaseModel, ValidationError
-from sqlalchemy import create_engine, event, inspect, text
-from sqlalchemy.exc import OperationalError
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
-from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel, select
-from sqlmodel.ext.asyncio.session import AsyncSession
 
 USER_ID = UUID("00000000-0000-0000-0000-000000000001")
 OTHER_USER_ID = UUID("00000000-0000-0000-0000-000000000002")

@@ -5,13 +5,14 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from api.models.user import utc_now
-from api.models.workflows import SplatGenerationWorkflowSettings
 from pydantic import BaseModel, ConfigDict
 from pydantic import Field as PydanticField
 from sqlalchemy import JSON, CheckConstraint, Column, DateTime, Index, String
 from sqlalchemy.orm import relationship
 from sqlmodel import Field, Relationship, SQLModel
+
+from api.models.user import utc_now
+from api.models.workflows import SplatGenerationWorkflowSettings
 
 if TYPE_CHECKING:
     from api.models.building import Building

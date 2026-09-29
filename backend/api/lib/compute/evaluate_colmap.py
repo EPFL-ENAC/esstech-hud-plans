@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Callable
 
 import pycolmap
+from pydantic import BaseModel
+
 from api.utils.colmap_utils import looks_like_colmap_model_dir
 from api.utils.maths import (
     MeanMedianMinMax,
@@ -13,7 +15,6 @@ from api.utils.maths import (
     contiguous_segments,
     fraction_leq,
 )
-from pydantic import BaseModel
 
 
 class ReprojectionErrorFracs(BaseModel):

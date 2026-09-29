@@ -2,6 +2,7 @@ import os
 import re
 
 import cv2
+
 from api.lib.compute.frame_picker import VideoAnalysis
 from api.lib.types import ProgressCallback
 

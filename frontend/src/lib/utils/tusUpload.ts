@@ -5,8 +5,9 @@ import { ApiError } from 'src/lib/buildings';
 import type { FetchProgress } from './fetchProgress';
 
 /**
- * Chunked, resumable video upload with the tus protocol against the tusd
- * sidecar. tusd keeps already-transferred bytes at the byte-offset level, so
+ * Chunked, resumable video upload with the tus protocol through the API
+ * upload proxy, which forwards the requests to the tusd server. tusd keeps
+ * already-transferred bytes at the byte-offset level, so
  * a pause, a network drop, or a page reload continues from the last confirmed
  * offset without re-sending data.
  */
@@ -24,7 +25,7 @@ export interface ResumableUploadOptions {
 }
 
 export interface ResumableUploadResult {
-    /** tusd-side upload id extracted from the upload location URL. */
+    /** tusd-side upload id extracted from the proxied upload location URL. */
     uploadId: string;
     /** True when a previously started upload of this file was continued. */
     resumed: boolean;

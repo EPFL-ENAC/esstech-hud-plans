@@ -62,6 +62,12 @@ path under the repo (for example `backend/data/tusd-uploads`). Upload requests
 are validated by a `pre-create` hook that calls the API at
 `TUSD_HOOKS_HTTP_URL`.
 
+The API proxies all upload traffic to tusd. The frontend never talks to tusd
+directly. Upload requests go to the API at `/tus/files`, and the API forwards
+them to the address in `TUSD_INTERNAL_URL` (dev default `http://localhost:8080`,
+the loopback-published compose port). In a real deployment tusd is not exposed,
+and `TUSD_INTERNAL_URL` points at the compose service (`http://tusd:8080`).
+
 The API and workflow process must share the `backend/data/workflows` directory.
 The `splat-generation/default` deployment runs FFmpeg, optionally selects frames
 locally with the frame picker, then runs COLMAP and Brush. It is submitted through

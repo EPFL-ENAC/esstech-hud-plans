@@ -5,10 +5,15 @@ blocking: tusd rejects the upload creation when this endpoint answers with a
 non-2xx status. The Authorization header of the original upload request is
 forwarded inside the hook payload and validated here with the same JWT logic
 as the rest of the API.
+
+A non-2xx status answers an internal failure only: tusd hides it behind a 500.
+End-user rejections return 200 with a hook response that carries the real
+status code in HTTPResponse, so the browser sees 401 or 400 and not 500.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -41,6 +46,19 @@ def _extract_bearer_token(headers: dict[str, Any]) -> str | None:
     return None
 
 
+def _rejection(status_code: int, detail: str) -> dict[str, Any]:
+    """Hook response that rejects the upload with a client-facing status."""
+
+    return {
+        "HTTPResponse": {
+            "StatusCode": status_code,
+            "Body": json.dumps({"detail": detail}),
+            "Header": {"Content-Type": "application/json"},
+        },
+        "RejectUpload": True,
+    }
+
+
 def _validate_hook_upload(upload: dict[str, Any]) -> None:
     """Check the upload metadata declared at creation time."""
 
@@ -62,7 +80,7 @@ def _validate_hook_upload(upload: dict[str, Any]) -> None:
 
 
 @router.post("/hooks", status_code=status.HTTP_200_OK)
-async def receive_tusd_hook(request: Request) -> dict[str, bool]:
+async def receive_tusd_hook(request: Request) -> dict[str, Any]:
     """Receive a tusd lifecycle hook.
 
     Only `pre-create` is blocking. Every other hook type is acknowledged so
@@ -94,18 +112,21 @@ async def receive_tusd_hook(request: Request) -> dict[str, bool]:
 
     http_request = event.get("HTTPRequest") or {}
     request_headers = (
-        http_request.get("Headers") if isinstance(http_request, dict) else None
+        http_request.get("Header") if isinstance(http_request, dict) else None
     )
     token = _extract_bearer_token(request_headers or {})
     if token is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing bearer token",
+        return _rejection(
+            status.HTTP_401_UNAUTHORIZED,
+            "Missing bearer token",
         )
-    await run_in_threadpool(
-        authenticate_user,
-        HTTPAuthorizationCredentials(scheme="Bearer", credentials=token),
-    )
+    try:
+        await run_in_threadpool(
+            authenticate_user,
+            HTTPAuthorizationCredentials(scheme="Bearer", credentials=token),
+        )
+    except HTTPException as exc:
+        return _rejection(exc.status_code, str(exc.detail))
 
     upload = event.get("Upload") or {}
     if not isinstance(upload, dict):
@@ -113,6 +134,9 @@ async def receive_tusd_hook(request: Request) -> dict[str, bool]:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid hook upload",
         )
-    _validate_hook_upload(upload)
+    try:
+        _validate_hook_upload(upload)
+    except HTTPException as exc:
+        return _rejection(exc.status_code, str(exc.detail))
 
     return {"ok": True}

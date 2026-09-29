@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 import pytest
+
 from api.lib.utils import commands
 from api.lib.utils.commands import iter_command_log_records
 from api.lib.utils.commands.environments import local as local_commands

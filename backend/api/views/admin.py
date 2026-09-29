@@ -1,8 +1,9 @@
 import pandas as pd
-from api.services.admin import generate_parameters_table
-from api.services.auth import require_admin
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+
+from api.services.admin import generate_parameters_table
+from api.services.auth import require_admin
 
 router = APIRouter(dependencies=[Depends(require_admin)])
 

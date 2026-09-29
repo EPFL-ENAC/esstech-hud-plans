@@ -45,8 +45,11 @@ services:
     # The image runs USER tusd; on dev machines where bind mounts appear
     # root-owned inside containers, tusd must run as root to write the mount
     user: "0:0"
+    # Loopback publishing keeps tusd private in dev. The backend proxies the
+    # upload requests, so the real deployment publishes no tusd port and the
+    # backend reaches tusd at TUSD_INTERNAL_URL=http://tusd:8080
     ports:
-      - '1080:1080'
+      - '127.0.0.1:8080:8080'
     volumes:
       - ${TUSD_UPLOAD_DIR:-/tmp/hud-tusd-uploads}:/data
     extra_hosts:
@@ -55,15 +58,11 @@ services:
       - -upload-dir
       - /data
       - -port
-      - '1080'
+      - '8080'
       - -hooks-http
       - ${TUSD_HOOKS_HTTP_URL:-http://host.docker.internal:8000/api/tus/hooks}
       - -hooks-enabled-events
       - pre-create
-      - -cors-allow-origin
-      - ${APP_URL:-http://localhost:9000}
-      - -cors-allow-headers
-      - Authorization
       - -disable-download
 
 volumes:

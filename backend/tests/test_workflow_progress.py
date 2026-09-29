@@ -4,6 +4,8 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from starlette.concurrency import run_in_threadpool
+
 from api.lib.workflows import splat_generation as workflow
 from api.models.workflows import (
     BrushSettings,
@@ -11,7 +13,6 @@ from api.models.workflows import (
     FramePickerSettings,
     SplatGenerationWorkflowSettings,
 )
-from starlette.concurrency import run_in_threadpool
 
 
 def test_progress_callback_scales_throttles_and_writes_on_flow_event_loop(

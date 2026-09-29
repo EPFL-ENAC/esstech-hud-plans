@@ -9,6 +9,16 @@ from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
+from fastapi import FastAPI, UploadFile
+from fastapi.testclient import TestClient
+from pydantic import BaseModel
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.pool import StaticPool
+from sqlmodel import SQLModel
+from sqlmodel.ext.asyncio.session import AsyncSession
+from starlette.datastructures import Headers
+
 from api.config import config
 from api.db import get_session
 from api.lib.compute import scitas as scitas_compute
@@ -34,15 +44,6 @@ from api.services.reconstructions import (
 )
 from api.views import buildings as building_views
 from api.views import reconstructions as reconstruction_views
-from fastapi import FastAPI, UploadFile
-from fastapi.testclient import TestClient
-from pydantic import BaseModel
-from sqlalchemy.exc import OperationalError
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
-from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel
-from sqlmodel.ext.asyncio.session import AsyncSession
-from starlette.datastructures import Headers
 
 USER_ID = UUID("00000000-0000-0000-0000-000000000001")
 OTHER_USER_ID = UUID("00000000-0000-0000-0000-000000000002")

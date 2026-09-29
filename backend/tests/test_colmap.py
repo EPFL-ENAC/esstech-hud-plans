@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+
 from api.lib.compute import colmap
 from api.lib.utils.commands import (
     Command,

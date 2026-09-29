@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from api.db import retry_on_db_error
-from api.models.auth import AuthenticatedUser
-from api.models.user import User, UserCreate, UserUpdate, utc_now
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
+
+from api.db import retry_on_db_error
+from api.models.auth import AuthenticatedUser
+from api.models.user import User, UserCreate, UserUpdate, utc_now
 
 
 class UserService:

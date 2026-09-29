@@ -364,20 +364,17 @@ export function createBuildingFromReconstruction(
     return uploadJson('/buildings/from-reconstruction', formData, onProgress);
 }
 
-/** Submit a video already uploaded through the tus sidecar for reconstruction. */
+/** Submit a video already uploaded through the API upload proxy for reconstruction. */
 export function createReconstructionResumable(
     buildingId: string,
     tusUploadId: string,
     settings: SplatGenerationSettings,
 ): Promise<Reconstruction> {
-    return requestJson(
-        `/buildings/${encodeURIComponent(buildingId)}/reconstructions/resumable`,
-        {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ tus_upload_id: tusUploadId, settings }),
-        },
-    );
+    return requestJson(`/buildings/${encodeURIComponent(buildingId)}/reconstructions/resumable`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tus_upload_id: tusUploadId, settings }),
+    });
 }
 
 /** Submit a tus-uploaded video and create the building in the same call. */

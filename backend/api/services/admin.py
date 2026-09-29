@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 
 import pandas as pd
+
 from api.config import config
 
 splats_dir = str(config.DATA_PATH / "splats")

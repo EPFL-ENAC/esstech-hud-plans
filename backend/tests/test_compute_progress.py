@@ -1,4 +1,5 @@
 import pytest
+
 from api.lib.compute.progress import (
     BrushProgressEstimator,
     ColmapProgressEstimator,

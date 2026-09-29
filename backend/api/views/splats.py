@@ -3,6 +3,11 @@ import mimetypes
 import os
 import shutil
 
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse
+from fastapi_cache.decorator import cache
+from pydantic import BaseModel, TypeAdapter
+
 from api.config import config
 from api.lib.compute.video_frame import VideoFrame
 from api.models.splats import (
@@ -19,10 +24,6 @@ from api.models.splats import (
 )
 from api.services.auth import require_user
 from api.services.splats import GenerationManager
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
-from fastapi_cache.decorator import cache
-from pydantic import BaseModel, TypeAdapter
 
 router = APIRouter(dependencies=[Depends(require_user)])
 

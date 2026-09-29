@@ -4,6 +4,7 @@ from pathlib import Path
 
 import cv2
 import pytest
+
 from api.lib.compute import ffmpeg
 from api.lib.utils.commands import (
     LOCAL_EXECUTABLES_DIRECTORY,

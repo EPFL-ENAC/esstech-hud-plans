@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Callable, Literal, Union
 
 import numpy as np
+
 from api.config import config
 from api.lib.compute.colmap_geometric_data import (
     ColmapGeometricData,

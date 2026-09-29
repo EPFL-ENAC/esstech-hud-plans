@@ -27,6 +27,7 @@ dependencies = [
     "pydantic>=2.12.5",
     "pydantic-settings>=2.12.0",
     "python-multipart>=0.0.21",
+    "httpx>=0.28.1",
     "requests>=2.32.5",
     "sqlalchemy[asyncio]>=2.0.0",
     "sqlmodel>=0.0.38",
@@ -53,6 +54,12 @@ test = [
 
 [tool.setuptools]
 packages = ["api"]
+
+[tool.ruff]
+# api lives under the backend directory, which ruff only sees when the
+# project root is the config file directory. Keep import sorting stable
+# whether ruff runs from the repo root (pre-commit) or from backend/.
+src = ["."]
 
 [tool.codespell]
 skip = 'uv.lock'

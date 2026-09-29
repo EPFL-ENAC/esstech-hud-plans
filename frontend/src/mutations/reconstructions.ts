@@ -33,7 +33,8 @@ export function useSubmitReconstructionMutation() {
     const mutation = useMutation<Reconstruction, SubmitReconstructionVariables, unknown>({
         mutation: async (variables) => {
             videoUpload.reset();
-            // Step 1: resumable upload to the tusd sidecar, reporting true
+            // Step 1: resumable upload through the API upload proxy (which
+            // forwards to tusd), reporting true
             // network bytes. Step 2: submit the finished upload for scheduling;
             // the pipeline copies the video out of the tusd staging directory.
             const { uploadId } = await uploadVideoResumable(variables.video, {

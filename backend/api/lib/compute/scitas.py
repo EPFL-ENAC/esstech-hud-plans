@@ -10,10 +10,11 @@ from datetime import datetime
 from typing import Literal
 
 import paramiko
-from api.config import config
-from api.lib.compute.remote import RemoteCompute, StepName
 from prefect.blocks.core import Block
 from prefect.utilities.asyncutils import run_coro_as_sync
+
+from api.config import config
+from api.lib.compute.remote import RemoteCompute, StepName
 
 
 class ScitasJobNamesBlock(Block):

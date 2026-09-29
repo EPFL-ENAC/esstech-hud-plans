@@ -1,11 +1,12 @@
 import cv2
 import numpy as np
+from pydantic import BaseModel
+
 from api.lib.compute.image_utils import (
     calibrated_sharpness,
     compute_busyness_map,
     resize_to_fit,
 )
-from pydantic import BaseModel
 
 
 class VideoFrameDistance(BaseModel):

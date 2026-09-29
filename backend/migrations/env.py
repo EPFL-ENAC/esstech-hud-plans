@@ -5,14 +5,15 @@ from logging.config import fileConfig
 from typing import Any
 
 from alembic import context
-from api.config import config as app_config
-from api.models.building import Building
-from api.models.reconstruction import Reconstruction
-from api.models.user import User
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 from sqlmodel import SQLModel
+
+from api.config import config as app_config
+from api.models.building import Building
+from api.models.reconstruction import Reconstruction
+from api.models.user import User
 
 _model_imports = (Building, Reconstruction, User)
 

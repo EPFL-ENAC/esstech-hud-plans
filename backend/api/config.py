@@ -75,6 +75,11 @@ class Config(BaseSettings):
     TUSD_UPLOAD_RETENTION_DAYS: int = 7
     # Hook endpoint URL tusd calls for pre-create validation (used by the compose command)
     TUSD_HOOKS_HTTP_URL: str = "http://host.docker.internal:8000/api/tus/hooks"
+    # Internal address of the tusd server. The API proxies upload requests to
+    # it, so the browser never reaches tusd. Dev targets the loopback-published
+    # compose port. In the real deployment tusd is not exposed and this points
+    # at the compose service (http://tusd:8080)
+    TUSD_INTERNAL_URL: str = "http://localhost:8080"
 
 
 @lru_cache()

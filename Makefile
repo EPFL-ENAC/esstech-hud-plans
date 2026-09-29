@@ -37,7 +37,7 @@ db-revision:
 	cd backend && make db-revision name="$(name)"
 
 run-all:
-	make run-db && make db-upgrade && trap 'kill $(jobs -p) 2>/dev/null; make stop-db' INT && { make run-workflows & make run-backend & make run-frontend & wait; }
+	make run-db && trap 'kill "$${backend_pid}" "$${frontend_pid}" "$${workflows_pid}" 2>/dev/null; make stop-db' INT TERM HUP && { make run-workflows & workflows_pid=$$!; make run-backend & backend_pid=$$!; make run-frontend & frontend_pid=$$!; wait; }
 
 test:
 	cd backend && make test

@@ -1,4 +1,6 @@
 import pytest
+from pydantic import ValidationError
+
 from api.models.workflows import (
     BrushSettings,
     ColmapSettings,
@@ -6,7 +8,6 @@ from api.models.workflows import (
     FramePickerSettings,
     SplatGenerationWorkflowSettings,
 )
-from pydantic import ValidationError
 
 
 def test_splat_generation_workflow_settings_defaults_are_grouped_by_tool() -> None:

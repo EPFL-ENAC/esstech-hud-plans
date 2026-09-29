@@ -18,7 +18,7 @@ install-external-softwares-linux:
 	./scripts/linux/install_brush.sh
 
 run:
-	uv run dotenv -f "$(env_path)" run uvicorn api.main:app --reload
+	uv run dotenv -f "$(env_path)" run uvicorn api.main:app --reload --host 0.0.0.0
 
 run-workflows:
 	uv run dotenv -f "$(env_path)" run python -m api.lib.workflows
