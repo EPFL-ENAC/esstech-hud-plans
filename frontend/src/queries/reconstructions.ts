@@ -12,6 +12,7 @@ import {
 import { getAuthSubject } from 'src/lib/auth';
 import type { FetchProgress } from 'src/lib/utils/fetchProgress';
 import { useSplatDownloadStore } from 'src/stores/splatDownload';
+import { useVideoDownloadStore } from 'src/stores/videoDownload';
 import {
     getReconstructionSplat,
     getReconstructionStep,
@@ -172,16 +173,26 @@ export function useReconstructionVideoQuery(
 ) {
     const subject = getAuthSubject();
     const cache = useQueryCache();
+    const videoDownload = useVideoDownloadStore();
     const key = computed(() => [
         ...reconstructionKey(subject, buildingId.value),
         'video',
         reconstructionId.value,
     ]);
+    // A different building or reconstruction must restart the progress bar.
+    watch([buildingId, reconstructionId], () => videoDownload.reset());
     const query = useQuery({
         key: () => key.value,
         enabled: false,
-        query: ({ signal }) =>
-            getReconstructionVideo(buildingId.value, reconstructionId.value, signal),
+        query: ({ signal }) => {
+            videoDownload.reset();
+            return getReconstructionVideo(
+                buildingId.value,
+                reconstructionId.value,
+                signal,
+                (progress) => videoDownload.update(progress),
+            );
+        },
         staleTime: Infinity,
         refetchOnMount: false,
         refetchOnWindowFocus: false,

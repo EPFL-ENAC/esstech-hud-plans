@@ -293,10 +293,14 @@ export function getReconstructionVideo(
     buildingId: string,
     reconstructionId: string,
     signal: AbortSignal,
+    onProgress?: (progress: FetchProgress) => void,
 ): Promise<Blob> {
+    const options: ResumableDownloadOptions = {};
+    if (onProgress) options.onProgress = onProgress;
     return downloadResumable(
         `${baseUrl}/buildings/${encodeURIComponent(buildingId)}/reconstructions/${encodeURIComponent(reconstructionId)}/video`,
         { signal },
+        options,
     );
 }
 

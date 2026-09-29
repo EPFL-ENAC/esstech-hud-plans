@@ -93,7 +93,9 @@ async function hashUrl(url: string): Promise<string> {
     // start, so they must stay deterministic; SHA-256 keeps colliding URLs
     // from sharing one .part file.
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(url));
-    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join(
+        '',
+    );
 }
 
 async function getPartDirectory(): Promise<FileSystemDirectoryHandle> {
@@ -149,9 +151,11 @@ async function finalizeDownload(
     url: string,
     partHandle: FileSystemFileHandle,
 ): Promise<Blob> {
-    const blob = await partHandle.getFile();
+    // Read every byte while the part file still exists: reads from a File
+    // whose OPFS entry was removed hang or fail, which broke every download.
+    const buffer = await (await partHandle.getFile()).arrayBuffer();
     await clearDownload(directory, partName, url);
-    return blob;
+    return new Blob([buffer]);
 }
 
 async function clearDownload(

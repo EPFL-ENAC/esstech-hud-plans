@@ -284,7 +284,6 @@ export default {
         processingProgress: 'Processing {progress}%',
         video: {
             title: 'Input video',
-            loading: 'Loading video…',
             label: 'Reconstruction input video',
             unsupported: 'Your browser does not support video playback.',
             load: 'Load video',
@@ -293,6 +292,8 @@ export default {
             loadFailed: 'Unable to load the video. Please try again.',
             playbackFailed:
                 'This video could not be played. Its format may not be supported by your browser.',
+            downloading: 'Downloading video ({loaded} MB / {total} MB)',
+            downloadingUnknown: 'Downloading video ({loaded} MB)',
         },
         errors: {
             invalidSettings: 'Check the video and reconstruction settings, then try again.',

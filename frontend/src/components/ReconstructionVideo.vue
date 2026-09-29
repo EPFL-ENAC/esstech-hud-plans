@@ -2,9 +2,8 @@
     <section :aria-label="t('reconstructions.video.title')" class="q-gutter-y-sm">
         <div class="text-subtitle2">{{ t('reconstructions.video.title') }}</div>
 
-        <div v-if="loading" role="status" class="row items-center q-gutter-sm">
-            <q-spinner color="primary" size="24px" />
-            <span>{{ t('reconstructions.video.loading') }}</span>
+        <div v-if="loading" role="status" class="q-gutter-y-sm">
+            <video-download-progress />
             <q-btn flat dense :label="t('common.cancel')" @click="cancel" />
         </div>
 
@@ -44,6 +43,7 @@
 import { computed, onBeforeUnmount, ref, toRef, watch } from 'vue';
 import { ApiError } from 'src/lib/buildings';
 import { useReconstructionVideoQuery } from 'src/queries/reconstructions';
+import VideoDownloadProgress from 'src/components/VideoDownloadProgress.vue';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();

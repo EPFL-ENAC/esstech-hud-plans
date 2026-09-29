@@ -300,7 +300,6 @@ export default {
         processingProgress: 'Traitement {progress} %',
         video: {
             title: 'Vidéo source',
-            loading: 'Chargement de la vidéo…',
             label: 'Vidéo source de la reconstruction',
             unsupported: 'Votre navigateur ne prend pas en charge la lecture vidéo.',
             load: 'Charger la vidéo',
@@ -309,6 +308,8 @@ export default {
             loadFailed: 'Impossible de charger la vidéo. Veuillez réessayer.',
             playbackFailed:
                 'Impossible de lire cette vidéo. Son format n’est peut-être pas pris en charge par votre navigateur.',
+            downloading: 'Téléchargement de la vidéo ({loaded} Mo / {total} Mo)',
+            downloadingUnknown: 'Téléchargement de la vidéo ({loaded} Mo)',
         },
         errors: {
             invalidSettings:

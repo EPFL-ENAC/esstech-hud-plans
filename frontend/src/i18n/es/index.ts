@@ -293,7 +293,6 @@ export default {
         processingProgress: 'Procesando {progress} %',
         video: {
             title: 'Vídeo de origen',
-            loading: 'Cargando el vídeo…',
             label: 'Vídeo de origen de la reconstrucción',
             unsupported: 'Tu navegador no permite reproducir vídeos.',
             load: 'Cargar el vídeo',
@@ -302,6 +301,8 @@ export default {
             loadFailed: 'No se pudo cargar el vídeo. Inténtalo de nuevo.',
             playbackFailed:
                 'No se pudo reproducir este vídeo. Es posible que su formato no sea compatible con tu navegador.',
+            downloading: 'Descargando el vídeo ({loaded} MB / {total} MB)',
+            downloadingUnknown: 'Descargando el vídeo ({loaded} MB)',
         },
         errors: {
             invalidSettings:
