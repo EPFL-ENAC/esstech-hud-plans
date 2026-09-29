@@ -145,11 +145,6 @@ const routes: RouteRecordRaw[] = [
                 component: () => import('pages/AdvancedPage.vue'),
             },
             {
-                // Temporary developer route for testing the workflows API.
-                path: '/workflow-test',
-                component: () => import('pages/WorkflowTestPage.vue'),
-            },
-            {
                 path: '/buildings',
                 component: () => import('pages/BuildingsPageTemp.vue'),
             },

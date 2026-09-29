@@ -4,8 +4,4 @@
 .vscode/
 *.egg-info/
 __pycache__/
-commit.sh
-PLAN.md
-research-briefs/
-REPORT-resumable-transfer.md
 backend/data/

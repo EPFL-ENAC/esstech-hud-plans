@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.routing import APIRouter
 from sqlalchemy.exc import SQLAlchemyError
@@ -41,7 +41,6 @@ from api.views.buildings import get_current_building
 from api.views.reconstruction_submission import (
     ResumableReconstructionSubmission,
     get_reconstruction_service,
-    validate_reconstruction_submission,
     validate_tus_upload,
 )
 
@@ -165,40 +164,6 @@ def get_reconstruction_splat(
         ),
         media_type="application/octet-stream",
     )
-
-
-@router.post(
-    "",
-    status_code=status.HTTP_202_ACCEPTED,
-    response_model=ReconstructionRead,
-)
-async def create_reconstruction(
-    file: Annotated[UploadFile, File()],
-    settings: Annotated[str, Form(...)],
-    building: Annotated[Building, Depends(get_current_building)],
-    reconstructions: Annotated[
-        ReconstructionService,
-        Depends(get_reconstruction_service),
-    ],
-) -> Reconstruction:
-    workflow_settings = validate_reconstruction_submission(file, settings)
-
-    try:
-        return await reconstructions.create_from_video(
-            building=building,
-            video=file,
-            settings=workflow_settings,
-        )
-    except ReconstructionCreationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "message": str(exc),
-                "reconstruction_id": str(exc.reconstruction.id),
-            },
-        ) from exc
-    except (OSError, SQLAlchemyError) as exc:
-        raise _database_unavailable(exc) from exc
 
 
 @router.post(

@@ -12,7 +12,6 @@ from typing import Any, Self
 from uuid import UUID, uuid4
 
 from anyio import from_thread
-from fastapi import UploadFile
 from prefect import flow, get_run_logger, task
 from prefect.cache_policies import DEFAULT
 from prefect.client.schemas.objects import FlowRun
@@ -323,39 +322,6 @@ class SplatGenerationArtifact:
         return artifact
 
     @classmethod
-    async def from_uploaded_file(
-        cls,
-        uploaded_file: UploadFile,
-        storage_root: Path,
-        *,
-        artifact_id: UUID | None = None,
-    ) -> Self:
-        if not uploaded_file.filename:
-            raise ValueError("Uploaded file must have a filename")
-
-        file_extension = (
-            Path(uploaded_file.filename).suffix.removeprefix(".").lower() or "mp4"
-        )
-        artifact = cls.create(
-            storage_root,
-            video_format=file_extension,
-            artifact_id=artifact_id,
-        )
-
-        try:
-            with artifact.video_path.open("wb") as destination:
-                await run_in_threadpool(
-                    shutil.copyfileobj, uploaded_file.file, destination
-                )
-        except Exception:
-            artifact.remove()
-            raise
-        finally:
-            await uploaded_file.close()
-
-        return artifact
-
-    @classmethod
     def load(cls, artifact_id: UUID, storage_root: Path) -> Self:
         return cls(artifact_id, storage_root)
 
@@ -382,12 +348,7 @@ async def copy_video_from_tus_upload(
     tus_video_filename: str,
     video_path: str,
 ) -> str:
-    """Copy a completed tus upload into its final artifact location.
-
-    Runs in the worker process on the host: the tusd staging directory is a
-    local path shared with the tusd container, while the destination may live
-    on the workflow data mount.
-    """
+    """Copy a completed tus upload into its final artifact location."""
 
     run_logger = get_run_logger()
     await run_in_threadpool(
@@ -700,18 +661,6 @@ async def _submit_splat_generation_run(
         **extra_options,
     )
     return flow_run.id
-
-
-async def schedule_splat_generation(
-    artifact: SplatGenerationArtifact,
-    settings: SplatGenerationWorkflowSettings,
-    owner_id: UUID,
-    reconstruction_id: UUID | None = None,
-) -> UUID:
-    parameters: dict[str, object] = _splat_generation_parameters(
-        artifact, settings, owner_id
-    )
-    return await _submit_splat_generation_run(parameters, reconstruction_id)
 
 
 async def schedule_splat_generation_from_tus(

@@ -3,10 +3,9 @@ from collections.abc import AsyncIterator
 from typing import Annotated, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from prefect.client.schemas.objects import FlowRun, StateType
-from pydantic import ValidationError
 
 from api.lib.workflows import common as workflow_common
 from api.lib.workflows.common import (
@@ -15,14 +14,10 @@ from api.lib.workflows.common import (
     stream_workflow_logs,
 )
 from api.lib.workflows.counter import schedule_counter
-from api.lib.workflows.splat_generation import (
-    SplatGenerationArtifact,
-    schedule_splat_generation,
-)
+from api.lib.workflows.splat_generation import SplatGenerationArtifact
 from api.models.user import User
 from api.models.workflows import (
     SplatGenerationResultResponse,
-    SplatGenerationWorkflowSettings,
     WorkflowStatus,
     WorkflowStatusResponse,
     WorkflowSubmissionResponse,
@@ -70,61 +65,6 @@ async def submit_counter(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Counter workflow service is unavailable",
-        ) from exc
-
-    return WorkflowSubmissionResponse(workflow_id=workflow_id)
-
-
-@router.post(
-    "/splat-generation",
-    status_code=status.HTTP_202_ACCEPTED,
-    response_model=WorkflowSubmissionResponse,
-)
-async def submit_splat_generation(
-    file: Annotated[UploadFile, File()],
-    settings: Annotated[
-        str,
-        Form(
-            description=(
-                "JSON-encoded SplatGenerationWorkflowSettings with separate "
-                '"ffmpeg", "colmap", and "brush" objects, plus an optional '
-                '"frame_picker" object.'
-            )
-        ),
-    ],
-    current_user: User = Depends(require_user),
-) -> WorkflowSubmissionResponse:
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="File must have a filename")
-    if file.content_type is None or not file.content_type.startswith("video/"):
-        raise HTTPException(status_code=400, detail="Uploaded file must be a video")
-
-    try:
-        workflow_settings = SplatGenerationWorkflowSettings.model_validate_json(
-            settings
-        )
-    except ValidationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=exc.errors(include_url=False),
-        ) from exc
-
-    artifact = await SplatGenerationArtifact.from_uploaded_file(
-        file, workflow_common.WORKFLOW_DATA_DIRECTORY
-    )
-
-    try:
-        workflow_id = await schedule_splat_generation(
-            artifact=artifact,
-            settings=workflow_settings,
-            owner_id=current_user.id,
-        )
-    except Exception as exc:
-        logger.exception("Failed to schedule splat generation")
-        artifact.remove()
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Splat generation service is unavailable",
         ) from exc
 
     return WorkflowSubmissionResponse(workflow_id=workflow_id)

@@ -1,4 +1,4 @@
-"""Shared dependencies and validation for video reconstruction submissions."""
+"""Shared dependencies and validation for resumable video reconstruction submissions."""
 
 import json
 import mimetypes
@@ -6,8 +6,8 @@ import re
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, UploadFile, status
-from pydantic import BaseModel, Field, ValidationError
+from fastapi import Depends, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from api.config import config
@@ -27,36 +27,6 @@ def get_reconstruction_service(
     """Build a request-scoped reconstruction service."""
 
     return ReconstructionService(session)
-
-
-def validate_reconstruction_submission(
-    video: UploadFile,
-    settings: str,
-) -> SplatGenerationWorkflowSettings:
-    """Validate a video upload and decode the workflow settings.
-
-    Client-provided content types are not trusted. Browsers can send an empty
-    or generic type when they cannot detect the MIME type of the selected file.
-    """
-    if not video.filename:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File must have a filename",
-        )
-    media_type = mimetypes.guess_type(video.filename)[0]
-    if media_type is None or not media_type.startswith("video/"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Uploaded file must be a video",
-        )
-
-    try:
-        return SplatGenerationWorkflowSettings.model_validate_json(settings)
-    except ValidationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=exc.errors(include_url=False),
-        ) from exc
 
 
 def validate_video_filename(filename: str | None) -> str:

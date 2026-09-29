@@ -45,9 +45,6 @@ services:
     # The image runs USER tusd; on dev machines where bind mounts appear
     # root-owned inside containers, tusd must run as root to write the mount
     user: "0:0"
-    # Loopback publishing keeps tusd private in dev. The backend proxies the
-    # upload requests, so the real deployment publishes no tusd port and the
-    # backend reaches tusd at TUSD_INTERNAL_URL=http://tusd:8080
     ports:
       - '127.0.0.1:8080:8080'
     volumes:

@@ -4,17 +4,7 @@ import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import (
-    APIRouter,
-    Depends,
-    File,
-    Form,
-    HTTPException,
-    Query,
-    UploadFile,
-    status,
-)
-from pydantic import ValidationError
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -44,7 +34,6 @@ from api.services.reconstructions import (
 from api.views.reconstruction_submission import (
     ResumableBuildingFromReconstructionSubmission,
     get_reconstruction_service,
-    validate_reconstruction_submission,
     validate_tus_upload,
 )
 
@@ -106,100 +95,6 @@ async def create_building(
 
 
 @router.post(
-    "/from-reconstruction",
-    status_code=status.HTTP_202_ACCEPTED,
-    response_model=BuildingFromReconstructionRead,
-    responses={
-        400: {"description": "File must have a filename and a video content type."},
-        401: {"description": "Authentication is required."},
-        422: {"description": "Missing fields or invalid building/workflow settings."},
-        503: {
-            "model": BuildingFromReconstructionError,
-            "description": (
-                "Database, video storage, or scheduling failure. Once created, the "
-                "building is retained and building_id is returned. A persisted "
-                "failed reconstruction is also retained and its ID is included."
-            ),
-        },
-    },
-)
-async def create_building_from_reconstruction(
-    file: Annotated[UploadFile, File(description="Video to reconstruct.")],
-    building: Annotated[
-        str,
-        Form(
-            description="JSON-encoded BuildingCreate: name, address, latitude, longitude. "
-            "Use {} for an unnamed building without coordinates."
-        ),
-    ],
-    settings: Annotated[
-        str,
-        Form(
-            description="JSON-encoded SplatGenerationWorkflowSettings: ffmpeg, "
-            "frame_picker, colmap, brush. Use {} for workflow defaults."
-        ),
-    ],
-    current_user: Annotated[User, Depends(require_user)],
-    buildings: Annotated[BuildingService, Depends(get_building_service)],
-    reconstructions: Annotated[
-        ReconstructionService, Depends(get_reconstruction_service)
-    ],
-) -> BuildingFromReconstructionRead:
-    """Create an owned building, then submit its first reconstruction.
-
-    All input is validated before creating records. Creation is sequential:
-    reconstruction failure does not roll back the already-created building.
-    """
-    workflow_settings = validate_reconstruction_submission(file, settings)
-    try:
-        building_settings = BuildingCreate.model_validate_json(building)
-    except ValidationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=exc.errors(include_url=False, include_context=False),
-        ) from exc
-
-    try:
-        created_building = await buildings.create(
-            user_id=current_user.id, payload=building_settings
-        )
-    except (OSError, SQLAlchemyError) as exc:
-        raise _database_unavailable(exc) from exc
-
-    # Keep response data available even if reconstruction rollback expires ORM rows.
-    building_read = BuildingRead.model_validate(created_building)
-    try:
-        reconstruction = await reconstructions.create_from_video(
-            building=created_building,
-            video=file,
-            settings=workflow_settings,
-        )
-    except ReconstructionCreationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "message": str(exc),
-                "building_id": str(building_read.id),
-                "reconstruction_id": str(exc.reconstruction.id),
-            },
-        ) from exc
-    except (OSError, SQLAlchemyError) as exc:
-        logger.exception("Reconstruction database operation failed", exc_info=exc)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "message": "Reconstruction database is unavailable",
-                "building_id": str(building_read.id),
-            },
-        ) from exc
-
-    return BuildingFromReconstructionRead(
-        building=building_read,
-        reconstruction=ReconstructionRead.model_validate(reconstruction),
-    )
-
-
-@router.post(
     "/from-reconstruction/resumable",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=BuildingFromReconstructionRead,
@@ -210,7 +105,7 @@ async def create_building_from_reconstruction(
         503: {
             "model": BuildingFromReconstructionError,
             "description": (
-                "Database, video storage, or scheduling failure. Once created, the "
+                "Database or scheduling failure. Once created, the "
                 "building is retained and building_id is returned. A persisted "
                 "failed reconstruction is also retained and its ID is included."
             ),

@@ -3,13 +3,12 @@ import json
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
-from fastapi import FastAPI, UploadFile
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 from sqlalchemy.exc import OperationalError
@@ -17,7 +16,6 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
-from starlette.datastructures import Headers
 
 from api.config import config
 from api.db import get_session
@@ -39,7 +37,6 @@ from api.services.buildings import BuildingService
 from api.services.reconstructions import (
     ReconstructionSchedulingError,
     ReconstructionService,
-    ReconstructionVideoStorageError,
     SortOrder,
 )
 from api.views import buildings as building_views
@@ -50,14 +47,6 @@ OTHER_USER_ID = UUID("00000000-0000-0000-0000-000000000002")
 BUILDING_ID = UUID("10000000-0000-0000-0000-000000000001")
 OTHER_BUILDING_ID = UUID("10000000-0000-0000-0000-000000000002")
 WORKFLOW_ID = UUID("20000000-0000-0000-0000-000000000001")
-
-
-def _video(filename: str = "scan.mov", content: bytes = b"video bytes") -> UploadFile:
-    return UploadFile(
-        file=BytesIO(content),
-        filename=filename,
-        headers=Headers({"content-type": "video/quicktime"}),
-    )
 
 
 def _stored_reconstruction(
@@ -217,185 +206,6 @@ def test_reconstruction_lifecycle_mutations_are_in_memory() -> None:
     assert reconstruction.status == ReconstructionStatus.COMPLETED
 
 
-def test_create_from_video_persists_and_schedules_reconstruction(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    settings = SplatGenerationWorkflowSettings(frame_picker=FramePickerSettings())
-    captured: dict[str, object] = {}
-    monkeypatch.setattr(workflow_common, "WORKFLOW_DATA_DIRECTORY", tmp_path)
-
-    async def fake_schedule(**kwargs: object) -> UUID:
-        captured.update(kwargs)
-        return WORKFLOW_ID
-
-    monkeypatch.setattr(splat_workflow, "schedule_splat_generation", fake_schedule)
-
-    async def run() -> None:
-        async with reconstruction_service() as (service, _, _, building, other):
-            reconstruction = await service.create_from_video(
-                building=building,
-                video=_video(),
-                settings=settings,
-            )
-
-            assert reconstruction.status == ReconstructionStatus.SCHEDULED
-            assert reconstruction.progress == 0.0
-            assert reconstruction.prefect_workflow_id == WORKFLOW_ID
-            assert reconstruction.settings == settings.model_dump(mode="json")
-            assert reconstruction.workspace_directory == str(
-                (tmp_path / reconstruction.id.hex).resolve()
-            )
-            assert reconstruction.input_video_path is not None
-            assert Path(reconstruction.input_video_path).read_bytes() == b"video bytes"
-            assert reconstruction.raw_frames_directory is None
-            assert reconstruction.frames_directory is None
-            assert reconstruction.colmap_directory is None
-            assert reconstruction.splat_path is None
-
-            artifact = captured["artifact"]
-            assert isinstance(artifact, splat_workflow.SplatGenerationArtifact)
-            assert artifact.artifact_id == reconstruction.id
-            assert captured["owner_id"] == USER_ID
-            assert captured["reconstruction_id"] == reconstruction.id
-            assert captured["settings"] == settings
-
-            assert (
-                await service.get(
-                    reconstruction.id,
-                    building_id=building.id,
-                )
-                == reconstruction
-            )
-            assert (
-                await service.get(
-                    reconstruction.id,
-                    building_id=other.id,
-                )
-                is None
-            )
-            assert await service.list(building_id=building.id) == [reconstruction]
-            assert await service.list(building_id=other.id) == []
-
-            response = ReconstructionRead.model_validate(reconstruction)
-            assert response.settings == settings
-
-    asyncio.run(run())
-
-
-def test_create_from_video_retains_failed_scheduling_record_and_video(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    monkeypatch.setattr(workflow_common, "WORKFLOW_DATA_DIRECTORY", tmp_path)
-
-    async def fail_schedule(**kwargs: object) -> UUID:
-        raise RuntimeError("Prefect unavailable")
-
-    monkeypatch.setattr(splat_workflow, "schedule_splat_generation", fail_schedule)
-
-    async def run() -> None:
-        async with reconstruction_service() as (service, _, _, building, _):
-            with pytest.raises(ReconstructionSchedulingError) as exc_info:
-                await service.create_from_video(
-                    building=building,
-                    video=_video(),
-                    settings=SplatGenerationWorkflowSettings(),
-                )
-
-            failed = exc_info.value.reconstruction
-            assert failed.status == ReconstructionStatus.FAILED
-            assert failed.progress == 0.0
-            assert failed.prefect_workflow_id is None
-            assert failed.error_message == "RuntimeError: Prefect unavailable"
-            assert failed.input_video_path is not None
-            assert Path(failed.input_video_path).read_bytes() == b"video bytes"
-            assert await service.list(building_id=building.id) == [failed]
-
-    asyncio.run(run())
-
-
-def test_create_from_video_retains_failed_row_and_removes_partial_upload(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    monkeypatch.setattr(workflow_common, "WORKFLOW_DATA_DIRECTORY", tmp_path)
-
-    async def fail_upload(*args: object, **kwargs: object) -> object:
-        reconstruction_id = kwargs["artifact_id"]
-        assert isinstance(reconstruction_id, UUID)
-        partial = tmp_path / reconstruction_id.hex / "video" / "input.mov"
-        partial.parent.mkdir(parents=True)
-        partial.write_bytes(b"partial")
-        raise OSError("disk full")
-
-    monkeypatch.setattr(
-        splat_workflow.SplatGenerationArtifact,
-        "from_uploaded_file",
-        fail_upload,
-    )
-
-    async def run() -> None:
-        async with reconstruction_service() as (service, _, _, building, _):
-            with pytest.raises(ReconstructionVideoStorageError) as exc_info:
-                await service.create_from_video(
-                    building=building,
-                    video=_video(),
-                    settings=SplatGenerationWorkflowSettings(),
-                )
-
-            failed = exc_info.value.reconstruction
-            assert failed.status == ReconstructionStatus.FAILED
-            assert failed.error_message == "OSError: disk full"
-            assert failed.input_video_path is None
-            assert not (tmp_path / failed.id.hex).exists()
-
-    asyncio.run(run())
-
-
-def test_scheduling_race_does_not_move_running_record_back_to_scheduled(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    monkeypatch.setattr(workflow_common, "WORKFLOW_DATA_DIRECTORY", tmp_path)
-
-    async def run() -> None:
-        async with reconstruction_service() as (
-            service,
-            _,
-            engine,
-            building,
-            _,
-        ):
-
-            async def start_before_return(**kwargs: object) -> UUID:
-                reconstruction_id = kwargs["reconstruction_id"]
-                assert isinstance(reconstruction_id, UUID)
-                async with AsyncSession(engine, expire_on_commit=False) as race_session:
-                    await ReconstructionService(race_session).mark_running(
-                        reconstruction_id,
-                        prefect_workflow_id=WORKFLOW_ID,
-                    )
-                return WORKFLOW_ID
-
-            monkeypatch.setattr(
-                splat_workflow,
-                "schedule_splat_generation",
-                start_before_return,
-            )
-            reconstruction = await service.create_from_video(
-                building=building,
-                video=_video(),
-                settings=SplatGenerationWorkflowSettings(),
-            )
-
-            assert reconstruction.status == ReconstructionStatus.RUNNING
-            assert reconstruction.progress == 0.05
-            assert reconstruction.prefect_workflow_id == WORKFLOW_ID
-
-    asyncio.run(run())
-
-
 def test_reconstruction_lifecycle_preserves_progress_and_partial_artifacts() -> None:
     async def run() -> None:
         async with reconstruction_service() as (service, session, _, building, _):
@@ -538,7 +348,10 @@ def reconstruction_api(
         "sqlite+aiosqlite://",
         poolclass=StaticPool,
     )
+    tus_dir = tmp_path / "tus-uploads"
+    tus_dir.mkdir()
     monkeypatch.setattr(workflow_common, "WORKFLOW_DATA_DIRECTORY", tmp_path)
+    monkeypatch.setattr(config, "TUSD_UPLOAD_DIR", str(tus_dir))
 
     async def prepare_database() -> None:
         async with engine.begin() as connection:
@@ -567,7 +380,9 @@ def reconstruction_api(
     async def fake_schedule(**kwargs: object) -> UUID:
         return WORKFLOW_ID
 
-    monkeypatch.setattr(splat_workflow, "schedule_splat_generation", fake_schedule)
+    monkeypatch.setattr(
+        splat_workflow, "schedule_splat_generation_from_tus", fake_schedule
+    )
 
     app = FastAPI()
     app.include_router(building_views.router, prefix="/buildings")
@@ -587,11 +402,39 @@ def reconstruction_api(
     asyncio.run(engine.dispose())
 
 
+def _seed_completed_upload(
+    filename: str = "scan.mp4", content: bytes = b"video bytes"
+) -> str:
+    """Create a completed fake tus upload pair in the staging directory."""
+
+    upload_id = uuid4().hex
+    upload_dir = Path(config.TUSD_UPLOAD_DIR)
+    (upload_dir / upload_id).write_bytes(content)
+    (upload_dir / f"{upload_id}.info").write_text(
+        json.dumps(
+            {
+                "Size": len(content),
+                "SizeIsDeferred": False,
+                "MetaData": {"filename": filename},
+            }
+        )
+    )
+    return upload_id
+
+
 def _submit_reconstruction(client: TestClient, building_id: UUID):
+    upload_id = _seed_completed_upload()
     return client.post(
-        f"/buildings/{building_id}/reconstructions",
-        files={"file": ("scan.mp4", b"video bytes", "video/mp4")},
-        data={"settings": json.dumps({})},
+        f"/buildings/{building_id}/reconstructions/resumable",
+        json={"tus_upload_id": upload_id, "settings": {}},
+    )
+
+
+def _submit_building_from_reconstruction(client: TestClient):
+    upload_id = _seed_completed_upload()
+    return client.post(
+        "/buildings/from-reconstruction/resumable",
+        json={"tus_upload_id": upload_id, "building": {}, "settings": {}},
     )
 
 
@@ -701,8 +544,11 @@ def reconstruction_asset(
     artifact = request.param
     if artifact == "video":
         path = Path(created["input_video_path"])
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"video bytes")
     else:
         path = Path(created["workspace_directory"]) / "splat.ply"
+        path.parent.mkdir(parents=True)
         path.write_bytes(b"ply\nformat binary_little_endian 1.0\nend_header\n")
         _set_artifact_path(
             client,
@@ -778,6 +624,7 @@ def test_reconstruction_video_infers_media_type(
     created = _submit_reconstruction(client, building_id).json()
     reconstruction_id = UUID(created["id"])
     path = Path(created["input_video_path"]).with_suffix(suffix)
+    path.parent.mkdir(parents=True)
     path.write_bytes(b"video bytes")
     _set_artifact_path(client, reconstruction_id, "video", path)
 
@@ -963,52 +810,6 @@ def test_nested_reconstruction_routes_require_authentication(
     assert response.status_code == 401
 
 
-def test_nested_reconstruction_create_validates_video_and_settings(
-    reconstruction_api: tuple[TestClient, UUID],
-) -> None:
-    client, building_id = reconstruction_api
-
-    non_video_file = client.post(
-        f"/buildings/{building_id}/reconstructions",
-        files={"file": ("scan.txt", b"not video", "text/plain")},
-        data={"settings": json.dumps({})},
-    )
-    invalid_settings = client.post(
-        f"/buildings/{building_id}/reconstructions",
-        files={"file": ("scan.mp4", b"video", "video/mp4")},
-        data={"settings": json.dumps({"ffmpeg": {"fps": 0}})},
-    )
-
-    assert non_video_file.status_code == 400
-    assert invalid_settings.status_code == 422
-
-
-def test_nested_create_returns_failed_reconstruction_id(
-    monkeypatch: pytest.MonkeyPatch,
-    reconstruction_api: tuple[TestClient, UUID],
-) -> None:
-    client, building_id = reconstruction_api
-
-    async def fail_schedule(**kwargs: object) -> UUID:
-        raise RuntimeError("Prefect unavailable")
-
-    monkeypatch.setattr(splat_workflow, "schedule_splat_generation", fail_schedule)
-    response = _submit_reconstruction(client, building_id)
-
-    assert response.status_code == 503
-    reconstruction_id = response.json()["detail"]["reconstruction_id"]
-    listed = client.get(f"/buildings/{building_id}/reconstructions").json()
-    assert listed[0]["id"] == reconstruction_id
-    assert listed[0]["status"] == "failed"
-    assert listed[0]["error_message"] == "RuntimeError: Prefect unavailable"
-    assert (
-        client.get(
-            f"/buildings/{building_id}/reconstructions/{reconstruction_id}/logs"
-        ).status_code
-        == 409
-    )
-
-
 def test_nested_reconstruction_logs_bridge_to_prefect(
     monkeypatch: pytest.MonkeyPatch,
     reconstruction_api: tuple[TestClient, UUID],
@@ -1114,39 +915,6 @@ def test_nested_reconstruction_routes_map_database_failures_to_503(
 
     assert response.status_code == 503
     assert response.json() == {"detail": "Reconstruction database is unavailable"}
-
-
-def test_schedule_reconstruction_uses_prefect_idempotency_key(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    captured: dict[str, object] = {}
-    reconstruction_id = uuid4()
-    artifact = splat_workflow.SplatGenerationArtifact.create(
-        tmp_path,
-        artifact_id=reconstruction_id,
-    )
-
-    async def fake_run_deployment(**kwargs: object):
-        captured.update(kwargs)
-        return SimpleNamespace(id=WORKFLOW_ID)
-
-    monkeypatch.setattr(splat_workflow, "arun_deployment", fake_run_deployment)
-
-    result = asyncio.run(
-        splat_workflow.schedule_splat_generation(
-            artifact,
-            SplatGenerationWorkflowSettings(),
-            USER_ID,
-            reconstruction_id=reconstruction_id,
-        )
-    )
-
-    assert result == WORKFLOW_ID
-    assert captured["idempotency_key"] == f"reconstruction:{reconstruction_id}"
-    parameters = captured["parameters"]
-    assert isinstance(parameters, dict)
-    assert parameters["reconstruction_id"] == str(reconstruction_id)
 
 
 @pytest.mark.parametrize("use_frame_picker", [False, True])
@@ -1322,166 +1090,6 @@ def test_reconstruction_flow_hooks_publish_terminal_states(
     ]
 
 
-def _submit_building_from_reconstruction(
-    client: TestClient,
-    *,
-    building: dict[str, object] | None = None,
-    settings: dict[str, object] | None = None,
-):
-    return client.post(
-        "/buildings/from-reconstruction",
-        files={"file": ("scan.mp4", b"video bytes", "video/mp4")},
-        data={
-            "building": json.dumps(building or {}),
-            "settings": json.dumps(settings or {}),
-        },
-    )
-
-
-@pytest.mark.parametrize("custom_settings", [False, True])
-def test_building_from_reconstruction_creates_linked_owned_records(
-    reconstruction_api: tuple[TestClient, UUID],
-    monkeypatch: pytest.MonkeyPatch,
-    custom_settings: bool,
-) -> None:
-    client, _ = reconstruction_api
-    captured: dict[str, object] = {}
-
-    async def fake_schedule(**kwargs: object) -> UUID:
-        captured.update(kwargs)
-        return WORKFLOW_ID
-
-    monkeypatch.setattr(splat_workflow, "schedule_splat_generation", fake_schedule)
-    metadata = (
-        {
-            "name": "New hall",
-            "address": "Route de la Sorge 1",
-            "latitude": 46.52,
-            "longitude": 6.57,
-        }
-        if custom_settings
-        else {}
-    )
-    settings = SplatGenerationWorkflowSettings.model_validate(
-        {
-            "ffmpeg": {"fps": 4},
-            "frame_picker": {"distance_threshold": 0.5},
-            "colmap": {"quality": "high"},
-            "brush": {"total_steps": 20000},
-        }
-        if custom_settings
-        else {}
-    )
-    response = _submit_building_from_reconstruction(
-        client, building=metadata, settings=settings.model_dump(mode="json")
-    )
-    assert response.status_code == 202
-    building = response.json()["building"]
-    reconstruction = response.json()["reconstruction"]
-    assert building["user_id"] == str(USER_ID)
-    assert building["name"] == metadata.get("name", "")
-    assert building["address"] == metadata.get("address")
-    assert building["latitude"] == metadata.get("latitude")
-    assert building["longitude"] == metadata.get("longitude")
-    assert reconstruction["building_id"] == building["id"]
-    assert reconstruction["status"] == "scheduled"
-    assert reconstruction["prefect_workflow_id"] == str(WORKFLOW_ID)
-    assert reconstruction["settings"] == settings.model_dump(mode="json")
-    assert Path(reconstruction["input_video_path"]).read_bytes() == b"video bytes"
-    assert captured["owner_id"] == USER_ID
-    assert captured["reconstruction_id"] == UUID(reconstruction["id"])
-    assert captured["settings"] == settings
-    assert client.get(f"/buildings/{building['id']}").json() == building
-    assert client.get(f"/buildings/{building['id']}/reconstructions").json() == [
-        reconstruction
-    ]
-    client.app.dependency_overrides[require_user] = lambda: User(
-        id=OTHER_USER_ID, keycloak_sub="subject-2"
-    )
-    assert client.get(f"/buildings/{building['id']}").status_code == 404
-    assert (
-        client.get(
-            f"/buildings/{building['id']}/reconstructions/{reconstruction['id']}"
-        ).status_code
-        == 404
-    )
-
-
-@pytest.mark.parametrize(
-    ("building", "settings", "media_type", "filename", "expected_status"),
-    [
-        ("not json", "{}", "video/mp4", "scan.mp4", 422),
-        ("null", "{}", "video/mp4", "scan.mp4", 422),
-        ('{"latitude": 46}', "{}", "video/mp4", "scan.mp4", 422),
-        ('{"latitude": 91, "longitude": 0}', "{}", "video/mp4", "scan.mp4", 422),
-        ("{}", "not json", "video/mp4", "scan.mp4", 422),
-        ("{}", "null", "video/mp4", "scan.mp4", 422),
-        ("{}", '{"ffmpeg": {"fps": 0}}', "video/mp4", "scan.mp4", 422),
-        ("{}", "{}", "text/plain", "scan.txt", 400),
-        ("{}", "{}", "application/octet-stream", "scan.txt", 400),
-        ("{}", "{}", "", "clip", 400),
-    ],
-)
-def test_building_from_reconstruction_validates_before_creating_records(
-    reconstruction_api: tuple[TestClient, UUID],
-    building: str,
-    settings: str,
-    media_type: str,
-    filename: str,
-    expected_status: int,
-    tmp_path: Path,
-) -> None:
-    client, _ = reconstruction_api
-    before = client.get("/buildings").json()
-    response = client.post(
-        "/buildings/from-reconstruction",
-        files={"file": (filename, b"video bytes", media_type)},
-        data={"building": building, "settings": settings},
-    )
-    assert response.status_code == expected_status
-    assert client.get("/buildings").json() == before
-    assert list(tmp_path.iterdir()) == []
-
-
-@pytest.mark.parametrize(
-    ("filename", "content"),
-    [
-        # Empty client MIME type with a video file extension.
-        ("scan.mp4", b"video bytes"),
-        ("clip.mov", b"video bytes"),
-    ],
-)
-def test_building_from_reconstruction_accepts_empty_mime_type(
-    reconstruction_api: tuple[TestClient, UUID],
-    filename: str,
-    content: bytes,
-) -> None:
-    """The backend detects the type from the file, not the client MIME type."""
-    client, _ = reconstruction_api
-    response = client.post(
-        "/buildings/from-reconstruction",
-        files={"file": (filename, content, "")},
-        data={"building": "{}", "settings": "{}"},
-    )
-    assert response.status_code == 202
-    created = response.json()
-    assert created["reconstruction"]["status"] == "scheduled"
-
-
-@pytest.mark.parametrize("missing", ["file", "building", "settings"])
-def test_building_from_reconstruction_requires_all_fields(
-    reconstruction_api: tuple[TestClient, UUID], missing: str
-) -> None:
-    client, _ = reconstruction_api
-    before = client.get("/buildings").json()
-    data = {"building": "{}", "settings": "{}"}
-    data.pop(missing, None)
-    files = {} if missing == "file" else {"file": ("scan.mp4", b"video", "video/mp4")}
-    response = client.post("/buildings/from-reconstruction", data=data, files=files)
-    assert response.status_code == 422
-    assert client.get("/buildings").json() == before
-
-
 def test_building_from_reconstruction_requires_authentication(
     reconstruction_api: tuple[TestClient, UUID],
 ) -> None:
@@ -1528,75 +1136,8 @@ def test_building_from_reconstruction_handles_database_insert_failure(
             client.get(f"/buildings/{detail['building_id']}/reconstructions").json()
             == []
         )
-    assert list(tmp_path.iterdir()) == []
-
-
-@pytest.mark.parametrize("failure", ["storage", "scheduling"])
-def test_building_from_reconstruction_retains_records_after_submission_failure(
-    reconstruction_api: tuple[TestClient, UUID],
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    failure: str,
-) -> None:
-    client, _ = reconstruction_api
-
-    async def fail_upload(*args: object, **kwargs: object) -> object:
-        reconstruction_id = kwargs["artifact_id"]
-        assert isinstance(reconstruction_id, UUID)
-        partial = tmp_path / reconstruction_id.hex / "video" / "input.mp4"
-        partial.parent.mkdir(parents=True)
-        partial.write_bytes(b"partial")
-        raise OSError("disk full")
-
-    async def fail_schedule(**kwargs: object) -> UUID:
-        raise RuntimeError("Prefect unavailable")
-
-    if failure == "storage":
-        monkeypatch.setattr(
-            splat_workflow.SplatGenerationArtifact, "from_uploaded_file", fail_upload
-        )
-    else:
-        monkeypatch.setattr(splat_workflow, "schedule_splat_generation", fail_schedule)
-    response = _submit_building_from_reconstruction(client)
-    assert response.status_code == 503
-    detail = response.json()["detail"]
-    building_id = detail["building_id"]
-    reconstruction_id = detail["reconstruction_id"]
-    assert client.get(f"/buildings/{building_id}").status_code == 200
-    reconstructions = client.get(f"/buildings/{building_id}/reconstructions").json()
-    assert len(reconstructions) == 1
-    reconstruction = reconstructions[0]
-    assert reconstruction["id"] == reconstruction_id
-    assert reconstruction["building_id"] == building_id
-    assert reconstruction["status"] == "failed"
-    if failure == "storage":
-        assert detail["message"] == "Failed to store reconstruction video"
-        assert reconstruction["input_video_path"] is None
-        assert not (tmp_path / UUID(reconstruction_id).hex).exists()
-    else:
-        assert detail["message"] == "Failed to schedule reconstruction workflow"
-        assert Path(reconstruction["input_video_path"]).read_bytes() == b"video bytes"
-
-
-def test_building_from_reconstruction_openapi_contract(
-    reconstruction_api: tuple[TestClient, UUID],
-) -> None:
-    client, _ = reconstruction_api
-    schema = client.get("/openapi.json").json()
-    operation = schema["paths"]["/buildings/from-reconstruction"]["post"]
-    body = operation["requestBody"]["content"]["multipart/form-data"]["schema"]
-    body_schema = schema["components"]["schemas"][body["$ref"].split("/")[-1]]
-    assert set(body_schema["required"]) == {"file", "building", "settings"}
-    assert body_schema["properties"]["file"]["format"] == "binary"
-    for field in ("building", "settings"):
-        assert body_schema["properties"][field]["type"] == "string"
-        assert "JSON-encoded" in body_schema["properties"][field]["description"]
-    assert {"202", "400", "401", "422", "503"} <= set(operation["responses"])
-    success = schema["components"]["schemas"]["BuildingFromReconstructionRead"]
-    assert set(success["required"]) == {"building", "reconstruction"}
-    assert operation["responses"]["503"]["content"]["application/json"]["schema"][
-        "$ref"
-    ].endswith("/BuildingFromReconstructionError")
+    # Only the seeded tus staging directory remains; no workflow artifacts.
+    assert [p for p in tmp_path.iterdir() if p.name != "tus-uploads"] == []
 
 
 def test_delete_removes_files_and_row_for_completed_reconstruction(
@@ -1789,7 +1330,6 @@ def test_nested_reconstruction_delete_route(
     created = response.json()
     reconstruction_id = UUID(created["id"])
     directory = Path(created["workspace_directory"])
-    assert directory.is_dir()
 
     deleted = client.delete(
         f"/buildings/{building_id}/reconstructions/{reconstruction_id}"

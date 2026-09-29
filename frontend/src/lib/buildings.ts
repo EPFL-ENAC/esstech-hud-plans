@@ -3,7 +3,6 @@ import { baseUrl } from 'boot/api';
 import { authFetch } from 'src/lib/auth';
 import type { FetchProgress } from 'src/lib/utils/fetchProgress';
 import { downloadResumable, type ResumableDownloadOptions } from 'src/lib/utils/resumableDownload';
-import { uploadWithProgress } from 'src/lib/utils/xhrUpload';
 
 export interface CurrentUser {
     id: string;
@@ -315,53 +314,6 @@ export async function getReconstructionSplat(
         options,
     );
     return blob.arrayBuffer();
-}
-
-async function uploadJson<T>(
-    path: string,
-    body: FormData,
-    onProgress?: (progress: FetchProgress) => void,
-): Promise<T> {
-    const { status, text } = await uploadWithProgress(`${baseUrl}${path}`, body, onProgress);
-    let parsed: unknown = null;
-    if (text) {
-        try {
-            parsed = JSON.parse(text) as unknown;
-        } catch {
-            parsed = text;
-        }
-    }
-    if (status < 200 || status >= 300) {
-        throw new ApiError(`Request failed with HTTP ${status}`, status, parsed);
-    }
-    return parsed as T;
-}
-
-export function createReconstruction(
-    buildingId: string,
-    submission: ReconstructionSubmission,
-    onProgress?: (progress: FetchProgress) => void,
-): Promise<Reconstruction> {
-    const formData = new FormData();
-    formData.append('file', submission.video);
-    formData.append('settings', JSON.stringify(submission.settings));
-    return uploadJson(
-        `/buildings/${encodeURIComponent(buildingId)}/reconstructions`,
-        formData,
-        onProgress,
-    );
-}
-
-export function createBuildingFromReconstruction(
-    building: BuildingCreate,
-    submission: ReconstructionSubmission,
-    onProgress?: (progress: FetchProgress) => void,
-): Promise<BuildingFromReconstruction> {
-    const formData = new FormData();
-    formData.append('file', submission.video);
-    formData.append('building', JSON.stringify(building));
-    formData.append('settings', JSON.stringify(submission.settings));
-    return uploadJson('/buildings/from-reconstruction', formData, onProgress);
 }
 
 /** Submit a video already uploaded through the API upload proxy for reconstruction. */
