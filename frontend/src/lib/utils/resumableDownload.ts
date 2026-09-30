@@ -21,7 +21,7 @@ export interface ResumableDownloadOptions {
 }
 
 const DB_NAME = 'hud-downloads';
-const DB_VERSION = 1;
+const DB_VERSION = 3;
 const STORE_NAME = 'downloads';
 const PART_DIRECTORY = 'downloads';
 const PART_SUFFIX = '.part';
@@ -44,8 +44,14 @@ function openDownloadDatabase(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
         const request = indexedDB.open(DB_NAME, DB_VERSION);
         request.onupgradeneeded = () => {
-            if (!request.result.objectStoreNames.contains(STORE_NAME)) {
-                request.result.createObjectStore(STORE_NAME);
+            const db = request.result;
+            for (const foreignStore of ['meta', 'blocks']) {
+                if (db.objectStoreNames.contains(foreignStore)) {
+                    db.deleteObjectStore(foreignStore);
+                }
+            }
+            if (!db.objectStoreNames.contains(STORE_NAME)) {
+                db.createObjectStore(STORE_NAME);
             }
         };
         request.onsuccess = () => resolve(request.result);
@@ -284,13 +290,16 @@ export async function downloadResumable(
             block.set(value.subarray(chunkOffset, chunkOffset + take), blockSize);
             blockSize += take;
             chunkOffset += take;
+            // Commit while bytes remain in the chunk, so blockSize resets
+            // before the next pass; a commit after the loop lets take fall to
+            // zero and spins forever on chunks that cross a block boundary.
+            if (blockSize === COMMIT_BLOCK_BYTES) {
+                await commitBlock();
+            }
         }
         // Report per network chunk too, so files smaller than one commit
         // block still move the progress bar.
         opts.onProgress?.({ loaded: offset + blockSize, total: total || record.total });
-        if (blockSize === COMMIT_BLOCK_BYTES) {
-            await commitBlock();
-        }
     }
     await commitBlock();
 
