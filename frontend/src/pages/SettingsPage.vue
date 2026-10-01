@@ -4,28 +4,15 @@
 
         <section class="q-mb-xl">
             <h2 class="text-h6 text-weight-bold">{{ t('more.languageSettings') }}</h2>
-            <q-select
-                v-model="locale"
-                :options="languageOptions"
-                :label="t('more.language')"
-                emit-value
-                map-options
-                outlined
-                dense
-            />
+            <language-selector />
         </section>
     </q-page>
 </template>
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n';
+import LanguageSelector from 'src/components/LanguageSelector.vue';
 import PageHeader from 'src/components/PageHeader.vue';
-import type { MessageLanguages } from 'src/i18n/instance';
 
-const { t, locale } = useI18n({ useScope: 'global' });
-const languageOptions = [
-    { label: 'English', value: 'en' },
-    { label: 'Français', value: 'fr' },
-    { label: 'Español', value: 'es' },
-] satisfies { label: string; value: MessageLanguages }[];
+const { t } = useI18n();
 </script>
