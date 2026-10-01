@@ -1,11 +1,12 @@
 import { useMutation, useQueryCache } from '@pinia/colada';
-import { computed } from 'vue';
+import { computed, type Ref } from 'vue';
 import { getAuthSubject } from 'src/lib/auth';
 import { useVideoUploadStore } from 'src/stores/videoUpload';
 import {
     type BuildingSelection,
     type Reconstruction,
     type ReconstructionSubmission,
+    type SplatGenerationSettings,
     createBuildingFromReconstructionResumable,
     createReconstructionResumable,
     getFailedBuildingId,
@@ -16,14 +17,65 @@ import { uploadVideoResumable } from 'src/lib/utils/tusUpload';
 
 export type SubmitReconstructionVariables = ReconstructionSubmission & BuildingSelection;
 
+/** Variables for scheduling a reconstruction from an already finished tus upload. */
+export type CreateReconstructionVariables = BuildingSelection & {
+    uploadId: string;
+    settings: SplatGenerationSettings;
+};
+
+type ReconstructionMutationVariables =
+    | SubmitReconstructionVariables
+    | CreateReconstructionVariables;
+
 function retainedBuildingId(
     error: unknown,
-    variables: SubmitReconstructionVariables | undefined,
+    variables: ReconstructionMutationVariables | undefined,
 ): string | null {
     return (
         getFailedBuildingId(error) ??
         (getFailedReconstructionId(error) ? (variables?.buildingId ?? null) : null)
     );
+}
+
+function refreshBuildingData(
+    queryCache: ReturnType<typeof useQueryCache>,
+    subject: string | null,
+    buildingId: string | null,
+): void {
+    if (buildingId === null) return;
+
+    // Mark cached data stale immediately, but don't let background refresh
+    // failures change the outcome of a submission that already finished.
+    void Promise.all([
+        queryCache.invalidateQueries({ key: ['buildings', subject, 'all'] }),
+        queryCache.invalidateQueries({ key: ['buildings', subject, 'list'] }),
+        queryCache.invalidateQueries({ key: ['buildings', subject, 'locations'] }),
+        queryCache.invalidateQueries({
+            key: ['buildings', subject, 'detail', buildingId],
+            exact: true,
+        }),
+        queryCache.invalidateQueries({
+            key: ['buildings', subject, 'detail', buildingId, 'reconstructions', 'list'],
+        }),
+    ]).catch((error: unknown) => console.warn('Could not refresh building data', error));
+}
+
+function useReconstructionMutationStatus(mutation: {
+    data: Ref<Reconstruction | undefined>;
+    error: Ref<unknown>;
+    variables: Ref<ReconstructionMutationVariables | undefined>;
+}) {
+    const destinationBuildingId = computed(
+        () =>
+            mutation.data.value?.building_id ??
+            retainedBuildingId(mutation.error.value, mutation.variables.value),
+    );
+    const errorMessage = computed(() =>
+        mutation.error.value === null
+            ? ''
+            : getReconstructionSubmissionErrorMessage(mutation.error.value),
+    );
+    return { destinationBuildingId, errorMessage };
 }
 
 export function useSubmitReconstructionMutation() {
@@ -59,36 +111,44 @@ export function useSubmitReconstructionMutation() {
             );
         },
         onSettled(data, error, variables) {
-            const buildingId = data?.building_id ?? retainedBuildingId(error, variables);
-            if (buildingId === null) return;
-
-            // Mark cached data stale immediately, but don't let background refresh
-            // failures change the outcome of a submission that already finished.
-            void Promise.all([
-                queryCache.invalidateQueries({ key: ['buildings', subject, 'all'] }),
-                queryCache.invalidateQueries({ key: ['buildings', subject, 'list'] }),
-                queryCache.invalidateQueries({ key: ['buildings', subject, 'locations'] }),
-                queryCache.invalidateQueries({
-                    key: ['buildings', subject, 'detail', buildingId],
-                    exact: true,
-                }),
-                queryCache.invalidateQueries({
-                    key: ['buildings', subject, 'detail', buildingId, 'reconstructions', 'list'],
-                }),
-            ]).catch((error: unknown) => console.warn('Could not refresh building data', error));
+            refreshBuildingData(
+                queryCache,
+                subject,
+                data?.building_id ?? retainedBuildingId(error, variables),
+            );
         },
     });
 
-    const destinationBuildingId = computed(
-        () =>
-            mutation.data.value?.building_id ??
-            retainedBuildingId(mutation.error.value, mutation.variables.value),
-    );
-    const errorMessage = computed(() =>
-        mutation.error.value === null
-            ? ''
-            : getReconstructionSubmissionErrorMessage(mutation.error.value),
-    );
+    return { ...mutation, ...useReconstructionMutationStatus(mutation) };
+}
 
-    return { ...mutation, destinationBuildingId, errorMessage };
+export function useCreateReconstructionMutation() {
+    const queryCache = useQueryCache();
+    const subject = getAuthSubject();
+    const mutation = useMutation<Reconstruction, CreateReconstructionVariables, unknown>({
+        mutation: async (variables) => {
+            if (variables.buildingId === null) {
+                const result = await createBuildingFromReconstructionResumable(
+                    variables.building,
+                    variables.uploadId,
+                    variables.settings,
+                );
+                return result.reconstruction;
+            }
+            return createReconstructionResumable(
+                variables.buildingId,
+                variables.uploadId,
+                variables.settings,
+            );
+        },
+        onSettled(data, error, variables) {
+            refreshBuildingData(
+                queryCache,
+                subject,
+                data?.building_id ?? retainedBuildingId(error, variables),
+            );
+        },
+    });
+
+    return { ...mutation, ...useReconstructionMutationStatus(mutation) };
 }
