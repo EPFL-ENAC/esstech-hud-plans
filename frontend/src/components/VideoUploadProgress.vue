@@ -1,5 +1,5 @@
 <template>
-    <div role="status">
+    <div v-if="state.phase !== 'idle'" role="status">
         <q-linear-progress
             :value="ratio"
             :indeterminate="total === 0"
@@ -17,16 +17,22 @@
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { formatMb } from 'src/lib/utils/fetchProgress';
-import { useVideoUploadStore } from 'src/stores/videoUpload';
+import type { ReconstructionSubmissionState } from 'src/mutations/reconstructions';
 
 const { t } = useI18n();
-const videoUpload = useVideoUploadStore();
-const progress = computed(() => videoUpload.progress ?? { loaded: 0, total: 0 });
+const props = defineProps<{ state: ReconstructionSubmissionState }>();
+const progress = computed(() =>
+    props.state.phase === 'uploading' && props.state.progress
+        ? props.state.progress
+        : { loaded: 0, total: 0 },
+);
 const loaded = computed(() => progress.value.loaded);
 const total = computed(() => progress.value.total);
 const ratio = computed(() => (total.value > 0 ? Math.min(loaded.value / total.value, 1) : 0));
 const caption = computed(() => {
-    if (videoUpload.resumed) return t('capture.resumingUpload');
+    if (props.state.phase === 'idle') return '';
+    if (props.state.phase === 'submitting') return t('capture.submittingReconstruction');
+    if (props.state.resumed) return t('capture.resumingUpload');
     return total.value > 0
         ? t('capture.uploading', {
               loaded: formatMb(loaded.value),

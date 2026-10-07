@@ -76,7 +76,11 @@
             </q-banner>
         </section>
 
-        <video-upload-progress v-if="submitting" class="q-mb-md" />
+        <video-upload-progress
+            v-if="submissionState.phase !== 'idle'"
+            :state="submissionState"
+            class="q-mb-md"
+        />
 
         <q-btn
             :label="t('capture.startProcessing')"
@@ -123,6 +127,7 @@ const $q = useQuasar();
 const {
     mutateAsync: submitReconstruction,
     isLoading: submitting,
+    submissionState,
     destinationBuildingId,
     errorMessage: mutationError,
 } = useSubmitReconstructionMutation();
