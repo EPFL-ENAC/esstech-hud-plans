@@ -12,5 +12,4 @@ Frontend :
 - check if this worker url thing is necessary in the maps
 - building error messages in a less obnoxious way (cf mutations/buildings.ts)
 - check if we can make an helper to wire directly a query -> q-pagination
-- videoUpload.ts : it's weird that it's a store, and even weirder that this store assumes only one upload at a time
 - resumableDownload.ts is super ugly, maybe refactor (low priority)
