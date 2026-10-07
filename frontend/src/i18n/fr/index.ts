@@ -101,6 +101,7 @@ export default {
         uploading: 'Envoi de la vidéo ({loaded} Mo / {total} Mo)',
         uploadingUnknown: 'Envoi de la vidéo ({loaded} Mo)',
         resumingUpload: 'Reprise de l’envoi de la vidéo...',
+        submittingReconstruction: 'Envoi de la reconstruction…',
         camera: {
             viewfinder: 'Viseur de la caméra',
             label: 'Caméra',
