@@ -1,6 +1,6 @@
 Backend :
 - reuse a generic version of _database_error in the views instead of creating a custom version each time
-- bearer token stuff and http response code stuff in tus.py (and maybe elsewhere), those should either not exist or be placed in a more global context to avoid writing the same helpers in every files
+- bearer token stuff and http response code stuff in tus.py (and maybe elsewhere), those should either not exist or be placed in a more global context to avoid writing the same helpers in every file
 - tus_proxy.py seems to do a lot of hand work, can't FastAPI (or an idiomatic package) be used instead ?
 - _splat_generation_parameters should be a proper dataclas with .from_xxx() methods
 - views/reconstruction_submissions.py doesn't have any endpoint and thus shouldn't be in /views/
