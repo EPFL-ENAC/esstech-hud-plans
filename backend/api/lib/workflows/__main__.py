@@ -7,7 +7,7 @@ from api.lib.workflows.tus_cleanup import tus_cleanup_flow
 def serve_workflows() -> None:
     reconstruction = splat_generation_flow.to_deployment(
         name="default",
-        concurrency_limit=1,
+        concurrency_limit=3,
     )
     cleanup = tus_cleanup_flow.to_deployment(
         name="tus-cleanup",
