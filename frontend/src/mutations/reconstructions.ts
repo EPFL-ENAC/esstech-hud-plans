@@ -1,7 +1,7 @@
 import { useMutation, useQueryCache } from '@pinia/colada';
-import { computed } from 'vue';
+import { computed, readonly, shallowRef } from 'vue';
 import { getAuthSubject } from 'src/lib/auth';
-import { useVideoUploadStore } from 'src/stores/videoUpload';
+import type { FetchProgress } from 'src/lib/utils/fetchProgress';
 import {
     type BuildingSelection,
     type Reconstruction,
@@ -16,6 +16,11 @@ import { uploadVideoResumable } from 'src/lib/utils/tusUpload';
 
 export type SubmitReconstructionVariables = ReconstructionSubmission & BuildingSelection;
 
+export type ReconstructionSubmissionState =
+    | { phase: 'idle' }
+    | { phase: 'uploading'; progress: FetchProgress | null; resumed: boolean }
+    | { phase: 'submitting' };
+
 function retainedBuildingId(
     error: unknown,
     variables: SubmitReconstructionVariables | undefined,
@@ -29,34 +34,38 @@ function retainedBuildingId(
 export function useSubmitReconstructionMutation() {
     const queryCache = useQueryCache();
     const subject = getAuthSubject();
-    const videoUpload = useVideoUploadStore();
+    const submissionState = shallowRef<ReconstructionSubmissionState>({ phase: 'idle' });
     const mutation = useMutation<Reconstruction, SubmitReconstructionVariables, unknown>({
         mutation: async (variables) => {
-            videoUpload.reset();
-            // Step 1: resumable upload through the API upload proxy (which
-            // forwards to tusd), reporting true
-            // network bytes. Step 2: submit the finished upload for scheduling;
-            // the pipeline copies the video out of the tusd staging directory.
-            const { uploadId } = await uploadVideoResumable(variables.video, {
-                onProgress: videoUpload.update,
-                onResumed: () => videoUpload.setResumed(true),
-            });
-            // The upload step is done; the caption must not claim a resumed
-            // upload during the step-2 submission.
-            videoUpload.setResumed(false);
-            if (variables.buildingId === null) {
-                const result = await createBuildingFromReconstructionResumable(
-                    variables.building,
+            submissionState.value = { phase: 'uploading', progress: null, resumed: false };
+            try {
+                const { uploadId } = await uploadVideoResumable(variables.video, {
+                    onProgress(progress) {
+                        if (submissionState.value.phase !== 'uploading') return;
+                        submissionState.value = { ...submissionState.value, progress };
+                    },
+                    onResumed() {
+                        if (submissionState.value.phase !== 'uploading') return;
+                        submissionState.value = { ...submissionState.value, resumed: true };
+                    },
+                });
+                submissionState.value = { phase: 'submitting' };
+                if (variables.buildingId === null) {
+                    const result = await createBuildingFromReconstructionResumable(
+                        variables.building,
+                        uploadId,
+                        variables.settings,
+                    );
+                    return result.reconstruction;
+                }
+                return await createReconstructionResumable(
+                    variables.buildingId,
                     uploadId,
                     variables.settings,
                 );
-                return result.reconstruction;
+            } finally {
+                submissionState.value = { phase: 'idle' };
             }
-            return createReconstructionResumable(
-                variables.buildingId,
-                uploadId,
-                variables.settings,
-            );
         },
         onSettled(data, error, variables) {
             const buildingId = data?.building_id ?? retainedBuildingId(error, variables);
@@ -90,5 +99,10 @@ export function useSubmitReconstructionMutation() {
             : getReconstructionSubmissionErrorMessage(mutation.error.value),
     );
 
-    return { ...mutation, destinationBuildingId, errorMessage };
+    return {
+        ...mutation,
+        submissionState: readonly(submissionState),
+        destinationBuildingId,
+        errorMessage,
+    };
 }

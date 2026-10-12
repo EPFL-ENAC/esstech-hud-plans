@@ -10,7 +10,11 @@
                 {{ errorMessage }}
             </q-banner>
 
-            <video-upload-progress v-if="submitting" class="q-mb-md" />
+            <video-upload-progress
+                v-if="submissionState.phase !== 'idle'"
+                :state="submissionState"
+                class="q-mb-md"
+            />
 
             <q-card flat bordered>
                 <q-card-section>
@@ -81,6 +85,7 @@ const validationError = ref('');
 const {
     mutateAsync: submitReconstruction,
     isLoading: submitting,
+    submissionState,
     errorMessage: submissionError,
     destinationBuildingId,
 } = useSubmitReconstructionMutation();

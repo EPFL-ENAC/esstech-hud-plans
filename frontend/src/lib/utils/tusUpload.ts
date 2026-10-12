@@ -36,11 +36,37 @@ export function uploadVideoResumable(
     opts: ResumableUploadOptions = {},
 ): Promise<ResumableUploadResult> {
     return new Promise((resolve, reject) => {
+        if (opts.signal?.aborted) {
+            reject(new DOMException('Aborted', 'AbortError'));
+            return;
+        }
         if (!tusEndpoint) {
             reject(new ApiError('Resumable upload endpoint is not configured', 0, null));
             return;
         }
+        let settled = false;
         let resumed = false;
+
+        function finish(settle: () => void): void {
+            if (settled) return;
+            settled = true;
+            opts.signal?.removeEventListener('abort', onAbort);
+            settle();
+        }
+
+        function onAbort(): void {
+            if (settled) return;
+            finish(() => reject(new DOMException('Aborted', 'AbortError')));
+            // Pause without deleting the upload or its resume fingerprint.
+            try {
+                void upload.abort(false).catch((error: unknown) => {
+                    console.warn('Could not pause video upload', error);
+                });
+            } catch (error) {
+                console.warn('Could not pause video upload', error);
+            }
+        }
+
         const upload = new Upload(file, {
             endpoint: tusEndpoint,
             chunkSize: UPLOAD_CHUNK_BYTES,
@@ -56,60 +82,59 @@ export function uploadVideoResumable(
                 }
             },
             onProgress: (bytesSent, bytesTotal) => {
+                if (settled) return;
                 opts.onProgress?.({ loaded: bytesSent, total: bytesTotal ?? 0 });
             },
             onSuccess: () => {
+                if (settled) return;
                 const uploadId = upload.url?.split('/').pop() ?? '';
                 if (!uploadId) {
-                    reject(new ApiError('Upload completed without a location', 0, null));
+                    finish(() =>
+                        reject(new ApiError('Upload completed without a location', 0, null)),
+                    );
                     return;
                 }
-                resolve({ uploadId, resumed });
+                finish(() => resolve({ uploadId, resumed }));
             },
             onError: (error) => {
                 // A rejected pre-create hook surfaces as the forwarded HTTP status.
                 const status =
                     error instanceof DetailedError ? (error.originalResponse?.getStatus() ?? 0) : 0;
-                reject(new ApiError(`Upload failed: ${error.message}`, status, null));
+                finish(() => reject(new ApiError(`Upload failed: ${error.message}`, status, null)));
             },
         });
 
-        if (opts.signal) {
-            opts.signal.addEventListener(
-                'abort',
-                () => {
-                    // Pause: tusd keeps the transferred bytes and the
-                    // fingerprint stays stored, so a later attempt resumes
-                    // from the confirmed offset.
-                    void upload.abort();
-                    reject(new DOMException('Aborted', 'AbortError'));
-                },
-                { once: true },
-            );
+        opts.signal?.addEventListener('abort', onAbort, { once: true });
+
+        async function startUpload(): Promise<void> {
+            let previousUploads: Awaited<ReturnType<Upload['findPreviousUploads']>> = [];
+            try {
+                previousUploads = await upload.findPreviousUploads();
+            } catch {
+                // Unavailable resume storage must not prevent a fresh upload.
+            }
+            // tus-js-client resets its aborted flag on start, so a pending
+            // lookup must never restart an upload that already settled.
+            if (settled) return;
+            const previousUpload = previousUploads.length === 1 ? previousUploads[0] : undefined;
+            if (previousUpload) {
+                upload.resumeFromPreviousUpload(previousUpload);
+                resumed = true;
+                opts.onResumed?.();
+            }
+            if (!settled) upload.start();
         }
 
-        // Resume a previously started upload of this file after a reload; the
-        // URL storage keeps one fingerprint per file, so a single match is the
-        // upload this file belongs to.
-        upload
-            .findPreviousUploads()
-            .then((previousUploads) => {
-                // The signal may have aborted while the lookup was pending;
-                // tus-js-client resets its aborted flag, so a stopped upload
-                // must never be started here.
-                if (opts.signal?.aborted) return;
-                const previousUpload =
-                    previousUploads.length === 1 ? previousUploads[0] : undefined;
-                if (previousUpload) {
-                    upload.resumeFromPreviousUpload(previousUpload);
-                    resumed = true;
-                    opts.onResumed?.();
-                }
-                upload.start();
-            })
-            .catch(() => {
-                if (opts.signal?.aborted) return;
-                upload.start();
+        // Also cover a signal aborted during setup, before the listener existed.
+        if (opts.signal?.aborted) onAbort();
+        else {
+            void startUpload().catch((error: unknown) => {
+                const failure =
+                    error instanceof Error
+                        ? error
+                        : new Error('Could not start video upload', { cause: error });
+                finish(() => reject(failure));
             });
+        }
     });
 }

@@ -100,6 +100,7 @@ export default {
         uploading: 'Subiendo el vídeo ({loaded} MB / {total} MB)',
         uploadingUnknown: 'Subiendo el vídeo ({loaded} MB)',
         resumingUpload: 'Reanudando la subida del vídeo...',
+        submittingReconstruction: 'Enviando la reconstrucción…',
         camera: {
             viewfinder: 'Visor de la cámara',
             label: 'Cámara',

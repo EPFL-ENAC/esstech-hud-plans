@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 from uuid import UUID, uuid4
 
 import pytest
@@ -151,30 +152,29 @@ def test_schedule_counter_returns_prefect_run_id(
     }
 
 
-def test_workflow_runner_serves_splat_generation(
+def test_workflow_runner_serves_both_deployments(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured: dict = {}
-    cleanup_captured: dict = {}
-
-    class FakeFlow:
-        def __init__(self, sink: dict) -> None:
-            self._sink = sink
-
-        def serve(self, **kwargs) -> None:
-            self._sink.update(kwargs)
-
-    monkeypatch.setattr(workflow_runner, "splat_generation_flow", FakeFlow(captured))
-    monkeypatch.setattr(workflow_runner, "tus_cleanup_flow", FakeFlow(cleanup_captured))
+    reconstruction = Mock(spec=["to_deployment"])
+    cleanup = Mock(spec=["to_deployment"])
+    serve = Mock()
+    monkeypatch.setattr(workflow_runner, "splat_generation_flow", reconstruction)
+    monkeypatch.setattr(workflow_runner, "tus_cleanup_flow", cleanup)
+    monkeypatch.setattr(workflow_runner, "serve", serve)
 
     workflow_runner.serve_workflows()
 
-    assert captured == {"name": "default", "limit": 1}
-    assert cleanup_captured == {
-        "name": "tus-cleanup",
-        "interval": 86400,
-        "limit": 1,
-    }
+    reconstruction.to_deployment.assert_called_once_with(
+        name="default", concurrency_limit=1
+    )
+    cleanup.to_deployment.assert_called_once_with(
+        name="tus-cleanup", interval=86400, concurrency_limit=1
+    )
+    serve.assert_called_once_with(
+        reconstruction.to_deployment.return_value,
+        cleanup.to_deployment.return_value,
+        limit=2,
+    )
 
 
 def test_extract_frames_task_sends_ffmpeg_output_to_prefect_run_logger(

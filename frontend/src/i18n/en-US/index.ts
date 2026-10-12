@@ -97,6 +97,7 @@ export default {
         uploading: 'Uploading video ({loaded} MB / {total} MB)',
         uploadingUnknown: 'Uploading video ({loaded} MB)',
         resumingUpload: 'Resuming upload...',
+        submittingReconstruction: 'Submitting reconstruction…',
         camera: {
             viewfinder: 'Camera viewfinder',
             label: 'Camera',
