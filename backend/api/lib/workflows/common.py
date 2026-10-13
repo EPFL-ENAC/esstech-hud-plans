@@ -119,6 +119,17 @@ async def cancel_workflow(workflow_id: UUID) -> None:
         raise WorkflowNotFoundError from exc
 
 
+async def read_flow_run_parameters(workflow_id: UUID) -> dict[str, object] | None:
+    """Return a flow run's parameters, or None when the run no longer exists."""
+
+    try:
+        async with get_client() as client:
+            flow_run = await client.read_flow_run(workflow_id)
+    except ObjectNotFound:
+        return None
+    return flow_run.parameters
+
+
 STEP_NAME_PATTERN = re.compile(r"^(.+)-[a-z0-9]{3}$")
 
 

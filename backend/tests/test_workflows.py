@@ -20,7 +20,6 @@ from api.models.user import User
 from api.models.workflows import (
     BrushSettings,
     ColmapSettings,
-    FfmpegSettings,
     FramePickerSettings,
     SplatGenerationWorkflowSettings,
 )
@@ -165,7 +164,7 @@ def test_workflow_runner_serves_both_deployments(
     workflow_runner.serve_workflows()
 
     reconstruction.to_deployment.assert_called_once_with(
-        name="default", concurrency_limit=1
+        name="default", concurrency_limit=3
     )
     cleanup.to_deployment.assert_called_once_with(
         name="tus-cleanup", interval=86400, concurrency_limit=1

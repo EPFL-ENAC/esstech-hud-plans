@@ -654,3 +654,32 @@ def test_tus_cleanup_flow_uses_configured_directory(
 
     assert removed == ["expired"]
     assert not (upload_dir / "expired").exists()
+
+
+def test_remove_staging_upload_deletes_pair_inside_staging_dir(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    upload_dir = tmp_path / "tus"
+    upload_dir.mkdir()
+    monkeypatch.setattr(config, "TUSD_UPLOAD_DIR", str(upload_dir))
+    binary = _make_tus_upload(upload_dir, "stagedupload")
+
+    assert tus_cleanup.remove_staging_upload(str(binary)) is True
+    assert not binary.exists()
+    assert not (upload_dir / "stagedupload.info").exists()
+
+
+def test_remove_staging_upload_rejects_paths_outside_staging_dir(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    upload_dir = tmp_path / "tus"
+    upload_dir.mkdir()
+    monkeypatch.setattr(config, "TUSD_UPLOAD_DIR", str(upload_dir))
+    outside = tmp_path / "elsewhere.video"
+    outside.write_bytes(b"chunk")
+
+    assert tus_cleanup.remove_staging_upload(str(outside)) is False
+    assert outside.exists()
+    assert tus_cleanup.remove_staging_upload(str(upload_dir / "missing")) is False
