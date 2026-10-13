@@ -7,14 +7,16 @@ from uuid import uuid4
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import create_async_engine
-from sqlmodel import SQLModel
+from sqlmodel import SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from api.models.auth import AuthenticatedUser
+from api.models.building import Building, BuildingCreate
 from api.models.user import User, UserCreate, UserRead, UserUpdate
 from api.services.auth import require_user
+from api.services.buildings import BuildingService
 from api.services.users import UserService
 from api.views import users as user_views
 
@@ -213,3 +215,117 @@ def test_sync_authenticated_user_recovers_from_create_race() -> None:
         assert result.username == "latest"
 
     asyncio.run(run())
+
+
+@asynccontextmanager
+async def user_service_with_buildings() -> AsyncIterator[
+    tuple[UserService, BuildingService, AsyncSession]
+]:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as connection:
+        await connection.run_sync(SQLModel.metadata.create_all)
+
+    try:
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            yield UserService(session), BuildingService(session), session
+    finally:
+        await engine.dispose()
+
+
+def test_delete_all_data_removes_buildings_and_user_row_only() -> None:
+    async def run() -> None:
+        async with user_service_with_buildings() as (users, buildings, session):
+            user = await users.create(
+                UserCreate(keycloak_sub="subject-1", username="user-1")
+            )
+            other = await users.create(
+                UserCreate(keycloak_sub="subject-2", username="user-2")
+            )
+            await buildings.create(
+                user_id=user.id,
+                payload=BuildingCreate(
+                    name="Main building",
+                    latitude=46.5191,
+                    longitude=6.5668,
+                ),
+            )
+            await buildings.create(
+                user_id=other.id,
+                payload=BuildingCreate(
+                    name="Other building",
+                    latitude=47.0,
+                    longitude=7.0,
+                ),
+            )
+
+            await users.delete_all_data(user)
+
+            remaining = (await session.exec(select(Building))).all()
+            assert [building.user_id for building in remaining] == [other.id]
+            assert await users.get(user.id) is None
+            assert await users.get(other.id) is not None
+
+    asyncio.run(run())
+
+
+def test_delete_all_data_route_returns_no_content() -> None:
+    async def run() -> None:
+        engine = create_async_engine("sqlite+aiosqlite://")
+        async with engine.begin() as connection:
+            await connection.run_sync(SQLModel.metadata.create_all)
+        try:
+            async with AsyncSession(engine, expire_on_commit=False) as session:
+                users = UserService(session)
+                buildings = BuildingService(session)
+                user = await users.create(UserCreate(keycloak_sub="subject-1"))
+                other = await users.create(UserCreate(keycloak_sub="subject-2"))
+                await buildings.create(
+                    user_id=user.id,
+                    payload=BuildingCreate(
+                        name="Main building",
+                        latitude=46.5191,
+                        longitude=6.5668,
+                    ),
+                )
+
+                app = FastAPI()
+                app.include_router(user_views.router, prefix="/user")
+                app.dependency_overrides[require_user] = lambda: user
+                app.dependency_overrides[user_views.get_user_service] = lambda: users
+
+                with TestClient(app) as client:
+                    response = client.delete("/user/me/data")
+
+                assert response.status_code == 204
+                assert (await session.exec(select(Building))).all() == []
+                assert await users.get(user.id) is None
+                assert await users.get(other.id) is not None
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
+
+
+def test_delete_all_data_route_maps_database_errors_to_unavailable() -> None:
+    class FailingUserService:
+        async def delete_all_data(self, user: User) -> None:
+            raise SQLAlchemyError("boom")
+
+    current_user = User(
+        id=uuid4(),
+        keycloak_sub="subject-1",
+        username="tester",
+        email=None,
+        name=None,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    app = FastAPI()
+    app.include_router(user_views.router, prefix="/user")
+    app.dependency_overrides[require_user] = lambda: current_user
+    app.dependency_overrides[user_views.get_user_service] = lambda: FailingUserService()
+
+    with TestClient(app) as client:
+        response = client.delete("/user/me/data")
+
+    assert response.status_code == 503

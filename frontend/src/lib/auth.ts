@@ -99,6 +99,30 @@ export function logout(): void {
     clearAccessToken();
 }
 
+/** Remove every trace of the app on this device: storage, caches, databases. */
+export async function clearLocalData(): Promise<void> {
+    localStorage.clear();
+    sessionStorage.clear();
+    if (typeof caches !== 'undefined') {
+        const names = await caches.keys();
+        await Promise.all(names.map((name) => caches.delete(name)));
+    }
+    if (typeof indexedDB.databases === 'function') {
+        const names = (await indexedDB.databases())
+            .map(({ name }) => name)
+            .filter((name): name is string => !!name);
+        await Promise.all(names.map(deleteIndexedDatabase));
+    }
+}
+
+/** deleteDatabase returns an IDBRequest, so wrap it; best-effort, never rejects. */
+function deleteIndexedDatabase(name: string): Promise<void> {
+    return new Promise((resolve) => {
+        const request = indexedDB.deleteDatabase(name);
+        request.onsuccess = request.onerror = request.onblocked = () => resolve();
+    });
+}
+
 /** Build the Keycloak authorization URL for the login redirect. */
 export function buildKeycloakLoginUrl(): string {
     // Random state for login CSRF protection: we verify it on the callback so

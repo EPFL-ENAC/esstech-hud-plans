@@ -8,7 +8,9 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from api.db import retry_on_db_error
 from api.models.auth import AuthenticatedUser
+from api.models.building import Building
 from api.models.user import User, UserCreate, UserUpdate, utc_now
+from api.services.buildings import BuildingService
 
 
 class UserService:
@@ -61,6 +63,23 @@ class UserService:
         self._session.add(user)
         await self._commit_and_refresh(user)
         return user
+
+    async def delete_all_data(self, user: User) -> None:
+        """Delete every building owned by the user, then the user row."""
+
+        building_service = BuildingService(self._session)
+        result = await self._session.exec(
+            select(Building).where(Building.user_id == user.id)
+        )
+        for building in result.all():
+            await building_service.delete(building)
+
+        try:
+            await self._session.delete(user)
+            await self._session.commit()
+        except Exception:
+            await self._session.rollback()
+            raise
 
     async def sync_authenticated_user(self, identity: AuthenticatedUser) -> User:
         """Create or refresh the user matching a verified identity."""

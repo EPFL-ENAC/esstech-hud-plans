@@ -49,6 +49,15 @@ export default {
         language: 'Language',
         help: 'Help & Support',
         helpPlaceholder: 'Help and support resources will be available here.',
+        deleteAllData: 'Delete all data',
+        deleteAllDataTitle: 'Delete all data?',
+        deleteAllDataWarning:
+            'This permanently deletes all your buildings, reconstructions, and generated files. This cannot be undone. Type "{keyword}" to confirm.',
+        deleteAllDataKeyword: 'DELETE',
+        deleteAllDataConfirm: 'Delete everything',
+        deleteAllDataDoneTitle: 'All data deleted',
+        deleteAllDataDone: 'All your data has been deleted. You will now be signed out.',
+        deleteAllDataFailed: 'Could not delete your data. Please try again.',
     },
     auth: {
         appTitle: 'Points of Home',

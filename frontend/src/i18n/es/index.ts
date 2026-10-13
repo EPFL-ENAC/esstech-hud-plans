@@ -51,6 +51,15 @@ export default {
         language: 'Idioma',
         help: 'Ayuda y asistencia',
         helpPlaceholder: 'Los recursos de ayuda y asistencia estarán disponibles aquí.',
+        deleteAllData: 'Eliminar todos los datos',
+        deleteAllDataTitle: '¿Eliminar todos los datos?',
+        deleteAllDataWarning:
+            'Esto elimina permanentemente todos tus edificios, reconstrucciones y archivos generados. No se puede deshacer. Escribe "{keyword}" para confirmar.',
+        deleteAllDataKeyword: 'ELIMINAR',
+        deleteAllDataConfirm: 'Eliminar todo',
+        deleteAllDataDoneTitle: 'Datos eliminados',
+        deleteAllDataDone: 'Todos tus datos han sido eliminados. Se cerrará tu sesión.',
+        deleteAllDataFailed: 'No se pudieron eliminar tus datos. Inténtalo de nuevo.',
     },
     auth: {
         appTitle: 'Points of Home',
