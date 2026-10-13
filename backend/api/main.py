@@ -19,6 +19,7 @@ from api.views.splats import router as splats_router
 from api.views.tus import router as tus_router
 from api.views.tus_proxy import close_tus_proxy
 from api.views.tus_proxy import router as tus_proxy_router
+from api.views.uploads import router as uploads_router
 from api.views.users import router as users_router
 from api.views.workflows import router as workflows_router
 
@@ -108,6 +109,12 @@ app.include_router(
     buildings_router,
     prefix="/buildings",
     tags=["Buildings"],
+)
+
+app.include_router(
+    uploads_router,
+    prefix="/uploads",
+    tags=["Uploads"],
 )
 
 app.include_router(

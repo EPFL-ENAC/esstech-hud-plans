@@ -1,0 +1,612 @@
+import asyncio
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from unittest.mock import AsyncMock
+from uuid import UUID, uuid4
+
+import pytest
+from alembic.config import Config
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
+from alembic.script import ScriptDirectory
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy import (
+    BigInteger,
+    Column,
+    DateTime,
+    Integer,
+    MetaData,
+    Table,
+    create_engine,
+    event,
+    inspect,
+    text,
+)
+from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.pool import StaticPool
+from sqlmodel import SQLModel
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from api.db import get_session
+from api.models.building import Building
+from api.models.reconstruction import Reconstruction
+from api.models.uploads import (
+    UploadStatus,
+    UserUploadCreate,
+    UserUploadRead,
+    UserUploads,
+    UserUploadUpdate,
+)
+from api.models.user import User
+from api.services.auth import require_user
+from api.services.uploads import SortOrder, UserUploadsService
+from api.views import uploads as upload_views
+
+USER_ID = UUID(int=1)
+OTHER_USER_ID = UUID(int=2)
+
+
+@pytest.fixture
+def database() -> Iterator[AsyncEngine]:
+    engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def enable_foreign_keys(connection: object, record: object) -> None:
+        connection.execute("PRAGMA foreign_keys=ON")  # type: ignore[attr-defined]
+
+    async def prepare_database() -> None:
+        async with engine.begin() as connection:
+            await connection.run_sync(SQLModel.metadata.create_all)
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            session.add_all(
+                [
+                    User(id=USER_ID, keycloak_sub="subject-1"),
+                    User(id=OTHER_USER_ID, keycloak_sub="subject-2"),
+                ]
+            )
+            await session.commit()
+
+    asyncio.run(prepare_database())
+    try:
+        yield engine
+    finally:
+        asyncio.run(engine.dispose())
+
+
+@asynccontextmanager
+async def uploads_service(
+    engine: AsyncEngine,
+) -> AsyncIterator[tuple[UserUploadsService, AsyncSession]]:
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        yield UserUploadsService(session), session
+
+
+@pytest.fixture
+def api_client(database: AsyncEngine) -> Iterator[TestClient]:
+    async def session_override() -> AsyncIterator[AsyncSession]:
+        async with AsyncSession(database, expire_on_commit=False) as session:
+            yield session
+
+    app = FastAPI()
+    app.include_router(upload_views.router, prefix="/uploads")
+    app.dependency_overrides[get_session] = session_override
+    app.dependency_overrides[require_user] = lambda: User(
+        id=USER_ID,
+        keycloak_sub="subject-1",
+    )
+    with TestClient(app) as client:
+        yield client
+
+
+def test_upload_defaults_and_column_types() -> None:
+    upload = UserUploads(
+        user_id=USER_ID,
+        filename="video.mp4",
+        size_bytes=0,
+        file_path="TODO",
+    )
+    assert isinstance(upload.id, UUID)
+    assert upload.name == "TODO"
+    assert upload.description == ""
+    assert upload.status == UploadStatus.PENDING
+    assert upload.created_at.tzinfo == UTC
+    assert upload.uploaded_at is None
+    table = SQLModel.metadata.tables["user_uploads"]
+    assert isinstance(table.c.size_bytes.type, BigInteger)
+    created_at_type = table.c.created_at.type
+    uploaded_at_type = table.c.uploaded_at.type
+    assert isinstance(created_at_type, DateTime)
+    assert isinstance(uploaded_at_type, DateTime)
+    assert created_at_type.timezone is True
+    assert uploaded_at_type.timezone is True
+    assert table.c.uploaded_at.nullable is True
+    assert not issubclass(UserUploadCreate, SQLModel)
+    assert not issubclass(UserUploadUpdate, SQLModel)
+    assert not issubclass(UserUploadRead, SQLModel)
+
+
+def test_upload_service_crud_preserves_file(
+    database: AsyncEngine, tmp_path: Path
+) -> None:
+    file_path = tmp_path / "video.mp4"
+    file_path.write_bytes(b"existing file")
+
+    async def run() -> None:
+        async with uploads_service(database) as (uploads, session):
+            upload = await uploads.create(
+                user_id=USER_ID,
+                payload=UserUploadCreate(),
+                filename=file_path.name,
+                size_bytes=2**32,
+                file_path=str(file_path),
+            )
+            upload_id = upload.id
+            assert await uploads.get(upload_id, user_id=OTHER_USER_ID) is None
+            assert await uploads.get(uuid4(), user_id=USER_ID) is None
+            assert await uploads.list(user_id=OTHER_USER_ID) == []
+
+            session.expunge_all()
+            persisted = await uploads.get(upload_id, user_id=USER_ID)
+            assert persisted is not None
+            original = UserUploadRead.model_validate(persisted).model_dump()
+            assert original["size_bytes"] == 2**32
+            assert original["status"] == UploadStatus.PENDING
+            assert original["uploaded_at"] is None
+
+            updated = await uploads.update(
+                persisted,
+                UserUploadUpdate(name="Video", description="A building"),
+            )
+            assert UserUploadRead.model_validate(updated).model_dump() == {
+                **original,
+                "name": "Video",
+                "description": "A building",
+            }
+            assert await uploads.update(updated, UserUploadUpdate()) is updated
+            await uploads.delete(updated)
+            assert await uploads.get(upload_id, user_id=USER_ID) is None
+
+    asyncio.run(run())
+    assert file_path.read_bytes() == b"existing file"
+
+
+@pytest.mark.parametrize("sort_order", ["asc", "desc"])
+def test_upload_list_orders_and_scopes_before_pagination(
+    database: AsyncEngine,
+    sort_order: SortOrder,
+) -> None:
+    async def run() -> None:
+        async with uploads_service(database) as (uploads, session):
+            timestamp = datetime(2026, 10, 13, tzinfo=UTC)
+            owned = [
+                UserUploads(
+                    id=UUID(int=100 - index),
+                    user_id=USER_ID,
+                    filename="video.mp4",
+                    size_bytes=0,
+                    file_path="TODO",
+                    created_at=timestamp + timedelta(days=index // 2),
+                )
+                for index in range(6)
+            ]
+            session.add_all(owned)
+            session.add(
+                UserUploads(
+                    user_id=OTHER_USER_ID,
+                    filename="other.mp4",
+                    size_bytes=0,
+                    file_path="TODO",
+                    created_at=timestamp,
+                )
+            )
+            await session.commit()
+            expected = sorted(
+                owned,
+                key=lambda upload: (upload.created_at, upload.id),
+                reverse=sort_order == "desc",
+            )
+            for offset in range(0, 8, 2):
+                page = await uploads.list(
+                    user_id=USER_ID,
+                    offset=offset,
+                    limit=2,
+                    sort_order=sort_order,
+                )
+                assert [upload.id for upload in page] == [
+                    upload.id for upload in expected[offset : offset + 2]
+                ]
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "pagination",
+    [
+        {"offset": -1},
+        {"limit": 0},
+        {"limit": 101},
+        {"sort_order": "invalid"},
+    ],
+)
+def test_upload_service_validates_pagination(
+    database: AsyncEngine,
+    pagination: dict[str, object],
+) -> None:
+    async def run() -> None:
+        async with uploads_service(database) as (uploads, session):
+            with pytest.raises(ValueError):
+                await uploads.list(user_id=USER_ID, **pagination)  # type: ignore[arg-type]
+
+    asyncio.run(run())
+
+
+def test_failed_creation_rolls_back(database: AsyncEngine) -> None:
+    async def run() -> None:
+        async with uploads_service(database) as (uploads, session):
+            with pytest.raises(IntegrityError):
+                await uploads.create(
+                    user_id=uuid4(),
+                    payload=UserUploadCreate(),
+                    filename="missing-owner.mp4",
+                    size_bytes=0,
+                    file_path="TODO",
+                )
+            assert await uploads.list(user_id=USER_ID) == []
+            created = await uploads.create(
+                user_id=USER_ID,
+                payload=UserUploadCreate(),
+                filename="video.mp4",
+                size_bytes=0,
+                file_path="TODO",
+            )
+            assert created.user_id == USER_ID
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("operation", ["update", "delete"])
+def test_failed_mutation_rolls_back(
+    database: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    async def run() -> None:
+        async with uploads_service(database) as (uploads, session):
+            created = await uploads.create(
+                user_id=USER_ID,
+                payload=UserUploadCreate(),
+                filename="video.mp4",
+                size_bytes=0,
+                file_path="TODO",
+            )
+            upload_id = created.id
+            with monkeypatch.context() as patches:
+                patches.setattr(
+                    session,
+                    "commit",
+                    AsyncMock(side_effect=OperationalError("commit", {}, Exception())),
+                )
+                with pytest.raises(OperationalError):
+                    if operation == "update":
+                        await uploads.update(created, UserUploadUpdate(name="Changed"))
+                    else:
+                        await uploads.delete(created)
+            persisted = await uploads.get(upload_id, user_id=USER_ID)
+            assert persisted is not None
+            assert persisted.name == "TODO"
+
+    asyncio.run(run())
+
+
+def test_upload_routes_cover_crud(api_client: TestClient) -> None:
+    response = api_client.post("/uploads", json={})
+    assert response.status_code == 201
+    created = response.json()
+    upload_id = created["id"]
+    assert UUID(upload_id)
+    assert datetime.fromisoformat(created["created_at"])
+    assert created == {
+        "id": upload_id,
+        "user_id": str(USER_ID),
+        "name": "TODO",
+        "description": "",
+        "filename": "placeholder.bin",
+        "size_bytes": 0,
+        "file_path": "TODO",
+        "status": "pending",
+        "created_at": created["created_at"],
+        "uploaded_at": None,
+    }
+    assert api_client.get("/uploads").json() == [created]
+    assert api_client.get(f"/uploads/{upload_id}").json() == created
+    updated = api_client.patch(
+        f"/uploads/{upload_id}",
+        json={"name": "My video"},
+    )
+    assert updated.status_code == 200
+    assert updated.json() == {**created, "name": "My video"}
+    updated = api_client.patch(
+        f"/uploads/{upload_id}",
+        json={"description": "My description"},
+    )
+    assert updated.json() == {
+        **created,
+        "name": "My video",
+        "description": "My description",
+    }
+    assert api_client.patch(f"/uploads/{upload_id}", json={}).json() == updated.json()
+    assert api_client.get(f"/uploads/{upload_id}").json() == updated.json()
+    deleted = api_client.delete(f"/uploads/{upload_id}")
+    assert deleted.status_code == 204
+    assert deleted.content == b""
+    assert api_client.get(f"/uploads/{upload_id}").status_code == 404
+    assert api_client.get("/uploads").json() == []
+
+
+def test_upload_creation_accepts_user_metadata(api_client: TestClient) -> None:
+    response = api_client.post(
+        "/uploads",
+        json={"name": "Video", "description": "A building"},
+    )
+    assert response.status_code == 201
+    assert response.json()["name"] == "Video"
+    assert response.json()["description"] == "A building"
+
+
+@pytest.mark.parametrize("method", ["post", "patch"])
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"name": None},
+        {"description": None},
+        {"id": str(USER_ID)},
+        {"user_id": str(OTHER_USER_ID)},
+        {"filename": "video.mp4"},
+        {"size_bytes": 100},
+        {"file_path": "/some/path"},
+        {"status": "uploaded"},
+        {"created_at": "2026-10-13T00:00:00Z"},
+        {"uploaded_at": "2026-10-13T00:00:00Z"},
+    ],
+)
+def test_upload_routes_reject_nulls_and_noneditable_fields(
+    api_client: TestClient,
+    method: str,
+    payload: dict[str, object],
+) -> None:
+    created = api_client.post("/uploads", json={}).json()
+    path = "/uploads" if method == "post" else f"/uploads/{created['id']}"
+    assert api_client.request(method, path, json=payload).status_code == 422
+    assert api_client.get(f"/uploads/{created['id']}").json() == created
+
+
+@pytest.mark.parametrize(
+    "query",
+    ["offset=-1", "limit=0", "limit=101", "sort_order=invalid"],
+)
+def test_upload_routes_validate_pagination(api_client: TestClient, query: str) -> None:
+    assert api_client.get(f"/uploads?{query}").status_code == 422
+
+
+def test_upload_routes_hide_other_users_rows(api_client: TestClient) -> None:
+    created = api_client.post("/uploads", json={}).json()
+    assert isinstance(api_client.app, FastAPI)
+    api_client.app.dependency_overrides[require_user] = lambda: User(
+        id=OTHER_USER_ID,
+        keycloak_sub="subject-2",
+    )
+    assert api_client.get("/uploads").json() == []
+    for upload_id in [created["id"], str(uuid4())]:
+        for method in ["get", "patch", "delete"]:
+            response = api_client.request(method, f"/uploads/{upload_id}", json={})
+            assert response.status_code == 404
+            assert response.json() == {"detail": "Upload not found"}
+    api_client.app.dependency_overrides[require_user] = lambda: User(
+        id=USER_ID,
+        keycloak_sub="subject-1",
+    )
+    assert api_client.get(f"/uploads/{created['id']}").json() == created
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("post", "/uploads"),
+        ("get", "/uploads"),
+        ("get", f"/uploads/{USER_ID}"),
+        ("patch", f"/uploads/{USER_ID}"),
+        ("delete", f"/uploads/{USER_ID}"),
+    ],
+)
+def test_upload_routes_require_authentication(
+    api_client: TestClient,
+    method: str,
+    path: str,
+) -> None:
+    assert isinstance(api_client.app, FastAPI)
+    del api_client.app.dependency_overrides[require_user]
+    assert api_client.request(method, path, json={}).status_code == 401
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [OSError("unavailable"), OperationalError("", {}, Exception())],
+)
+@pytest.mark.parametrize("operation", ["create", "list", "get", "update", "delete"])
+def test_upload_routes_map_database_failures(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    failure: Exception,
+) -> None:
+    upload_id = api_client.post("/uploads", json={}).json()["id"]
+    monkeypatch.setattr(
+        UserUploadsService,
+        operation,
+        AsyncMock(side_effect=failure),
+    )
+    method, path = {
+        "create": ("post", "/uploads"),
+        "list": ("get", "/uploads"),
+        "get": ("get", f"/uploads/{upload_id}"),
+        "update": ("patch", f"/uploads/{upload_id}"),
+        "delete": ("delete", f"/uploads/{upload_id}"),
+    }[operation]
+    response = api_client.request(method, path, json={"name": "Changed"})
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Upload database is unavailable"}
+
+
+def test_upload_router_is_registered_in_application() -> None:
+    from api.main import app
+
+    paths = app.openapi()["paths"]
+    assert {"get", "post"} <= paths["/uploads"].keys()
+    assert {"get", "patch", "delete"} <= paths["/uploads/{upload_id}"].keys()
+
+
+def test_upload_migration_preserves_existing_tables_and_cascades() -> None:
+    config = Config()
+    config.set_main_option(
+        "script_location",
+        str(Path(__file__).resolve().parents[1] / "migrations"),
+    )
+    scripts = ScriptDirectory.from_config(config)
+    migration = scripts.get_revision("32120c241602")
+    assert migration is not None
+    assert migration.down_revision == "c82a6f419d03"
+    assert isinstance(migration.down_revision, str)
+    user_table = SQLModel.metadata.tables["users"]
+    building_table = SQLModel.metadata.tables[Building.__tablename__]
+    reconstruction_table = SQLModel.metadata.tables[Reconstruction.__tablename__]
+    upload_table = SQLModel.metadata.tables["user_uploads"]
+    engine = create_engine("sqlite://")
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+            unmanaged = Table(
+                "prefect_flow_run",
+                MetaData(),
+                Column("id", Integer, primary_key=True),
+            )
+            unmanaged.create(connection)
+            connection.execute(unmanaged.insert().values(id=1))
+            with Operations.context(MigrationContext.configure(connection)):
+                for revision in reversed(
+                    list(
+                        scripts.walk_revisions(
+                            base="base",
+                            head=migration.down_revision,
+                        )
+                    )
+                ):
+                    revision.module.upgrade()
+                connection.execute(
+                    user_table.insert().values(
+                        id=USER_ID,
+                        keycloak_sub="existing",
+                        created_at=datetime.now(UTC),
+                        updated_at=datetime.now(UTC),
+                    )
+                )
+                connection.execute(
+                    building_table.insert().values(
+                        id=USER_ID,
+                        user_id=USER_ID,
+                        name="Existing building",
+                        created_at=datetime.now(UTC),
+                        updated_at=datetime.now(UTC),
+                    )
+                )
+                connection.execute(
+                    reconstruction_table.insert().values(
+                        id=USER_ID,
+                        building_id=USER_ID,
+                        settings={},
+                        status="preparing",
+                        created_at=datetime.now(UTC),
+                        updated_at=datetime.now(UTC),
+                    )
+                )
+                existing_tables = [
+                    "users",
+                    "buildings",
+                    "reconstructions",
+                    "prefect_flow_run",
+                ]
+                before = {
+                    table: connection.execute(text(f"SELECT * FROM {table}")).all()
+                    for table in existing_tables
+                }
+                migration.module.upgrade()
+
+                inspector = inspect(connection)
+                columns = {
+                    column["name"]: column
+                    for column in inspector.get_columns("user_uploads")
+                }
+                assert isinstance(columns["size_bytes"]["type"], BigInteger)
+                assert columns["uploaded_at"]["nullable"] is True
+                assert columns["created_at"]["nullable"] is False
+                foreign_key = inspector.get_foreign_keys("user_uploads")[0]
+                assert foreign_key["referred_table"] == "users"
+                assert foreign_key["options"] == {"ondelete": "CASCADE"}
+                assert inspector.get_indexes("user_uploads")[0]["column_names"] == [
+                    "user_id"
+                ]
+
+                connection.execute(
+                    upload_table.insert().values(
+                        user_id=USER_ID,
+                        filename="video.mp4",
+                        size_bytes=2**32,
+                        file_path="TODO",
+                        status="pending",
+                        created_at=datetime.now(UTC),
+                    )
+                )
+                assert (
+                    connection.execute(
+                        text("SELECT size_bytes FROM user_uploads")
+                    ).scalar()
+                    == 2**32
+                )
+                migration.module.downgrade()
+                assert "user_uploads" not in inspect(connection).get_table_names()
+                assert before == {
+                    table: connection.execute(text(f"SELECT * FROM {table}")).all()
+                    for table in existing_tables
+                }
+
+                migration.module.upgrade()
+                connection.execute(
+                    upload_table.insert().values(
+                        user_id=USER_ID,
+                        filename="video.mp4",
+                        size_bytes=0,
+                        file_path="TODO",
+                        status="pending",
+                        created_at=datetime.now(UTC),
+                    )
+                )
+                connection.execute(
+                    user_table.delete().where(user_table.c.id == USER_ID)
+                )
+                assert (
+                    connection.execute(
+                        text("SELECT count(*) FROM user_uploads")
+                    ).scalar()
+                    == 0
+                )
+                assert (
+                    connection.execute(
+                        text("SELECT count(*) FROM prefect_flow_run")
+                    ).scalar()
+                    == 1
+                )
+    finally:
+        engine.dispose()
