@@ -60,6 +60,12 @@ tusd container and the backend, and must stay on a local disk. On machines
 where `/tmp` is not shared with the docker daemon, set `TUSD_UPLOAD_DIR` to a
 path under the repo (for example `backend/data/tusd-uploads`).
 
+Set `TUSD_HOOK_SECRET` in `.env` to a random value (generate one with
+`openssl rand -hex 32`). The API injects this internal credential into tusd
+requests, and tusd forwards it to the upload hooks. Recreate the tusd container
+after changing its hook configuration. Starting a TUS upload creates its metadata
+row; finishing it marks that row uploaded. Uploads cannot be deleted while pending.
+
 The API and workflow process must share the `backend/data/workflows` directory.
 The `splat-generation/default` deployment runs FFmpeg, optionally selects frames
 locally with the frame picker, then runs COLMAP and Brush. It is submitted through

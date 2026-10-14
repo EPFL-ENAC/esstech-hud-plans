@@ -1,12 +1,34 @@
+import asyncio
+from collections.abc import AsyncIterator, Iterator
+from unittest.mock import AsyncMock
+from uuid import UUID
+
 import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import StaticPool
+from sqlmodel import SQLModel
+from sqlmodel.ext.asyncio.session import AsyncSession
 
+from api.config import config
+from api.db import get_session
+from api.lib.tus import TUS_HOOK_SECRET_HEADER, TUS_UPLOAD_ID_HEADER
+from api.models.uploads import UploadStatus, UserUploadRead, UserUploads
+from api.models.user import User
 from api.services.auth import require_user
+from api.services.uploads import UserUploadsService
 from api.views import tus_proxy
 
 UPSTREAM_BASE = "http://tusd:8080"
+USER_ID = UUID(int=1)
+OTHER_USER_ID = UUID(int=2)
+
+
+@pytest.fixture(autouse=True)
+def hook_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(config, "TUSD_HOOK_SECRET", "test-hook-secret")
 
 
 # Mock responses must carry their body as a stream. A response built with
@@ -41,12 +63,61 @@ def _install_transport(
 
 
 @pytest.fixture
-def tus_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+def tus_client() -> Iterator[TestClient]:
+    engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+
+    async def prepare() -> None:
+        async with engine.begin() as connection:
+            await connection.run_sync(SQLModel.metadata.create_all)
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            session.add_all(
+                [
+                    User(id=USER_ID, keycloak_sub="subject-1"),
+                    User(id=OTHER_USER_ID, keycloak_sub="subject-2"),
+                    *[
+                        UserUploads(
+                            id=UUID(character * 32),
+                            user_id=USER_ID,
+                            filename="video.mp4",
+                            size_bytes=11,
+                            file_path="TODO",
+                        )
+                        for character in ("c", "d")
+                    ],
+                ]
+            )
+            await session.commit()
+
+    asyncio.run(prepare())
+
+    async def session_override() -> AsyncIterator[AsyncSession]:
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            yield session
+
     app = FastAPI()
+    app.state.upload_database = engine
     app.include_router(tus_proxy.router, prefix="/tus")
-    app.dependency_overrides[require_user] = lambda: None
+    app.dependency_overrides[get_session] = session_override
+    app.dependency_overrides[require_user] = lambda: User(
+        id=USER_ID,
+        keycloak_sub="subject-1",
+    )
     with TestClient(app) as client:
         yield client
+    asyncio.run(engine.dispose())
+
+
+def _read_proxy_upload(tus_client: TestClient, upload_id: UUID) -> UserUploadRead:
+    assert isinstance(tus_client.app, FastAPI)
+    engine = tus_client.app.state.upload_database
+
+    async def read() -> UserUploadRead:
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            upload = await session.get(UserUploads, upload_id)
+            assert upload is not None
+            return UserUploadRead.model_validate(upload)
+
+    return asyncio.run(read())
 
 
 def test_create_forwards_headers_and_rewrites_location(
@@ -77,6 +148,8 @@ def test_create_forwards_headers_and_rewrites_location(
             "Upload-Length": "11",
             "Authorization": "Bearer token",
             "X-Custom": "drop-me",
+            TUS_UPLOAD_ID_HEADER: "client-cannot-pick-this-id",
+            TUS_HOOK_SECRET_HEADER: "client-cannot-pick-this-secret",
         },
     )
 
@@ -94,6 +167,9 @@ def test_create_forwards_headers_and_rewrites_location(
     assert upstream.headers["authorization"] == "Bearer token"
     assert upstream.headers["host"] == "tusd:8080"
     assert "x-custom" not in upstream.headers
+    assert UUID(upstream.headers[TUS_UPLOAD_ID_HEADER])
+    assert upstream.headers[TUS_HOOK_SECRET_HEADER] == "test-hook-secret"
+    assert TUS_HOOK_SECRET_HEADER.lower() not in response.headers
 
 
 def test_create_without_trailing_slash_reaches_tusd(
@@ -203,6 +279,9 @@ def test_head_forwards_offset_and_returns_no_body(
     assert response.headers["upload-length"] == "11"
     assert response.headers["cache-control"] == "no-store"
     assert response.content == b""
+    completed = _read_proxy_upload(tus_client, UUID(upload_id))
+    assert completed.status == UploadStatus.UPLOADED
+    assert completed.uploaded_at is not None
 
 
 def test_options_forwards_tus_capabilities(
@@ -284,3 +363,189 @@ def test_proxy_requires_authenticated_user() -> None:
     with TestClient(app) as client:
         assert client.patch(f"/tus/files/{'e' * 32}").status_code == 401
         assert client.delete(f"/tus/files/{'e' * 32}").status_code == 401
+
+
+def _complete_proxy_upload(tus_client: TestClient, upload_id: UUID) -> None:
+    assert isinstance(tus_client.app, FastAPI)
+    engine = tus_client.app.state.upload_database
+
+    async def complete() -> None:
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            await UserUploadsService(session).mark_uploaded(upload_id)
+
+    asyncio.run(complete())
+
+
+def test_pending_tus_delete_has_no_side_effects(
+    monkeypatch: pytest.MonkeyPatch,
+    tus_client: TestClient,
+) -> None:
+    upload_id = UUID("c" * 32)
+    before = _read_proxy_upload(tus_client, upload_id)
+    received: list[httpx.Request] = []
+    _install_transport(monkeypatch, {}, received)
+    response = tus_client.delete(f"/tus/files/{upload_id.hex}")
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Upload has not finished uploading"}
+    assert received == []
+    assert _read_proxy_upload(tus_client, upload_id) == before
+
+
+def test_completed_tus_delete_forwards_to_tusd(
+    monkeypatch: pytest.MonkeyPatch,
+    tus_client: TestClient,
+) -> None:
+    upload_id = UUID("c" * 32)
+    _complete_proxy_upload(tus_client, upload_id)
+    received: list[httpx.Request] = []
+    _install_transport(
+        monkeypatch,
+        {("DELETE", f"/files/{upload_id.hex}"): _upstream_response(204)},
+        received,
+    )
+    response = tus_client.delete(f"/tus/files/{upload_id.hex}")
+    assert response.status_code == 204
+    assert response.content == b""
+    assert received[0].headers[TUS_HOOK_SECRET_HEADER] == "test-hook-secret"
+    assert _read_proxy_upload(tus_client, upload_id).status == UploadStatus.UPLOADED
+
+
+@pytest.mark.parametrize("method", ["HEAD", "PATCH", "DELETE"])
+@pytest.mark.parametrize("other_user", [False, True])
+def test_proxy_hides_unowned_or_unknown_uploads(
+    monkeypatch: pytest.MonkeyPatch,
+    tus_client: TestClient,
+    method: str,
+    other_user: bool,
+) -> None:
+    assert isinstance(tus_client.app, FastAPI)
+    if other_user:
+        tus_client.app.dependency_overrides[require_user] = lambda: User(
+            id=OTHER_USER_ID,
+            keycloak_sub="subject-2",
+        )
+    upload_id = "c" * 32 if other_user else "e" * 32
+    received: list[httpx.Request] = []
+    _install_transport(monkeypatch, {}, received)
+    assert tus_client.request(method, f"/tus/files/{upload_id}").status_code == 404
+    assert received == []
+
+
+@pytest.mark.parametrize(
+    ("status_code", "offset", "length"),
+    [
+        (200, "5", "11"),
+        (200, "11", "12"),
+        (200, "invalid", "11"),
+        (200, "11", None),
+        (404, "11", "11"),
+        (500, "11", "11"),
+    ],
+)
+def test_head_does_not_complete_partial_or_invalid_upstream_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tus_client: TestClient,
+    status_code: int,
+    offset: str,
+    length: str | None,
+) -> None:
+    headers = {"Upload-Offset": offset}
+    if length is not None:
+        headers["Upload-Length"] = length
+    upstream = _upstream_response(status_code, headers=headers)
+    received: list[httpx.Request] = []
+    _install_transport(
+        monkeypatch, {("HEAD", f"/files/{'d' * 32}"): upstream}, received
+    )
+    response = tus_client.head(f"/tus/files/{'d' * 32}")
+    assert response.status_code == status_code
+    assert _read_proxy_upload(tus_client, UUID("d" * 32)).status == UploadStatus.PENDING
+    assert upstream.is_closed
+
+
+def test_head_closes_upstream_on_database_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tus_client: TestClient,
+) -> None:
+    upstream = _upstream_response(
+        200,
+        headers={"Upload-Offset": "11", "Upload-Length": "11"},
+    )
+    received: list[httpx.Request] = []
+    _install_transport(
+        monkeypatch, {("HEAD", f"/files/{'d' * 32}"): upstream}, received
+    )
+    monkeypatch.setattr(
+        UserUploadsService,
+        "mark_uploaded",
+        AsyncMock(side_effect=OSError("database unavailable")),
+    )
+    response = tus_client.head(f"/tus/files/{'d' * 32}")
+    assert response.status_code == 503
+    assert upstream.is_closed
+    assert _read_proxy_upload(tus_client, UUID("d" * 32)).status == UploadStatus.PENDING
+
+
+def test_head_does_not_rewrite_completed_upload(
+    monkeypatch: pytest.MonkeyPatch,
+    tus_client: TestClient,
+) -> None:
+    upload_id = UUID("d" * 32)
+    _complete_proxy_upload(tus_client, upload_id)
+    before = _read_proxy_upload(tus_client, upload_id)
+    mark_uploaded = AsyncMock()
+    monkeypatch.setattr(UserUploadsService, "mark_uploaded", mark_uploaded)
+    received: list[httpx.Request] = []
+    _install_transport(
+        monkeypatch,
+        {
+            ("HEAD", f"/files/{upload_id.hex}"): _upstream_response(
+                200,
+                headers={"Upload-Offset": "11", "Upload-Length": "11"},
+            )
+        },
+        received,
+    )
+    assert tus_client.head(f"/tus/files/{upload_id.hex}").status_code == 200
+    mark_uploaded.assert_not_awaited()
+    assert _read_proxy_upload(tus_client, upload_id) == before
+
+
+def test_proxy_database_failure_prevents_upstream_request(
+    monkeypatch: pytest.MonkeyPatch,
+    tus_client: TestClient,
+) -> None:
+    received: list[httpx.Request] = []
+    _install_transport(monkeypatch, {}, received)
+    monkeypatch.setattr(
+        UserUploadsService,
+        "get",
+        AsyncMock(side_effect=OSError("database unavailable")),
+    )
+    assert tus_client.head(f"/tus/files/{'c' * 32}").status_code == 503
+    assert received == []
+
+
+def test_proxy_requires_configured_hook_secret(
+    monkeypatch: pytest.MonkeyPatch,
+    tus_client: TestClient,
+) -> None:
+    monkeypatch.setattr(config, "TUSD_HOOK_SECRET", "")
+    received: list[httpx.Request] = []
+    _install_transport(monkeypatch, {}, received)
+    response = tus_client.post("/tus/files/", headers={"Tus-Resumable": "1.0.0"})
+    assert response.status_code == 503
+    assert received == []
+
+
+def test_proxy_closes_upstream_on_invalid_location(
+    monkeypatch: pytest.MonkeyPatch,
+    tus_client: TestClient,
+) -> None:
+    upstream = _upstream_response(
+        201, headers={"Location": "http://tusd:invalid/files/id"}
+    )
+    received: list[httpx.Request] = []
+    _install_transport(monkeypatch, {("POST", "/files/"): upstream}, received)
+    assert tus_client.post("/tus/files/").status_code == 502
+    assert upstream.is_closed

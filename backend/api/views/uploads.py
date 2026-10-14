@@ -10,14 +10,13 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from api.db import get_session
 from api.models.uploads import (
-    UserUploadCreate,
     UserUploadRead,
     UserUploads,
     UserUploadUpdate,
 )
 from api.models.user import User
 from api.services.auth import require_user
-from api.services.uploads import SortOrder, UserUploadsService
+from api.services.uploads import SortOrder, UploadConflictError, UserUploadsService
 
 logger = logging.getLogger(__name__)
 
@@ -58,30 +57,6 @@ async def get_current_upload(
             detail="Upload not found",
         )
     return upload
-
-
-@router.post(
-    "",
-    status_code=status.HTTP_201_CREATED,
-    response_model=UserUploadRead,
-)
-async def create_upload(
-    payload: UserUploadCreate,
-    current_user: Annotated[User, Depends(require_user)],
-    uploads: Annotated[UserUploadsService, Depends(get_uploads_service)],
-) -> UserUploads:
-    """Create metadata using placeholder file values until uploads are wired in."""
-
-    try:
-        return await uploads.create(
-            user_id=current_user.id,
-            payload=payload,
-            filename="placeholder.bin",
-            size_bytes=0,
-            file_path="TODO",
-        )
-    except (OSError, SQLAlchemyError) as exc:
-        raise _database_unavailable(exc) from exc
 
 
 @router.get("", response_model=list[UserUploadRead])
@@ -131,5 +106,10 @@ async def delete_upload(
 
     try:
         await uploads.delete(upload)
+    except UploadConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
     except (OSError, SQLAlchemyError) as exc:
         raise _database_unavailable(exc) from exc

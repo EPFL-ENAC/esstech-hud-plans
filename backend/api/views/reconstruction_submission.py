@@ -1,8 +1,6 @@
 """Shared dependencies and validation for resumable video reconstruction submissions."""
 
 import json
-import mimetypes
-import re
 from pathlib import Path
 from typing import Annotated
 
@@ -12,13 +10,10 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from api.config import config
 from api.db import get_session
+from api.lib.tus import TUS_UPLOAD_ID_PATTERN, validate_video_filename
 from api.models.building import BuildingCreate
 from api.models.workflows import SplatGenerationWorkflowSettings
 from api.services.reconstructions import ReconstructionService
-
-# tusd upload ids are hex tokens; keep the whitelist tight so an id can never
-# escape TUSD_UPLOAD_DIR.
-TUS_UPLOAD_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
 
 def get_reconstruction_service(
@@ -27,23 +22,6 @@ def get_reconstruction_service(
     """Build a request-scoped reconstruction service."""
 
     return ReconstructionService(session)
-
-
-def validate_video_filename(filename: str | None) -> str:
-    """Check that an upload metadata filename resolves to a video."""
-
-    if not isinstance(filename, str) or not filename:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Upload metadata must contain a filename",
-        )
-    media_type = mimetypes.guess_type(filename)[0]
-    if media_type is None or not media_type.startswith("video/"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Uploaded file must be a video",
-        )
-    return filename
 
 
 class ResumableReconstructionSubmission(BaseModel):

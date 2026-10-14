@@ -2,8 +2,10 @@ import asyncio
 import json
 import os
 import time
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
+from typing import Any
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -17,12 +19,16 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from api.config import config
 from api.db import get_session
+from api.lib.tus import TUS_HOOK_SECRET_HEADER, TUS_UPLOAD_ID_HEADER
 from api.lib.workflows import common as workflow_common
 from api.lib.workflows import splat_generation as splat_workflow
 from api.lib.workflows import tus_cleanup
+from api.models.auth import AuthenticatedUser
 from api.models.building import Building
+from api.models.uploads import UploadStatus, UserUploadRead, UserUploads
 from api.models.user import User
 from api.services.auth import require_user
+from api.services.uploads import UserUploadsService
 from api.views import buildings as building_views
 from api.views import reconstructions as reconstruction_views
 from api.views import tus as tus_views
@@ -31,6 +37,7 @@ from api.views.reconstruction_submission import validate_tus_upload
 USER_ID = UUID("00000000-0000-0000-0000-000000000001")
 BUILDING_ID = UUID("10000000-0000-0000-0000-000000000001")
 WORKFLOW_ID = UUID("20000000-0000-0000-0000-000000000001")
+UPLOAD_ID = UUID("30000000-0000-0000-0000-000000000001")
 
 
 def _hook_payload(
@@ -40,15 +47,21 @@ def _hook_payload(
     filename: str = "scan.mp4",
     size: object = 11,
     size_is_deferred: bool = False,
-) -> dict[str, object]:
+) -> dict[str, Any]:
+    request_headers: dict[str, object] = (
+        {"Authorization": ["Bearer forwarded-token"]}
+        if headers is None
+        else dict(headers)
+    )
+    request_headers[TUS_UPLOAD_ID_HEADER] = [UPLOAD_ID.hex]
     return {
         "Type": hook_type,
         "Event": {
             "Upload": {
-                "ID": None,
+                "ID": UPLOAD_ID.hex if hook_type == "pre-finish" else None,
                 "Size": size,
                 "SizeIsDeferred": size_is_deferred,
-                "Offset": 0,
+                "Offset": size if hook_type == "pre-finish" else 0,
                 "MetaData": {"filename": filename},
                 "IsPartial": False,
                 "IsFinal": False,
@@ -57,11 +70,7 @@ def _hook_payload(
             "HTTPRequest": {
                 "Method": "POST",
                 "URI": "/files/",
-                "Header": (
-                    {"Authorization": ["Bearer forwarded-token"]}
-                    if headers is None
-                    else headers
-                ),
+                "Header": request_headers,
             },
         },
     }
@@ -69,22 +78,54 @@ def _hook_payload(
 
 def _accept_any_token(
     received: list[HTTPAuthorizationCredentials],
-):
+) -> Callable[[HTTPAuthorizationCredentials], AuthenticatedUser]:
     def authenticate(
         credentials: HTTPAuthorizationCredentials,
-    ) -> object:
+    ) -> AuthenticatedUser:
         received.append(credentials)
-        return object()
+        return AuthenticatedUser(sub="subject-1")
 
     return authenticate
 
 
 @pytest.fixture
-def tus_hook_api() -> Iterator[TestClient]:
+def tus_hook_api(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    monkeypatch.setattr(config, "TUSD_HOOK_SECRET", "test-hook-secret")
+    engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+
+    async def prepare() -> None:
+        async with engine.begin() as connection:
+            await connection.run_sync(SQLModel.metadata.create_all)
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            session.add(User(id=USER_ID, keycloak_sub="subject-1"))
+            await session.commit()
+
+    asyncio.run(prepare())
+
+    async def session_override() -> AsyncIterator[AsyncSession]:
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            yield session
+
     app = FastAPI()
     app.include_router(tus_views.router, prefix="/tus")
+    app.dependency_overrides[get_session] = session_override
+    app.state.upload_database = engine
     with TestClient(app) as client:
+        client.headers[TUS_HOOK_SECRET_HEADER] = "test-hook-secret"
         yield client
+    asyncio.run(engine.dispose())
+
+
+def _read_hook_upload(tus_hook_api: TestClient) -> UserUploadRead | None:
+    assert isinstance(tus_hook_api.app, FastAPI)
+    engine = tus_hook_api.app.state.upload_database
+
+    async def read() -> UserUploadRead | None:
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            upload = await session.get(UserUploads, UPLOAD_ID)
+            return UserUploadRead.model_validate(upload) if upload is not None else None
+
+    return asyncio.run(read())
 
 
 def _make_tus_upload(
@@ -124,7 +165,19 @@ def test_hook_accepts_valid_pre_create(
     response = tus_hook_api.post("/tus/hooks", json=_hook_payload())
 
     assert response.status_code == 200
-    assert response.json() == {"ok": True}
+    assert response.json() == {"ChangeFileInfo": {"ID": UPLOAD_ID.hex}}
+    upload = _read_hook_upload(tus_hook_api)
+    assert upload is not None
+    assert upload.user_id == USER_ID
+    assert upload.filename == "scan.mp4"
+    assert upload.size_bytes == 11
+    assert upload.name == "TODO"
+    assert upload.description == ""
+    assert upload.file_path == str(
+        Path(config.TUSD_UPLOAD_DIR).resolve() / UPLOAD_ID.hex
+    )
+    assert upload.status == UploadStatus.PENDING
+    assert upload.uploaded_at is None
     assert len(received) == 1
     assert received[0].scheme == "Bearer"
     assert received[0].credentials == "forwarded-token"
@@ -195,7 +248,8 @@ def test_hook_rejects_non_video_filename(
     body = response.json()
     assert body["RejectUpload"] is True
     assert body["HTTPResponse"]["StatusCode"] == 400
-    assert len(received) == 1
+    assert len(received) == 0
+    assert _read_hook_upload(tus_hook_api) is None
 
 
 @pytest.mark.parametrize(
@@ -228,7 +282,7 @@ def test_hook_acknowledges_other_hook_types(tus_hook_api: TestClient) -> None:
     )
 
     assert response.status_code == 200
-    assert response.json() == {"ok": True}
+    assert response.json() == {}
 
 
 def test_hook_rejects_invalid_payload(tus_hook_api: TestClient) -> None:
@@ -654,3 +708,153 @@ def test_tus_cleanup_flow_uses_configured_directory(
 
     assert removed == ["expired"]
     assert not (upload_dir / "expired").exists()
+
+
+def test_pre_finish_marks_uploaded_before_acknowledging(
+    monkeypatch: pytest.MonkeyPatch,
+    tus_hook_api: TestClient,
+) -> None:
+    monkeypatch.setattr(tus_views, "authenticate_user", _accept_any_token([]))
+    creation = _hook_payload()
+    assert tus_hook_api.post("/tus/hooks", json=creation).status_code == 200
+    completion = _hook_payload(hook_type="pre-finish", headers={})
+    response = tus_hook_api.post("/tus/hooks", json=completion)
+    assert response.status_code == 200
+    assert response.json() == {}
+    uploaded = _read_hook_upload(tus_hook_api)
+    assert uploaded is not None
+    assert uploaded.status == UploadStatus.UPLOADED
+    assert uploaded.uploaded_at is not None
+    assert tus_hook_api.post("/tus/hooks", json=completion).status_code == 200
+    assert tus_hook_api.post("/tus/hooks", json=creation).status_code == 200
+    assert _read_hook_upload(tus_hook_api) == uploaded
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"Offset": 5},
+        {"Size": 12, "Offset": 12},
+        {"MetaData": {"filename": "different.mp4"}},
+    ],
+)
+def test_pre_finish_rejects_mismatched_completion(
+    monkeypatch: pytest.MonkeyPatch,
+    tus_hook_api: TestClient,
+    changes: dict[str, object],
+) -> None:
+    monkeypatch.setattr(tus_views, "authenticate_user", _accept_any_token([]))
+    assert tus_hook_api.post("/tus/hooks", json=_hook_payload()).status_code == 200
+    before = _read_hook_upload(tus_hook_api)
+    payload = _hook_payload(hook_type="pre-finish")
+    payload["Event"]["Upload"].update(changes)
+    response = tus_hook_api.post("/tus/hooks", json=payload)
+    assert response.status_code == 409
+    assert _read_hook_upload(tus_hook_api) == before
+
+
+def test_pre_finish_rejects_unregistered_upload(tus_hook_api: TestClient) -> None:
+    response = tus_hook_api.post(
+        "/tus/hooks",
+        json=_hook_payload(hook_type="pre-finish"),
+    )
+    assert response.status_code == 404
+    assert _read_hook_upload(tus_hook_api) is None
+
+
+@pytest.mark.parametrize("secret", ["", "incorrect"])
+def test_hook_rejects_invalid_internal_credential(
+    tus_hook_api: TestClient,
+    secret: str,
+) -> None:
+    response = tus_hook_api.post(
+        "/tus/hooks",
+        json=_hook_payload(),
+        headers={TUS_HOOK_SECRET_HEADER: secret},
+    )
+    assert response.status_code == 403
+    assert _read_hook_upload(tus_hook_api) is None
+
+
+def test_hook_requires_configured_secret(
+    monkeypatch: pytest.MonkeyPatch,
+    tus_hook_api: TestClient,
+) -> None:
+    monkeypatch.setattr(config, "TUSD_HOOK_SECRET", "")
+    assert tus_hook_api.post("/tus/hooks", json=_hook_payload()).status_code == 503
+    assert _read_hook_upload(tus_hook_api) is None
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"Size": True},
+        {"Size": -1},
+        {"Size": 2**63},
+        {"Offset": True},
+        {"Offset": -1},
+        {"Offset": 12},
+        {"IsPartial": True},
+        {"IsFinal": True},
+        {"PartialUploads": ["another-upload"]},
+    ],
+)
+def test_creation_rejects_invalid_sizes_offsets_and_concatenation(
+    tus_hook_api: TestClient,
+    changes: dict[str, object],
+) -> None:
+    payload = _hook_payload()
+    payload["Event"]["Upload"].update(changes)
+    response = tus_hook_api.post("/tus/hooks", json=payload)
+    assert response.status_code == 200
+    assert response.json()["RejectUpload"] is True
+    assert response.json()["HTTPResponse"]["StatusCode"] == 400
+    assert _read_hook_upload(tus_hook_api) is None
+
+
+def test_creation_requires_proxy_generated_id(tus_hook_api: TestClient) -> None:
+    payload = _hook_payload()
+    del payload["Event"]["HTTPRequest"]["Header"][TUS_UPLOAD_ID_HEADER]
+    response = tus_hook_api.post("/tus/hooks", json=payload)
+    assert response.status_code == 200
+    assert response.json()["HTTPResponse"]["StatusCode"] == 400
+    assert _read_hook_upload(tus_hook_api) is None
+
+
+def test_creation_rejects_conflicting_registration(
+    monkeypatch: pytest.MonkeyPatch,
+    tus_hook_api: TestClient,
+) -> None:
+    monkeypatch.setattr(tus_views, "authenticate_user", _accept_any_token([]))
+    assert tus_hook_api.post("/tus/hooks", json=_hook_payload()).status_code == 200
+    response = tus_hook_api.post("/tus/hooks", json=_hook_payload(size=12))
+    assert response.status_code == 200
+    assert response.json()["HTTPResponse"]["StatusCode"] == 409
+    upload = _read_hook_upload(tus_hook_api)
+    assert upload is not None
+    assert upload.size_bytes == 11
+
+
+@pytest.mark.parametrize("operation", ["create", "mark_uploaded"])
+def test_hook_database_failures_are_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+    tus_hook_api: TestClient,
+    operation: str,
+) -> None:
+    monkeypatch.setattr(tus_views, "authenticate_user", _accept_any_token([]))
+    if operation == "mark_uploaded":
+        assert tus_hook_api.post("/tus/hooks", json=_hook_payload()).status_code == 200
+    payload = _hook_payload(
+        hook_type="pre-finish" if operation == "mark_uploaded" else "pre-create",
+    )
+    with monkeypatch.context() as patches:
+        patches.setattr(
+            UserUploadsService,
+            operation,
+            AsyncMock(side_effect=OSError("database unavailable")),
+        )
+        response = tus_hook_api.post("/tus/hooks", json=payload)
+    assert response.status_code == 500
+    upload = _read_hook_upload(tus_hook_api)
+    assert upload is None or upload.status == UploadStatus.PENDING
+    assert tus_hook_api.post("/tus/hooks", json=payload).status_code == 200

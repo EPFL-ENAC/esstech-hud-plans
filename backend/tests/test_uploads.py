@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
@@ -13,6 +14,7 @@ from alembic.operations import Operations
 from alembic.script import ScriptDirectory
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from sqlalchemy import (
     BigInteger,
     Column,
@@ -43,7 +45,12 @@ from api.models.uploads import (
 )
 from api.models.user import User
 from api.services.auth import require_user
-from api.services.uploads import SortOrder, UserUploadsService
+from api.services.uploads import (
+    SortOrder,
+    UploadConflictError,
+    UploadNotFoundError,
+    UserUploadsService,
+)
 from api.views import uploads as upload_views
 
 USER_ID = UUID(int=1)
@@ -92,6 +99,7 @@ def api_client(database: AsyncEngine) -> Iterator[TestClient]:
             yield session
 
     app = FastAPI()
+    app.state.upload_database = database
     app.include_router(upload_views.router, prefix="/uploads")
     app.dependency_overrides[get_session] = session_override
     app.dependency_overrides[require_user] = lambda: User(
@@ -100,6 +108,31 @@ def api_client(database: AsyncEngine) -> Iterator[TestClient]:
     )
     with TestClient(app) as client:
         yield client
+
+
+def _create_upload(
+    api_client: TestClient,
+    *,
+    uploaded: bool = False,
+    payload: UserUploadCreate | None = None,
+) -> dict[str, Any]:
+    assert isinstance(api_client.app, FastAPI)
+    engine = api_client.app.state.upload_database
+
+    async def create() -> dict[str, Any]:
+        async with uploads_service(engine) as (uploads, session):
+            upload = await uploads.create(
+                user_id=USER_ID,
+                payload=payload or UserUploadCreate(),
+                filename="video.mp4",
+                size_bytes=11,
+                file_path="TODO",
+            )
+            if uploaded:
+                upload = await uploads.mark_uploaded(upload.id)
+            return UserUploadRead.model_validate(upload).model_dump(mode="json")
+
+    return asyncio.run(create())
 
 
 def test_upload_defaults_and_column_types() -> None:
@@ -130,7 +163,8 @@ def test_upload_defaults_and_column_types() -> None:
 
 
 def test_upload_service_crud_preserves_file(
-    database: AsyncEngine, tmp_path: Path
+    database: AsyncEngine,
+    tmp_path: Path,
 ) -> None:
     file_path = tmp_path / "video.mp4"
     file_path.write_bytes(b"existing file")
@@ -167,6 +201,7 @@ def test_upload_service_crud_preserves_file(
                 "description": "A building",
             }
             assert await uploads.update(updated, UserUploadUpdate()) is updated
+            await uploads.mark_uploaded(upload_id)
             await uploads.delete(updated)
             assert await uploads.get(upload_id, user_id=USER_ID) is None
 
@@ -284,6 +319,8 @@ def test_failed_mutation_rolls_back(
                 file_path="TODO",
             )
             upload_id = created.id
+            if operation == "delete":
+                await uploads.mark_uploaded(upload_id)
             with monkeypatch.context() as patches:
                 patches.setattr(
                     session,
@@ -303,9 +340,7 @@ def test_failed_mutation_rolls_back(
 
 
 def test_upload_routes_cover_crud(api_client: TestClient) -> None:
-    response = api_client.post("/uploads", json={})
-    assert response.status_code == 201
-    created = response.json()
+    created = _create_upload(api_client, uploaded=True)
     upload_id = created["id"]
     assert UUID(upload_id)
     assert datetime.fromisoformat(created["created_at"])
@@ -314,12 +349,12 @@ def test_upload_routes_cover_crud(api_client: TestClient) -> None:
         "user_id": str(USER_ID),
         "name": "TODO",
         "description": "",
-        "filename": "placeholder.bin",
-        "size_bytes": 0,
+        "filename": "video.mp4",
+        "size_bytes": 11,
         "file_path": "TODO",
-        "status": "pending",
+        "status": "uploaded",
         "created_at": created["created_at"],
-        "uploaded_at": None,
+        "uploaded_at": created["uploaded_at"],
     }
     assert api_client.get("/uploads").json() == [created]
     assert api_client.get(f"/uploads/{upload_id}").json() == created
@@ -348,16 +383,14 @@ def test_upload_routes_cover_crud(api_client: TestClient) -> None:
 
 
 def test_upload_creation_accepts_user_metadata(api_client: TestClient) -> None:
-    response = api_client.post(
-        "/uploads",
-        json={"name": "Video", "description": "A building"},
+    created = _create_upload(
+        api_client,
+        payload=UserUploadCreate(name="Video", description="A building"),
     )
-    assert response.status_code == 201
-    assert response.json()["name"] == "Video"
-    assert response.json()["description"] == "A building"
+    assert created["name"] == "Video"
+    assert created["description"] == "A building"
 
 
-@pytest.mark.parametrize("method", ["post", "patch"])
 @pytest.mark.parametrize(
     "payload",
     [
@@ -375,12 +408,13 @@ def test_upload_creation_accepts_user_metadata(api_client: TestClient) -> None:
 )
 def test_upload_routes_reject_nulls_and_noneditable_fields(
     api_client: TestClient,
-    method: str,
     payload: dict[str, object],
 ) -> None:
-    created = api_client.post("/uploads", json={}).json()
-    path = "/uploads" if method == "post" else f"/uploads/{created['id']}"
-    assert api_client.request(method, path, json=payload).status_code == 422
+    with pytest.raises(ValidationError):
+        UserUploadCreate.model_validate(payload)
+    created = _create_upload(api_client)
+    path = f"/uploads/{created['id']}"
+    assert api_client.patch(path, json=payload).status_code == 422
     assert api_client.get(f"/uploads/{created['id']}").json() == created
 
 
@@ -393,7 +427,7 @@ def test_upload_routes_validate_pagination(api_client: TestClient, query: str) -
 
 
 def test_upload_routes_hide_other_users_rows(api_client: TestClient) -> None:
-    created = api_client.post("/uploads", json={}).json()
+    created = _create_upload(api_client)
     assert isinstance(api_client.app, FastAPI)
     api_client.app.dependency_overrides[require_user] = lambda: User(
         id=OTHER_USER_ID,
@@ -415,7 +449,6 @@ def test_upload_routes_hide_other_users_rows(api_client: TestClient) -> None:
 @pytest.mark.parametrize(
     ("method", "path"),
     [
-        ("post", "/uploads"),
         ("get", "/uploads"),
         ("get", f"/uploads/{USER_ID}"),
         ("patch", f"/uploads/{USER_ID}"),
@@ -436,21 +469,20 @@ def test_upload_routes_require_authentication(
     "failure",
     [OSError("unavailable"), OperationalError("", {}, Exception())],
 )
-@pytest.mark.parametrize("operation", ["create", "list", "get", "update", "delete"])
+@pytest.mark.parametrize("operation", ["list", "get", "update", "delete"])
 def test_upload_routes_map_database_failures(
     api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     operation: str,
     failure: Exception,
 ) -> None:
-    upload_id = api_client.post("/uploads", json={}).json()["id"]
+    upload_id = _create_upload(api_client, uploaded=True)["id"]
     monkeypatch.setattr(
         UserUploadsService,
         operation,
         AsyncMock(side_effect=failure),
     )
     method, path = {
-        "create": ("post", "/uploads"),
         "list": ("get", "/uploads"),
         "get": ("get", f"/uploads/{upload_id}"),
         "update": ("patch", f"/uploads/{upload_id}"),
@@ -465,7 +497,8 @@ def test_upload_router_is_registered_in_application() -> None:
     from api.main import app
 
     paths = app.openapi()["paths"]
-    assert {"get", "post"} <= paths["/uploads"].keys()
+    assert "get" in paths["/uploads"]
+    assert "post" not in paths["/uploads"]
     assert {"get", "patch", "delete"} <= paths["/uploads/{upload_id}"].keys()
 
 
@@ -610,3 +643,173 @@ def test_upload_migration_preserves_existing_tables_and_cascades() -> None:
                 )
     finally:
         engine.dispose()
+
+
+def test_upload_post_is_removed(api_client: TestClient) -> None:
+    assert api_client.post("/uploads", json={}).status_code == 405
+    assert api_client.get("/uploads").json() == []
+
+
+def test_pending_upload_cannot_be_deleted(api_client: TestClient) -> None:
+    created = _create_upload(api_client)
+    response = api_client.delete(f"/uploads/{created['id']}")
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Upload has not finished uploading"}
+    assert api_client.get(f"/uploads/{created['id']}").json() == created
+
+
+def test_upload_registration_and_completion_are_idempotent(
+    database: AsyncEngine,
+) -> None:
+    async def run() -> None:
+        async with uploads_service(database) as (uploads, session):
+            upload_id = uuid4()
+            values: dict[str, Any] = {
+                "upload_id": upload_id,
+                "user_id": USER_ID,
+                "payload": UserUploadCreate(),
+                "filename": "video.mp4",
+                "size_bytes": 11,
+                "file_path": "TODO",
+            }
+            first = await uploads.create(**values)
+            await uploads.update(first, UserUploadUpdate(name="Renamed"))
+            completed = await uploads.mark_uploaded(upload_id)
+            timestamp = completed.uploaded_at
+            assert timestamp is not None
+            repeated = await uploads.create(**values)
+            assert repeated.id == upload_id
+            assert repeated.name == "Renamed"
+            assert repeated.status == UploadStatus.UPLOADED
+            assert repeated.uploaded_at == timestamp
+            session.expunge_all()
+            repeated = await uploads.mark_uploaded(upload_id)
+            assert repeated.uploaded_at == timestamp
+            assert len(await uploads.list(user_id=USER_ID)) == 1
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"user_id": OTHER_USER_ID},
+        {"filename": "different.mp4"},
+        {"size_bytes": 12},
+        {"file_path": "different"},
+    ],
+)
+def test_upload_registration_rejects_conflicting_ids(
+    database: AsyncEngine,
+    changes: dict[str, Any],
+) -> None:
+    async def run() -> None:
+        async with uploads_service(database) as (uploads, session):
+            values: dict[str, Any] = {
+                "upload_id": uuid4(),
+                "user_id": USER_ID,
+                "payload": UserUploadCreate(),
+                "filename": "video.mp4",
+                "size_bytes": 11,
+                "file_path": "TODO",
+            }
+            first = await uploads.create(**values)
+            with pytest.raises(UploadConflictError):
+                await uploads.create(**{**values, **changes})
+            assert first.status == UploadStatus.PENDING
+            assert first.filename == "video.mp4"
+            assert len(await uploads.list(user_id=USER_ID)) == 1
+
+    asyncio.run(run())
+
+
+def test_upload_registration_recovers_from_duplicate_insert(
+    database: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def run() -> None:
+        async with uploads_service(database) as (uploads, session):
+            values: dict[str, Any] = {
+                "upload_id": uuid4(),
+                "user_id": USER_ID,
+                "payload": UserUploadCreate(),
+                "filename": "video.mp4",
+                "size_bytes": 11,
+                "file_path": "TODO",
+            }
+            await uploads.create(**values)
+            session.expunge_all()
+            original_get = session.get
+            calls = 0
+
+            async def miss_initial_lookup(*args: Any, **kwargs: Any) -> Any:
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    return None
+                return await original_get(*args, **kwargs)
+
+            monkeypatch.setattr(session, "get", miss_initial_lookup)
+            repeated = await uploads.create(**values)
+            assert repeated.id == values["upload_id"]
+            assert calls == 2
+            assert len(await uploads.list(user_id=USER_ID)) == 1
+
+    asyncio.run(run())
+
+
+def test_upload_completion_rejects_missing_or_failed_rows(
+    database: AsyncEngine,
+) -> None:
+    async def run() -> None:
+        async with uploads_service(database) as (uploads, session):
+            with pytest.raises(UploadNotFoundError):
+                await uploads.mark_uploaded(uuid4())
+            failed = UserUploads(
+                user_id=USER_ID,
+                filename="video.mp4",
+                size_bytes=11,
+                file_path="TODO",
+                status=UploadStatus.FAILED,
+            )
+            session.add(failed)
+            await session.commit()
+            upload_id = failed.id
+            with pytest.raises(UploadConflictError):
+                await uploads.mark_uploaded(upload_id)
+            persisted = await uploads.get(upload_id, user_id=USER_ID)
+            assert persisted is not None
+            assert persisted.status == UploadStatus.FAILED
+            assert persisted.uploaded_at is None
+
+    asyncio.run(run())
+
+
+def test_failed_completion_rolls_back(
+    database: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def run() -> None:
+        async with uploads_service(database) as (uploads, session):
+            upload = await uploads.create(
+                user_id=USER_ID,
+                payload=UserUploadCreate(),
+                filename="video.mp4",
+                size_bytes=11,
+                file_path="TODO",
+            )
+            upload_id = upload.id
+            with monkeypatch.context() as patches:
+                patches.setattr(
+                    session,
+                    "commit",
+                    AsyncMock(side_effect=OperationalError("commit", {}, Exception())),
+                )
+                with pytest.raises(OperationalError):
+                    await uploads.mark_uploaded(upload_id)
+            persisted = await uploads.get(upload_id, user_id=USER_ID)
+            assert persisted is not None
+            assert persisted.status == UploadStatus.PENDING
+            assert persisted.uploaded_at is None
+
+    asyncio.run(run())
