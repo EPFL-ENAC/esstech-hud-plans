@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from api.config import config
 from api.db import retry_on_db_error
 from api.models.auth import AuthenticatedUser
 from api.models.building import Building
@@ -80,6 +81,18 @@ class UserService:
         except Exception:
             await self._session.rollback()
             raise
+
+    async def accept_terms(self, user: User) -> User:
+        """Record acceptance of the current terms version. Idempotent."""
+
+        if user.terms_accepted_version == config.TERMS_VERSION:
+            return user
+
+        user.terms_accepted_version = config.TERMS_VERSION
+        user.terms_accepted_at = utc_now()
+        self._session.add(user)
+        await self._commit_and_refresh(user)
+        return user
 
     async def sync_authenticated_user(self, identity: AuthenticatedUser) -> User:
         """Create or refresh the user matching a verified identity."""

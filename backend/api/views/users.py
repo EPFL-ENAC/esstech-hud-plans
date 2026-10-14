@@ -7,7 +7,8 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from api.db import get_session
 from api.models.user import User, UserRead
-from api.services.auth import require_user
+from api.services.auth import require_user_not_accepted
+from api.services.terms import is_accepted
 from api.services.users import UserService
 
 logger = logging.getLogger(__name__)
@@ -25,16 +26,19 @@ def get_user_service(
 
 @router.get("/me", response_model=UserRead)
 async def get_current_user(
-    current_user: Annotated[User, Depends(require_user)],
-) -> User:
+    current_user: Annotated[User, Depends(require_user_not_accepted)],
+) -> UserRead:
     """Return the persisted row synchronized from the current identity."""
 
-    return current_user
+    return UserRead(
+        **current_user.model_dump(),
+        terms_accepted=is_accepted(current_user),
+    )
 
 
 @router.delete("/me/data", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_current_user_data(
-    current_user: Annotated[User, Depends(require_user)],
+    current_user: Annotated[User, Depends(require_user_not_accepted)],
     users: Annotated[UserService, Depends(get_user_service)],
 ) -> None:
     """Delete every building, reconstruction, artifact, and the user row."""

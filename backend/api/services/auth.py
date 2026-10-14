@@ -13,6 +13,7 @@ from api.config import config
 from api.db import get_session
 from api.models.auth import AuthenticatedUser
 from api.models.user import User
+from api.services.terms import is_accepted
 from api.services.users import UserService
 
 logger = logging.getLogger(__name__)
@@ -123,11 +124,15 @@ def get_user_service(
     return UserService(session)
 
 
-async def require_user(
+async def require_user_not_accepted(
     identity: Annotated[AuthenticatedUser, Depends(authenticate_user)],
     users: Annotated[UserService, Depends(get_user_service)],
 ) -> User:
-    """Resolve a verified identity to its persisted application user."""
+    """Resolve a verified identity to its persisted application user.
+
+    No terms check: the terms routes use this dependency, so they stay
+    reachable before acceptance.
+    """
 
     try:
         return await users.sync_authenticated_user(identity)
@@ -139,13 +144,30 @@ async def require_user(
         ) from exc
 
 
+async def require_user(
+    current_user: Annotated[User, Depends(require_user_not_accepted)],
+) -> User:
+    """Resolve the persisted user and require acceptance of the current terms.
+
+    Raises 403 when the user has not accepted the current terms version.
+    """
+
+    if not is_accepted(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="terms_not_accepted",
+        )
+    return current_user
+
+
 async def require_admin(
     current_user: User = Depends(require_user),
     identity: AuthenticatedUser = Depends(authenticate_user),
 ) -> User:
     """Resolve the authenticated user and require the admin role.
 
-    Raises 403 when the user does not hold the \"admin\" client role.
+    Terms acceptance is enforced first, then the "admin" client role.
+    Raises 403 when either check fails.
     """
 
     if not identity.is_admin:

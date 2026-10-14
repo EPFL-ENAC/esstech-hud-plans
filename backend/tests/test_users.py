@@ -15,7 +15,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from api.models.auth import AuthenticatedUser
 from api.models.building import Building, BuildingCreate
 from api.models.user import User, UserCreate, UserRead, UserUpdate
-from api.services.auth import require_user
+from api.services.auth import require_user_not_accepted
 from api.services.buildings import BuildingService
 from api.services.users import UserService
 from api.views import users as user_views
@@ -76,7 +76,7 @@ def test_current_user_route_returns_persisted_user() -> None:
     )
     app = FastAPI()
     app.include_router(user_views.router, prefix="/user")
-    app.dependency_overrides[require_user] = lambda: current_user
+    app.dependency_overrides[require_user_not_accepted] = lambda: current_user
 
     with TestClient(app) as client:
         response = client.get("/user/me")
@@ -88,6 +88,9 @@ def test_current_user_route_returns_persisted_user() -> None:
         "username": "tester",
         "email": "tester@example.com",
         "name": "Test User",
+        "terms_accepted_version": None,
+        "terms_accepted_at": None,
+        "terms_accepted": False,
         "created_at": payload["created_at"],
         "updated_at": payload["updated_at"],
     }
@@ -290,7 +293,7 @@ def test_delete_all_data_route_returns_no_content() -> None:
 
                 app = FastAPI()
                 app.include_router(user_views.router, prefix="/user")
-                app.dependency_overrides[require_user] = lambda: user
+                app.dependency_overrides[require_user_not_accepted] = lambda: user
                 app.dependency_overrides[user_views.get_user_service] = lambda: users
 
                 with TestClient(app) as client:
@@ -322,7 +325,7 @@ def test_delete_all_data_route_maps_database_errors_to_unavailable() -> None:
     )
     app = FastAPI()
     app.include_router(user_views.router, prefix="/user")
-    app.dependency_overrides[require_user] = lambda: current_user
+    app.dependency_overrides[require_user_not_accepted] = lambda: current_user
     app.dependency_overrides[user_views.get_user_service] = lambda: FailingUserService()
 
     with TestClient(app) as client:

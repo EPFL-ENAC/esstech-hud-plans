@@ -69,6 +69,14 @@ export default {
         invalidState: 'Invalid OAuth state. Please try signing in again.',
         signInFailed: 'Sign in failed',
     },
+    terms: {
+        title: 'Terms of Service',
+        accept: 'Accept',
+        logout: 'Log out',
+        loading: 'Loading terms…',
+        loadFailed: 'Could not load the terms. Please try again.',
+        acceptFailed: 'Could not record your acceptance. Please try again.',
+    },
     notFound: {
         message: 'Oops. Nothing here...',
         goHome: 'Go Home',

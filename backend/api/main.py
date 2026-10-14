@@ -16,6 +16,7 @@ from api.views.auth import router as auth_router
 from api.views.buildings import router as buildings_router
 from api.views.reconstructions import router as reconstructions_router
 from api.views.splats import router as splats_router
+from api.views.terms import router as terms_router
 from api.views.tus import router as tus_router
 from api.views.tus_proxy import close_tus_proxy
 from api.views.tus_proxy import router as tus_proxy_router
@@ -126,6 +127,12 @@ app.include_router(
     admin_router,
     prefix="/admin",
     tags=["Admin"],
+)
+
+app.include_router(
+    terms_router,
+    prefix="/terms",
+    tags=["Terms"],
 )
 
 app.include_router(

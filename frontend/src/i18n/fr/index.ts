@@ -71,6 +71,14 @@ export default {
         invalidState: 'État OAuth invalide. Veuillez réessayer de vous connecter.',
         signInFailed: 'Échec de la connexion',
     },
+    terms: {
+        title: 'Conditions d’utilisation',
+        accept: 'Accepter',
+        logout: 'Se déconnecter',
+        loading: 'Chargement des conditions…',
+        loadFailed: 'Impossible de charger les conditions. Veuillez réessayer.',
+        acceptFailed: 'Impossible d’enregistrer votre acceptation. Veuillez réessayer.',
+    },
     notFound: {
         message: 'Oups. Il n’y a rien ici…',
         goHome: 'Retour à l’accueil',

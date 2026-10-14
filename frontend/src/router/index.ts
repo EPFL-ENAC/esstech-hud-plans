@@ -6,7 +6,7 @@ import {
     createWebHistory,
 } from 'vue-router';
 import routes from './routes';
-import { isAdmin, isAuthenticated } from 'src/lib/auth';
+import { getTermsAccepted, isAdmin, isAuthenticated } from 'src/lib/auth';
 
 /*
  * If not building with SSR mode, you can
@@ -34,9 +34,11 @@ export default defineRouter(function (/* { store, ssrContext } */) {
         history: createHistory(process.env.VUE_ROUTER_BASE),
     });
 
-    // Redirect unauthenticated users to /login (except on auth routes), and
-    // send authenticated users away from the login page.
-    Router.beforeEach((to) => {
+    // Redirect unauthenticated users to /login (except on auth routes),
+    // send authenticated users away from the login page, and gate every other
+    // route behind terms acceptance (including /admin: an unaccepted admin
+    // sees the terms first).
+    Router.beforeEach(async (to) => {
         // Keycloak strips the fragment from the redirect_uri, so the OAuth
         // response (code, session_state) arrives in window.location.search
         // while the hash router sits at '/' (never on /callback). Detect the
@@ -69,6 +71,9 @@ export default defineRouter(function (/* { store, ssrContext } */) {
         }
         if (!isAuthenticated()) {
             return '/login';
+        }
+        if (to.path !== '/terms' && !(await getTermsAccepted())) {
+            return '/terms';
         }
     });
 

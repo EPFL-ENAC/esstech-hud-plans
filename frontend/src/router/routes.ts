@@ -176,6 +176,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('pages/CallbackPage.vue'),
     },
 
+    // Terms acceptance screen, outside the main layout (own full-screen page)
+    {
+        path: '/terms',
+        component: () => import('pages/TermsPage.vue'),
+    },
+
     // Always leave this as last one,
     // but you can also remove it
     {

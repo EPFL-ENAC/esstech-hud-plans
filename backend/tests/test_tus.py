@@ -401,6 +401,7 @@ def tus_api(
     app.dependency_overrides[require_user] = lambda: User(
         id=USER_ID,
         keycloak_sub="subject-1",
+        terms_accepted_version=config.TERMS_VERSION,
     )
 
     with TestClient(app) as client:

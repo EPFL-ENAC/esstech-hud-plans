@@ -81,6 +81,9 @@ class Config(BaseSettings):
     # at the compose service (http://tusd:8080)
     TUSD_INTERNAL_URL: str = "http://localhost:8080"
 
+    # Current terms version. Bump it when publishing new terms (see README).
+    TERMS_VERSION: str = "v1"
+
 
 @lru_cache()
 def get_config():

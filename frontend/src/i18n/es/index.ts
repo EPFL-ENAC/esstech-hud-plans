@@ -71,6 +71,14 @@ export default {
         invalidState: 'Estado de OAuth no válido. Intenta iniciar sesión de nuevo.',
         signInFailed: 'No se pudo iniciar sesión',
     },
+    terms: {
+        title: 'Términos del servicio',
+        accept: 'Aceptar',
+        logout: 'Cerrar sesión',
+        loading: 'Cargando los términos…',
+        loadFailed: 'No se pudieron cargar los términos. Inténtalo de nuevo.',
+        acceptFailed: 'No se pudo registrar tu aceptación. Inténtalo de nuevo.',
+    },
     notFound: {
         message: 'Vaya. No hay nada aquí…',
         goHome: 'Volver al inicio',

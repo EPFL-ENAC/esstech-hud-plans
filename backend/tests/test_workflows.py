@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from prefect.client.schemas.objects import Log, StateType
 
+from api.config import config
 from api.lib.workflows import __main__ as workflow_runner
 from api.lib.workflows import common as workflow_common
 from api.lib.workflows import counter as counter_workflow
@@ -45,6 +46,7 @@ def client() -> TestClient:
     app.dependency_overrides[require_user] = lambda: User(
         id=USER_ID,
         keycloak_sub="subject-1",
+        terms_accepted_version=config.TERMS_VERSION,
     )
     return TestClient(app)
 

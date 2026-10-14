@@ -3,6 +3,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from api.config import config
+from api.models.user import User
 from api.services.auth import require_user
 from api.views import tus_proxy
 
@@ -44,7 +46,9 @@ def _install_transport(
 def tus_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     app = FastAPI()
     app.include_router(tus_proxy.router, prefix="/tus")
-    app.dependency_overrides[require_user] = lambda: None
+    app.dependency_overrides[require_user] = lambda: User(
+        keycloak_sub="subject-1", terms_accepted_version=config.TERMS_VERSION
+    )
     with TestClient(app) as client:
         yield client
 
@@ -130,7 +134,9 @@ def test_create_with_root_path_rewrites_location_under_prefix(
 
     app = FastAPI(root_path="/api")
     app.include_router(tus_proxy.router, prefix="/tus")
-    app.dependency_overrides[require_user] = lambda: None
+    app.dependency_overrides[require_user] = lambda: User(
+        keycloak_sub="subject-1", terms_accepted_version=config.TERMS_VERSION
+    )
     with TestClient(app) as client:
         response = client.post("/api/tus/files/", headers={"Tus-Resumable": "1.0.0"})
 
