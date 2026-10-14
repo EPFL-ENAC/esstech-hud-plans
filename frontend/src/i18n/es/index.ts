@@ -52,6 +52,25 @@ export default {
         help: 'Ayuda y asistencia',
         helpPlaceholder: 'Los recursos de ayuda y asistencia estarán disponibles aquí.',
     },
+    uploads: {
+        title: 'Archivos',
+        refresh: 'Actualizar',
+        loading: 'Cargando archivos…',
+        refreshing: 'Actualizando archivos…',
+        loadFailed: 'No se pudieron cargar tus archivos.',
+        refreshFailed:
+            'No se pudieron actualizar tus archivos. Los archivos ya cargados se muestran abajo.',
+        empty: 'Aún no hay archivos subidos.',
+        emptyPage: 'No hay archivos en esta página. Prueba una página anterior.',
+        pagination: 'Paginación de la lista de archivos',
+        created: 'Creado el {date}',
+        uploaded: 'Subido el {date}',
+        status: {
+            pending: 'Pendiente',
+            uploaded: 'Subido',
+            failed: 'Fallido',
+        },
+    },
     auth: {
         appTitle: 'Points of Home',
         appDescription: 'Escanea, planifica, construye.',

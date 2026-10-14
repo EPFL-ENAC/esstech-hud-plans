@@ -52,6 +52,25 @@ export default {
         help: 'Aide et assistance',
         helpPlaceholder: 'Les ressources d’aide et d’assistance seront disponibles ici.',
     },
+    uploads: {
+        title: 'Envois',
+        refresh: 'Actualiser',
+        loading: 'Chargement des envois…',
+        refreshing: 'Actualisation des envois…',
+        loadFailed: 'Impossible de charger vos envois.',
+        refreshFailed:
+            'Impossible d’actualiser vos envois. Les envois déjà chargés restent affichés ci-dessous.',
+        empty: 'Aucun envoi pour le moment.',
+        emptyPage: 'Aucun envoi sur cette page. Essayez une page précédente.',
+        pagination: 'Pagination de la liste des envois',
+        created: 'Créé le {date}',
+        uploaded: 'Envoyé le {date}',
+        status: {
+            pending: 'En attente',
+            uploaded: 'Envoyé',
+            failed: 'Échec',
+        },
+    },
     auth: {
         appTitle: 'Points of Home',
         appDescription: 'Scannez, planifiez, construisez.',
