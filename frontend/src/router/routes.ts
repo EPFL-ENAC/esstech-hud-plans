@@ -56,6 +56,15 @@ const routes: RouteRecordRaw[] = [
                     detail: () => import('pages/HelpPage.vue'),
                 },
             },
+            {
+                path: 'more/terms',
+                name: 'terms',
+                meta: { drawer: true },
+                components: {
+                    default: () => import('components/BackgroundPage.vue'),
+                    detail: () => import('pages/TermsDetailPage.vue'),
+                },
+            },
 
             // Detail pages open in the right drawer. BackgroundPage renders
             // the selected tab page beneath it (Library after Capture).

@@ -72,7 +72,7 @@ export default {
         signInFailed: 'No se pudo iniciar sesión',
     },
     terms: {
-        title: 'Términos del servicio',
+        title: 'Términos y condiciones',
         accept: 'Aceptar',
         logout: 'Cerrar sesión',
         loading: 'Cargando los términos…',

@@ -69,6 +69,19 @@
                 </q-item>
             </q-card>
 
+            <q-card flat bordered class="link-card items-center">
+                <q-item clickable v-ripple :to="{ name: 'terms' }">
+                    <q-item-section>
+                        <q-item-label class="text-subtitle1 text-weight-medium">
+                            {{ t('terms.title') }}
+                        </q-item-label>
+                    </q-item-section>
+                    <q-item-section side>
+                        <q-icon name="chevron_right" size="20px" color="dark" />
+                    </q-item-section>
+                </q-item>
+            </q-card>
+
             <q-card flat bordered clickable class="link-card" @click="handleLogout">
                 <q-item class="text-negative">
                     <q-item-section>

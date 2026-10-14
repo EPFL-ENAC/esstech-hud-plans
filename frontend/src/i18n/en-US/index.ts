@@ -70,7 +70,7 @@ export default {
         signInFailed: 'Sign in failed',
     },
     terms: {
-        title: 'Terms of Service',
+        title: 'Terms and Conditions',
         accept: 'Accept',
         logout: 'Log out',
         loading: 'Loading terms…',

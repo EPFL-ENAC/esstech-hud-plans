@@ -72,7 +72,7 @@ export default {
         signInFailed: 'Échec de la connexion',
     },
     terms: {
-        title: 'Conditions d’utilisation',
+        title: 'Conditions générales d’utilisation',
         accept: 'Accepter',
         logout: 'Se déconnecter',
         loading: 'Chargement des conditions…',
