@@ -1,7 +1,7 @@
 import { DetailedError, Upload } from 'tus-js-client';
 import { tusEndpoint } from 'src/boot/api';
-import { getAccessToken } from 'src/lib/auth';
-import { ApiError } from 'src/lib/buildings';
+import { getAccessToken, getAuthSubject } from 'src/lib/auth';
+import { ApiError } from 'src/lib/api';
 import type { FetchProgress } from './fetchProgress';
 
 /**
@@ -16,12 +16,16 @@ import type { FetchProgress } from './fetchProgress';
 const UPLOAD_CHUNK_BYTES = 64 * 1024 * 1024;
 
 const UPLOAD_RETRY_DELAYS = [0, 1000, 3000, 5000, 10000, 20000];
+const activeUploadUrls = new Set<string>();
 
 export interface ResumableUploadOptions {
     onProgress?: (progress: FetchProgress) => void;
     /** Called when a previously started upload is continued, before it starts. */
     onResumed?: () => void;
+    onUploadAvailable?: () => void;
     signal?: AbortSignal;
+    /** Scope resume records and requests to this account. */
+    subject?: string;
 }
 
 export interface ResumableUploadResult {
@@ -46,17 +50,17 @@ export function uploadVideoResumable(
         }
         let settled = false;
         let resumed = false;
+        let reservedUrl: string | null = null;
 
         function finish(settle: () => void): void {
             if (settled) return;
             settled = true;
+            if (reservedUrl) activeUploadUrls.delete(reservedUrl);
             opts.signal?.removeEventListener('abort', onAbort);
             settle();
         }
 
-        function onAbort(): void {
-            if (settled) return;
-            finish(() => reject(new DOMException('Aborted', 'AbortError')));
+        function pause(): void {
             // Pause without deleting the upload or its resume fingerprint.
             try {
                 void upload.abort(false).catch((error: unknown) => {
@@ -67,19 +71,66 @@ export function uploadVideoResumable(
             }
         }
 
+        function onAbort(): void {
+            if (settled) return;
+            finish(() => reject(new DOMException('Aborted', 'AbortError')));
+            pause();
+        }
+
+        function requireAccount(): void {
+            if (opts.subject === undefined || getAuthSubject() === opts.subject) return;
+            const error = new ApiError('Upload account has changed', 401, null);
+            finish(() => reject(error));
+            pause();
+            throw error;
+        }
+
+        function reserveUrl(url: string | null): void {
+            if (!url || url === reservedUrl) return;
+            if (activeUploadUrls.has(url)) {
+                throw new ApiError('Upload is already active', 409, null);
+            }
+            if (reservedUrl) activeUploadUrls.delete(reservedUrl);
+            activeUploadUrls.add(url);
+            reservedUrl = url;
+        }
+
         const upload = new Upload(file, {
             endpoint: tusEndpoint,
             chunkSize: UPLOAD_CHUNK_BYTES,
             retryDelays: UPLOAD_RETRY_DELAYS,
             metadata: { filename: file.name, filetype: file.type },
             removeFingerprintOnSuccess: true,
+            ...(opts.subject === undefined
+                ? {}
+                : {
+                      fingerprint: () =>
+                          Promise.resolve(
+                              JSON.stringify([
+                                  'hud-upload',
+                                  opts.subject,
+                                  tusEndpoint,
+                                  file.name,
+                                  file.type,
+                                  file.size,
+                                  file.lastModified,
+                              ]),
+                          ),
+                  }),
             // Set the token per request, so a refresh during a long upload is
             // picked up by every PATCH.
             onBeforeRequest: (request) => {
+                if (settled) throw new DOMException('Aborted', 'AbortError');
+                requireAccount();
                 const token = getAccessToken();
                 if (token) {
                     request.setHeader('Authorization', `Bearer ${token}`);
                 }
+            },
+            onUploadUrlAvailable: () => {
+                if (settled) return;
+                reserveUrl(upload.url);
+                opts.onUploadAvailable?.();
             },
             onProgress: (bytesSent, bytesTotal) => {
                 if (settled) return;
@@ -116,8 +167,13 @@ export function uploadVideoResumable(
             // tus-js-client resets its aborted flag on start, so a pending
             // lookup must never restart an upload that already settled.
             if (settled) return;
-            const previousUpload = previousUploads.length === 1 ? previousUploads[0] : undefined;
+            requireAccount();
+            const availableUploads = previousUploads.filter(
+                (previous) => !previous.uploadUrl || !activeUploadUrls.has(previous.uploadUrl),
+            );
+            const previousUpload = availableUploads.length === 1 ? availableUploads[0] : undefined;
             if (previousUpload) {
+                reserveUrl(previousUpload.uploadUrl);
                 upload.resumeFromPreviousUpload(previousUpload);
                 resumed = true;
                 opts.onResumed?.();

@@ -65,6 +65,28 @@ export default {
         pagination: 'Pagination de la liste des envois',
         created: 'Créé le {date}',
         uploaded: 'Envoyé le {date}',
+        new: {
+            title: 'Nouvel envoi',
+            instructions:
+                'Choisissez une vidéo, puis démarrez l’envoi. Vous pouvez continuer à utiliser l’application pendant le transfert.',
+            start: 'Envoyer',
+            emptyFile: 'Ce fichier est vide. Choisissez une vidéo avec du contenu.',
+            starting: 'Démarrage de l’envoi…',
+            resuming: 'Reprise de l’envoi…',
+            progress: 'Envoi : {loaded} / {total}',
+            resumedProgress: 'Reprise de l’envoi : {loaded} / {total}',
+            completed: '{filename} a été envoyé.',
+            viewUploads: 'Voir les envois',
+            failed: 'L’envoi a été interrompu. Réessayez pour le reprendre.',
+            invalidVideo:
+                'Cette vidéo n’a pas pu être acceptée. Choisissez un fichier vidéo compatible.',
+            authFailed:
+                'Votre envoi n’a pas pu être autorisé. Reconnectez-vous avant de réessayer.',
+            backgroundFailed:
+                'L’envoi de {filename} a été interrompu. Sélectionnez le même fichier dans Nouvel envoi pour le reprendre.',
+            navigationFailed:
+                'Votre envoi est terminé, mais la liste des envois n’a pas pu être ouverte. Utilisez Voir les envois pour réessayer.',
+        },
         status: {
             pending: 'En attente',
             uploaded: 'Envoyé',

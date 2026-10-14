@@ -5,6 +5,15 @@
                 flat
                 no-caps
                 color="primary"
+                icon="add"
+                :label="$q.screen.lt.sm ? undefined : t('uploads.new.title')"
+                :aria-label="t('uploads.new.title')"
+                :to="{ name: 'new-upload' }"
+            />
+            <q-btn
+                flat
+                no-caps
+                color="primary"
                 icon="refresh"
                 :label="t('uploads.refresh')"
                 :disable="isLoading"
@@ -65,7 +74,7 @@
                                     {{ upload.description }}
                                 </q-item-label>
                                 <q-item-label caption class="upload-metadata">
-                                    <span>{{ formatSize(upload.size_bytes) }}</span>
+                                    <span>{{ formatFileSize(upload.size_bytes, locale) }}</span>
                                     <span>{{
                                         t('uploads.created', {
                                             date: formatDate(upload.created_at),
@@ -124,6 +133,7 @@ import { useI18n } from 'vue-i18n';
 import PageHeader from 'src/components/PageHeader.vue';
 import QueryStateSwitcher from 'src/components/QueryStateSwitcher.vue';
 import type { UploadStatus } from 'src/lib/uploads';
+import { formatFileSize } from 'src/lib/utils/formatFileSize';
 import { MY_UPLOADS_PAGE_SIZE, useMyUploadsQuery } from 'src/queries/uploads';
 
 const { t, locale } = useI18n();
@@ -152,22 +162,9 @@ const dateFormatter = computed(
             minute: '2-digit',
         }),
 );
-const sizeUnits = ['byte', 'kilobyte', 'megabyte', 'gigabyte', 'terabyte'] as const;
 
 function formatDate(value: string): string {
     return dateFormatter.value.format(new Date(value));
-}
-
-function formatSize(bytes: number): string {
-    const unitIndex = Math.min(
-        Math.floor(Math.log10(Math.max(bytes, 1)) / 3),
-        sizeUnits.length - 1,
-    );
-    return new Intl.NumberFormat(locale.value, {
-        style: 'unit',
-        unit: sizeUnits[unitIndex] ?? 'byte',
-        maximumFractionDigits: 1,
-    }).format(bytes / 1000 ** unitIndex);
 }
 </script>
 

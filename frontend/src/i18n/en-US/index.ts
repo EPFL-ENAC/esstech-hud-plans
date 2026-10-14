@@ -62,6 +62,26 @@ export default {
         pagination: 'Upload list pagination',
         created: 'Created {date}',
         uploaded: 'Uploaded {date}',
+        new: {
+            title: 'New upload',
+            instructions:
+                'Choose a video file, then start the upload. You can keep using the app while it uploads.',
+            start: 'Upload',
+            emptyFile: 'This file is empty. Choose a video with content.',
+            starting: 'Starting upload…',
+            resuming: 'Resuming upload…',
+            progress: 'Uploading {loaded} / {total}',
+            resumedProgress: 'Resuming upload: {loaded} / {total}',
+            completed: '{filename} was uploaded.',
+            viewUploads: 'View uploads',
+            failed: 'The upload was interrupted. Retry to resume it.',
+            invalidVideo: 'This video could not be accepted. Choose a supported video file.',
+            authFailed: 'Your upload could not be authorized. Sign in again before retrying.',
+            backgroundFailed:
+                'The upload of {filename} was interrupted. Select the same file on New upload to resume it.',
+            navigationFailed:
+                'Your upload completed, but the uploads list could not be opened. Use View uploads to try again.',
+        },
         status: {
             pending: 'Pending',
             uploaded: 'Uploaded',

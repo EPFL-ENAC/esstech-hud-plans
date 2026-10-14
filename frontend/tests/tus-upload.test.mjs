@@ -20,6 +20,7 @@ async function fixture(t, behavior = {}) {
     const lookup = deferred();
     const uploads = [];
     let token = 'first-token';
+    let subject = 'user-a';
     class Upload {
         url = 'https://hud.test/tus/files/upload-id';
         starts = 0;
@@ -53,14 +54,15 @@ async function fixture(t, behavior = {}) {
     const { uploadVideoResumable } = await importTypeScript(t, 'src/lib/utils/tusUpload.ts', {
         'tus-js-client': { Upload, DetailedError },
         'src/boot/api': { tusEndpoint: 'https://hud.test/tus/files/' },
-        'src/lib/auth': { getAccessToken: () => token },
-        'src/lib/buildings': { ApiError },
+        'src/lib/auth': { getAccessToken: () => token, getAuthSubject: () => subject },
+        'src/lib/api': { ApiError },
     });
     return {
         lookup,
         uploads,
-        upload: (opts) => uploadVideoResumable({ name: 'scan.mp4' }, opts),
+        upload: (opts) => uploadVideoResumable(behavior.file ?? { name: 'scan.mp4' }, opts),
         setToken: (value) => (token = value),
+        setSubject: (value) => (subject = value),
     };
 }
 
@@ -238,4 +240,119 @@ test('abort from the resume callback prevents startup', async (t) => {
     f.lookup.resolve([{}]);
     await assert.rejects(promise, { name: 'AbortError' });
     assert.equal(f.uploads[0].starts, 0);
+});
+
+test('scoped fingerprints include the account, endpoint, and file attributes', async (t) => {
+    const f = await fixture(t, {
+        file: { name: 'scan.mp4', type: 'video/mp4', size: 1234, lastModified: 42 },
+    });
+    const first = f.upload({ subject: 'user-a' });
+    f.lookup.resolve([]);
+    await nextTurn();
+    const a = await f.uploads[0].options.fingerprint();
+    assert.deepEqual(JSON.parse(a), [
+        'hud-upload',
+        'user-a',
+        'https://hud.test/tus/files/',
+        'scan.mp4',
+        'video/mp4',
+        1234,
+        42,
+    ]);
+    f.uploads[0].options.onSuccess();
+    await first;
+    f.setSubject('user-b');
+    const second = f.upload({ subject: 'user-b' });
+    await nextTurn();
+    const b = await f.uploads[1].options.fingerprint();
+    assert.notEqual(a, b);
+    f.uploads[1].options.onSuccess();
+    await second;
+    const legacy = f.upload();
+    assert.equal(f.uploads[2].options.fingerprint, undefined);
+    await nextTurn();
+    f.uploads[2].options.onSuccess();
+    await legacy;
+});
+
+for (const changedSubject of [null, 'user-b']) {
+    test(`account change to ${changedSubject} stops requests without terminating`, async (t) => {
+        const f = await fixture(t);
+        const promise = f.upload({ subject: 'user-a' });
+        f.lookup.resolve([]);
+        await nextTurn();
+        const upload = f.uploads[0];
+        const headers = [];
+        const request = { setHeader: (...args) => headers.push(args) };
+        upload.options.onBeforeRequest(request);
+        f.setToken('refreshed-token');
+        upload.options.onBeforeRequest(request);
+        f.setSubject(changedSubject);
+        assert.throws(() => upload.options.onBeforeRequest(request), { status: 401 });
+        await assert.rejects(promise, { status: 401 });
+        assert.deepEqual(upload.aborts, [false]);
+        assert.deepEqual(headers, [
+            ['Authorization', 'Bearer first-token'],
+            ['Authorization', 'Bearer refreshed-token'],
+        ]);
+        upload.options.onSuccess();
+    });
+}
+
+test('account change while looking up a previous upload never starts it', async (t) => {
+    const f = await fixture(t);
+    const promise = f.upload({ subject: 'user-a' });
+    f.setSubject('user-b');
+    f.lookup.resolve([{ uploadUrl: 'old-upload' }]);
+    await assert.rejects(promise, { status: 401 });
+    assert.equal(f.uploads[0].starts, 0);
+    assert.deepEqual(f.uploads[0].resumes, []);
+});
+
+for (const settlement of ['success', 'error', 'abort']) {
+    test(`active resume URLs are reserved until ${settlement}`, async (t) => {
+        const f = await fixture(t);
+        const controller = new AbortController();
+        const previous = { uploadUrl: 'https://hud.test/tus/files/previous' };
+        const first = f.upload({ signal: controller.signal });
+        f.lookup.resolve([previous]);
+        await nextTurn();
+        const second = f.upload();
+        await nextTurn();
+        assert.deepEqual(f.uploads[0].resumes, [previous]);
+        assert.deepEqual(f.uploads[1].resumes, []);
+        if (settlement === 'success') {
+            f.uploads[0].options.onSuccess();
+            await first;
+        } else {
+            if (settlement === 'error') f.uploads[0].options.onError(new DetailedError('Failure'));
+            else controller.abort();
+            await assert.rejects(first);
+        }
+        const third = f.upload();
+        await nextTurn();
+        assert.deepEqual(f.uploads[2].resumes, [previous]);
+        f.uploads[1].options.onSuccess();
+        f.uploads[2].options.onSuccess();
+        await Promise.all([second, third]);
+    });
+}
+
+test('a newly created upload reserves its URL and reports availability once per callback', async (t) => {
+    const f = await fixture(t);
+    let available = 0;
+    const first = f.upload({ onUploadAvailable: () => available++ });
+    f.lookup.resolve([]);
+    await nextTurn();
+    f.uploads[0].options.onUploadUrlAvailable();
+    assert.equal(available, 1);
+    f.lookup.promise = Promise.resolve([{ uploadUrl: f.uploads[0].url }]);
+    const second = f.upload();
+    await nextTurn();
+    assert.deepEqual(f.uploads[1].resumes, []);
+    f.uploads[0].options.onSuccess();
+    f.uploads[0].options.onUploadUrlAvailable();
+    assert.equal(available, 1);
+    f.uploads[1].options.onSuccess();
+    await Promise.all([first, second]);
 });
