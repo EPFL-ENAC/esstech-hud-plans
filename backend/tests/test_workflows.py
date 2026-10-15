@@ -162,11 +162,18 @@ def test_workflow_runner_serves_both_deployments(
     monkeypatch.setattr(workflow_runner, "splat_generation_flow", reconstruction)
     monkeypatch.setattr(workflow_runner, "tus_cleanup_flow", cleanup)
     monkeypatch.setattr(workflow_runner, "serve", serve)
+    monkeypatch.setattr(
+        workflow_runner,
+        "config",
+        SimpleNamespace(
+            PREFECT_SPLAT_GENERATION_CONCURRENCY=8, PREFECT_TUS_CLEANUP_CONCURRENCY=1
+        ),
+    )
 
     workflow_runner.serve_workflows()
 
     reconstruction.to_deployment.assert_called_once_with(
-        name="default", concurrency_limit=3
+        name="default", concurrency_limit=8
     )
     cleanup.to_deployment.assert_called_once_with(
         name="tus-cleanup", interval=86400, concurrency_limit=1
@@ -174,7 +181,7 @@ def test_workflow_runner_serves_both_deployments(
     serve.assert_called_once_with(
         reconstruction.to_deployment.return_value,
         cleanup.to_deployment.return_value,
-        limit=2,
+        limit=9,
     )
 
 
