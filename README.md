@@ -91,6 +91,18 @@ See the [frontend PWA guide](frontend/README.md#browser-and-installed-app) for b
 modes, HTTPS requirements, offline behavior, and the release checklist.
 
 
+## Updating the terms and conditions
+
+Terms content lives in `backend/api/terms/<version>/{en,fr,es}.md`. To publish a
+new version:
+
+1. Create a new version directory, for example `backend/api/terms/v2/`, with the
+   `en`, `fr`, and `es` markdown files. English is the fallback for missing locales.
+2. Set `TERMS_VERSION` to the new version in `backend/api/config.py`.
+
+Every user is asked to accept the new version at their next request.
+
+
 ## Build and push Docker images
 
 From the project root, run:

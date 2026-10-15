@@ -46,6 +46,9 @@ class UserRead(BaseModel):
     username: str | None
     email: str | None
     name: str | None
+    terms_accepted_version: str | None
+    terms_accepted_at: datetime | None
+    terms_accepted: bool
     created_at: datetime
     updated_at: datetime
 
@@ -60,6 +63,11 @@ class User(SQLModel, table=True):  # type: ignore[call-arg]
     username: str | None = Field(default=None, index=True)
     email: str | None = Field(default=None, index=True)
     name: str | None = None
+    terms_accepted_version: str | None = None
+    terms_accepted_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     created_at: datetime = Field(
         default_factory=utc_now,
         sa_column=Column(DateTime(timezone=True), nullable=False),

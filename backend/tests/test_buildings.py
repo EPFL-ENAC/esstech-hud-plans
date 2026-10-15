@@ -20,6 +20,7 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from api.config import config
 from api.db import get_session
 from api.models.building import (
     Building,
@@ -664,6 +665,7 @@ def api_client() -> Iterator[TestClient]:
     app.dependency_overrides[require_user] = lambda: User(
         id=USER_ID,
         keycloak_sub="subject-1",
+        terms_accepted_version=config.TERMS_VERSION,
     )
 
     with TestClient(app) as client:
@@ -774,6 +776,7 @@ def test_building_locations_route_filters_and_serializes(
     api_client.app.dependency_overrides[require_user] = lambda: User(
         id=OTHER_USER_ID,
         keycloak_sub="subject-2",
+        terms_accepted_version=config.TERMS_VERSION,
     )
     try:
         assert api_client.get("/buildings/locations").json() == []
@@ -953,6 +956,7 @@ def test_building_routes_hide_rows_owned_by_another_user(
     api_client.app.dependency_overrides[require_user] = lambda: User(
         id=OTHER_USER_ID,
         keycloak_sub="subject-2",
+        terms_accepted_version=config.TERMS_VERSION,
     )
     try:
         assert api_client.get("/buildings?sort_order=desc").json() == []

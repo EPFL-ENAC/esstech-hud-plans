@@ -160,6 +160,10 @@ export function getCurrentUser(): Promise<CurrentUser> {
     return requestJson('/user/me');
 }
 
+export function deleteAllData(): Promise<void> {
+    return requestJson('/user/me/data', { method: 'DELETE' });
+}
+
 export function listBuildingLocations(): Promise<BuildingLocation[]> {
     return requestJson('/buildings/locations');
 }

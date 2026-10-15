@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.exc import OperationalError
 
+from api.config import config
 from api.models.auth import AuthenticatedUser
 from api.models.user import User
 from api.services import auth
@@ -74,14 +75,16 @@ def test_parse_authenticated_user_rejects_missing_subject() -> None:
         auth._parse_authenticated_user({})
 
 
-def test_require_user_maps_database_errors_to_service_unavailable() -> None:
+def test_require_user_not_accepted_maps_database_errors_to_service_unavailable() -> (
+    None
+):
     class FailingUserService:
         async def sync_authenticated_user(self, identity: AuthenticatedUser) -> User:
             raise OperationalError("SELECT", {}, RuntimeError("offline"))
 
     async def run() -> None:
         with pytest.raises(HTTPException) as exc_info:
-            await auth.require_user(
+            await auth.require_user_not_accepted(
                 AuthenticatedUser(sub="subject-1"),
                 FailingUserService(),  # type: ignore[arg-type]
             )
@@ -91,7 +94,7 @@ def test_require_user_maps_database_errors_to_service_unavailable() -> None:
 
 
 def test_require_admin_uses_current_token_roles() -> None:
-    user = User(keycloak_sub="subject-1")
+    user = User(keycloak_sub="subject-1", terms_accepted_version=config.TERMS_VERSION)
 
     async def run() -> None:
         assert (

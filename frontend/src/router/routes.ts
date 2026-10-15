@@ -66,6 +66,15 @@ const routes: RouteRecordRaw[] = [
                     detail: () => import('pages/HelpPage.vue'),
                 },
             },
+            {
+                path: 'more/terms',
+                name: 'terms',
+                meta: { drawer: true },
+                components: {
+                    default: () => import('components/BackgroundPage.vue'),
+                    detail: () => import('pages/TermsDetailPage.vue'),
+                },
+            },
 
             // Detail pages open in the right drawer. BackgroundPage renders
             // the selected tab page beneath it (Library after Capture).
@@ -184,6 +193,12 @@ const routes: RouteRecordRaw[] = [
     {
         path: '/callback',
         component: () => import('pages/CallbackPage.vue'),
+    },
+
+    // Terms acceptance screen, outside the main layout (own full-screen page)
+    {
+        path: '/terms',
+        component: () => import('pages/TermsPage.vue'),
     },
 
     // Always leave this as last one,

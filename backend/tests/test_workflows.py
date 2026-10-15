@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from prefect.client.schemas.objects import Log, StateType
 
+from api.config import config
 from api.lib.workflows import __main__ as workflow_runner
 from api.lib.workflows import common as workflow_common
 from api.lib.workflows import counter as counter_workflow
@@ -20,7 +21,6 @@ from api.models.user import User
 from api.models.workflows import (
     BrushSettings,
     ColmapSettings,
-    FfmpegSettings,
     FramePickerSettings,
     SplatGenerationWorkflowSettings,
 )
@@ -46,6 +46,7 @@ def client() -> TestClient:
     app.dependency_overrides[require_user] = lambda: User(
         id=USER_ID,
         keycloak_sub="subject-1",
+        terms_accepted_version=config.TERMS_VERSION,
     )
     return TestClient(app)
 
@@ -161,11 +162,18 @@ def test_workflow_runner_serves_both_deployments(
     monkeypatch.setattr(workflow_runner, "splat_generation_flow", reconstruction)
     monkeypatch.setattr(workflow_runner, "tus_cleanup_flow", cleanup)
     monkeypatch.setattr(workflow_runner, "serve", serve)
+    monkeypatch.setattr(
+        workflow_runner,
+        "config",
+        SimpleNamespace(
+            PREFECT_SPLAT_GENERATION_CONCURRENCY=8, PREFECT_TUS_CLEANUP_CONCURRENCY=1
+        ),
+    )
 
     workflow_runner.serve_workflows()
 
     reconstruction.to_deployment.assert_called_once_with(
-        name="default", concurrency_limit=1
+        name="default", concurrency_limit=8
     )
     cleanup.to_deployment.assert_called_once_with(
         name="tus-cleanup", interval=86400, concurrency_limit=1
@@ -173,7 +181,7 @@ def test_workflow_runner_serves_both_deployments(
     serve.assert_called_once_with(
         reconstruction.to_deployment.return_value,
         cleanup.to_deployment.return_value,
-        limit=2,
+        limit=9,
     )
 
 

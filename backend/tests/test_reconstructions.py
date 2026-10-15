@@ -396,6 +396,7 @@ def reconstruction_api(
     app.dependency_overrides[require_user] = lambda: User(
         id=USER_ID,
         keycloak_sub="subject-1",
+        terms_accepted_version=config.TERMS_VERSION,
     )
 
     with TestClient(app) as client:
@@ -740,7 +741,9 @@ def test_reconstruction_assets_require_authentication_and_ownership(
     try:
         assert client.get(url).status_code == 401
         client.app.dependency_overrides[require_user] = lambda: User(
-            id=OTHER_USER_ID, keycloak_sub="subject-2"
+            id=OTHER_USER_ID,
+            keycloak_sub="subject-2",
+            terms_accepted_version=config.TERMS_VERSION,
         )
         assert client.get(url).status_code == 404
     finally:
@@ -804,6 +807,7 @@ def test_nested_reconstruction_routes_hide_foreign_building(
     client.app.dependency_overrides[require_user] = lambda: User(
         id=OTHER_USER_ID,
         keycloak_sub="subject-2",
+        terms_accepted_version=config.TERMS_VERSION,
     )
     try:
         assert (

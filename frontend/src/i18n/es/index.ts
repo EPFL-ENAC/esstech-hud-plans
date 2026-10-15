@@ -51,6 +51,15 @@ export default {
         language: 'Idioma',
         help: 'Ayuda y asistencia',
         helpPlaceholder: 'Los recursos de ayuda y asistencia estarán disponibles aquí.',
+        deleteAllData: 'Eliminar todos los datos',
+        deleteAllDataTitle: '¿Eliminar todos los datos?',
+        deleteAllDataWarning:
+            'Esto elimina permanentemente todos tus edificios, reconstrucciones y archivos generados. No se puede deshacer. Escribe "{keyword}" para confirmar.',
+        deleteAllDataKeyword: 'ELIMINAR',
+        deleteAllDataConfirm: 'Eliminar todo',
+        deleteAllDataDoneTitle: 'Datos eliminados',
+        deleteAllDataDone: 'Todos tus datos han sido eliminados. Se cerrará tu sesión.',
+        deleteAllDataFailed: 'No se pudieron eliminar tus datos. Inténtalo de nuevo.',
     },
     uploads: {
         title: 'Archivos',
@@ -101,6 +110,14 @@ export default {
         missingCode: 'Falta el código de autorización',
         invalidState: 'Estado de OAuth no válido. Intenta iniciar sesión de nuevo.',
         signInFailed: 'No se pudo iniciar sesión',
+    },
+    terms: {
+        title: 'Términos y condiciones',
+        accept: 'Aceptar',
+        logout: 'Cerrar sesión',
+        loading: 'Cargando los términos…',
+        loadFailed: 'No se pudieron cargar los términos. Inténtalo de nuevo.',
+        acceptFailed: 'No se pudo registrar tu aceptación. Inténtalo de nuevo.',
     },
     notFound: {
         message: 'Vaya. No hay nada aquí…',

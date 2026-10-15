@@ -51,6 +51,15 @@ export default {
         language: 'Langue',
         help: 'Aide et assistance',
         helpPlaceholder: 'Les ressources d’aide et d’assistance seront disponibles ici.',
+        deleteAllData: 'Supprimer toutes les données',
+        deleteAllDataTitle: 'Supprimer toutes les données ?',
+        deleteAllDataWarning:
+            'Cette action supprime définitivement tous vos bâtiments, reconstructions et fichiers générés. Elle est irréversible. Tapez "{keyword}" pour confirmer.',
+        deleteAllDataKeyword: 'SUPPRIMER',
+        deleteAllDataConfirm: 'Tout supprimer',
+        deleteAllDataDoneTitle: 'Données supprimées',
+        deleteAllDataDone: 'Toutes vos données ont été supprimées. Vous allez être déconnecté.',
+        deleteAllDataFailed: 'Impossible de supprimer vos données. Veuillez réessayer.',
     },
     uploads: {
         title: 'Envois',
@@ -102,6 +111,14 @@ export default {
         missingCode: 'Code d’autorisation manquant',
         invalidState: 'État OAuth invalide. Veuillez réessayer de vous connecter.',
         signInFailed: 'Échec de la connexion',
+    },
+    terms: {
+        title: 'Conditions générales d’utilisation',
+        accept: 'Accepter',
+        logout: 'Se déconnecter',
+        loading: 'Chargement des conditions…',
+        loadFailed: 'Impossible de charger les conditions. Veuillez réessayer.',
+        acceptFailed: 'Impossible d’enregistrer votre acceptation. Veuillez réessayer.',
     },
     notFound: {
         message: 'Oups. Il n’y a rien ici…',

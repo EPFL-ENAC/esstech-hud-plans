@@ -25,6 +25,7 @@
         "@sentry/vue": "^10.66.0",
         "@sparkjsdev/spark": "^0.1.10",
         "maplibre-gl": "^6.8.0",
+        "markdown-it": "^15.0.2",
         "pinia": "^3.0.1",
         "quasar": "^2.16.0",
         "register-service-worker": "^1.7.2",

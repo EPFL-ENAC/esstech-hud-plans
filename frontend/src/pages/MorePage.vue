@@ -82,6 +82,19 @@
                 </q-item>
             </q-card>
 
+            <q-card flat bordered class="link-card items-center">
+                <q-item clickable v-ripple :to="{ name: 'terms' }">
+                    <q-item-section>
+                        <q-item-label class="text-subtitle1 text-weight-medium">
+                            {{ t('terms.title') }}
+                        </q-item-label>
+                    </q-item-section>
+                    <q-item-section side>
+                        <q-icon name="chevron_right" size="20px" color="dark" />
+                    </q-item-section>
+                </q-item>
+            </q-card>
+
             <q-card flat bordered clickable class="link-card" @click="handleLogout">
                 <q-item class="text-negative">
                     <q-item-section>
@@ -94,6 +107,19 @@
                     </q-item-section>
                 </q-item>
             </q-card>
+
+            <q-card flat bordered clickable class="link-card" @click="handleDeleteAllData">
+                <q-item class="text-negative">
+                    <q-item-section>
+                        <q-item-label class="text-subtitle1 text-weight-medium">{{
+                            t('more.deleteAllData')
+                        }}</q-item-label>
+                    </q-item-section>
+                    <q-item-section side>
+                        <q-icon name="delete_forever" size="20px" />
+                    </q-item-section>
+                </q-item>
+            </q-card>
         </q-list>
     </q-page>
 </template>
@@ -103,11 +129,16 @@ import PageHeader from 'src/components/PageHeader.vue';
 import PwaInstallButton from 'src/components/PwaInstallButton.vue';
 import { useRouter } from 'vue-router';
 import QueryStateSwitcher from 'src/components/QueryStateSwitcher.vue';
-import { logout } from 'src/lib/auth';
 import { useCurrentUserQuery } from 'src/queries/user';
 import { useI18n } from 'vue-i18n';
+import { useQuasar } from 'quasar';
+import { ref } from 'vue';
+import { deleteAllData } from 'src/lib/buildings';
+import { clearLocalData, logout } from 'src/lib/auth';
 
 const { t } = useI18n();
+const $q = useQuasar();
+const deleting = ref(false);
 
 const router = useRouter();
 const { state, asyncStatus, refetch } = useCurrentUserQuery();
@@ -119,6 +150,54 @@ function displayValue(value: string | null): string {
 function handleLogout() {
     logout();
     void router.push('/login');
+}
+
+function handleDeleteAllData() {
+    if (deleting.value) return;
+    $q.dialog({
+        title: t('more.deleteAllDataTitle'),
+        message: t('more.deleteAllDataWarning', { keyword: t('more.deleteAllDataKeyword') }),
+        prompt: {
+            model: '',
+            type: 'text',
+            isValid: (value: string) =>
+                value.trim().toUpperCase() === t('more.deleteAllDataKeyword'),
+        },
+        cancel: { label: t('common.cancel'), flat: true, noCaps: true },
+        ok: { label: t('more.deleteAllDataConfirm'), color: 'negative', noCaps: true },
+    }).onOk(() => {
+        void confirmDeleteAllData();
+    });
+}
+
+function confirmDeleteAllData() {
+    deleting.value = true;
+    deleteAllData()
+        .then(clearLocalData)
+        .then(() => {
+            $q.dialog({
+                title: t('more.deleteAllDataDoneTitle'),
+                message: t('more.deleteAllDataDone'),
+                ok: { label: t('common.close'), flat: true, noCaps: true },
+                // Fires for OK, Cancel and ESC; data is gone, every path signs out.
+            }).onDismiss(finishSignOut);
+        })
+        .catch(() => {
+            $q.notify({ type: 'negative', message: t('more.deleteAllDataFailed') });
+        })
+        .finally(() => {
+            deleting.value = false;
+        });
+}
+
+function finishSignOut() {
+    logout();
+    // Full reload instead of router.push: clears in-memory query caches so a
+    // re-login with the same identity cannot show data deleted on the server.
+    // Hash-only navigation: a real path would change window.location.pathname,
+    // which keycloakRedirectUri derives from.
+    window.location.hash = '#/login';
+    window.location.reload();
 }
 </script>
 

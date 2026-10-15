@@ -6,9 +6,12 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from api.config import config
 from api.db import retry_on_db_error
 from api.models.auth import AuthenticatedUser
+from api.models.building import Building
 from api.models.user import User, UserCreate, UserUpdate, utc_now
+from api.services.buildings import BuildingService
 
 
 class UserService:
@@ -58,6 +61,35 @@ class UserService:
             setattr(user, field_name, value)
 
         user.updated_at = utc_now()
+        self._session.add(user)
+        await self._commit_and_refresh(user)
+        return user
+
+    async def delete_all_data(self, user: User) -> None:
+        """Delete every building owned by the user, then the user row."""
+
+        building_service = BuildingService(self._session)
+        result = await self._session.exec(
+            select(Building).where(Building.user_id == user.id)
+        )
+        for building in result.all():
+            await building_service.delete(building)
+
+        try:
+            await self._session.delete(user)
+            await self._session.commit()
+        except Exception:
+            await self._session.rollback()
+            raise
+
+    async def accept_terms(self, user: User) -> User:
+        """Record acceptance of the current terms version. Idempotent."""
+
+        if user.terms_accepted_version == config.TERMS_VERSION:
+            return user
+
+        user.terms_accepted_version = config.TERMS_VERSION
+        user.terms_accepted_at = utc_now()
         self._session.add(user)
         await self._commit_and_refresh(user)
         return user

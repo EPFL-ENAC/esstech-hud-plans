@@ -1,4 +1,10 @@
-import { keycloakClientId, keycloakEndpoint, keycloakRealm, keycloakRedirectUri } from 'boot/api';
+import {
+    baseUrl,
+    keycloakClientId,
+    keycloakEndpoint,
+    keycloakRealm,
+    keycloakRedirectUri,
+} from 'boot/api';
 
 const TOKEN_KEY = 'access_token';
 
@@ -99,6 +105,30 @@ export function logout(): void {
     clearAccessToken();
 }
 
+/** Remove every trace of the app on this device: storage, caches, databases. */
+export async function clearLocalData(): Promise<void> {
+    localStorage.clear();
+    sessionStorage.clear();
+    if (typeof caches !== 'undefined') {
+        const names = await caches.keys();
+        await Promise.all(names.map((name) => caches.delete(name)));
+    }
+    if (typeof indexedDB.databases === 'function') {
+        const names = (await indexedDB.databases())
+            .map(({ name }) => name)
+            .filter((name): name is string => !!name);
+        await Promise.all(names.map(deleteIndexedDatabase));
+    }
+}
+
+/** deleteDatabase returns an IDBRequest, so wrap it; best-effort, never rejects. */
+function deleteIndexedDatabase(name: string): Promise<void> {
+    return new Promise((resolve) => {
+        const request = indexedDB.deleteDatabase(name);
+        request.onsuccess = request.onerror = request.onblocked = () => resolve();
+    });
+}
+
 /** Build the Keycloak authorization URL for the login redirect. */
 export function buildKeycloakLoginUrl(): string {
     // Random state for login CSRF protection: we verify it on the callback so
@@ -119,7 +149,8 @@ export function buildKeycloakLoginUrl(): string {
 
 /**
  * Wrapper around fetch that automatically attaches the stored bearer token
- * to every request.
+ * to every request. A 403 with detail "terms_not_accepted" from a gated
+ * endpoint sends the user to the terms screen.
  */
 export async function authFetch(
     input: RequestInfo | URL,
@@ -130,5 +161,43 @@ export async function authFetch(
     if (token) {
         headers.set('Authorization', `Bearer ${token}`);
     }
-    return fetch(input, { ...init, headers });
+    const response = await fetch(input, { ...init, headers });
+    if (response.status === 403) {
+        // Clone before reading so the caller can still consume the body. The
+        // hash navigation avoids a circular import with the router.
+        const body = (await response
+            .clone()
+            .json()
+            .catch(() => null)) as { detail?: string } | null;
+        if (body?.detail === 'terms_not_accepted') {
+            window.location.hash = '#/terms';
+        }
+    }
+    return response;
+}
+
+/** Cache (per page load) of whether the current user accepted the terms. */
+let termsAcceptedPromise: Promise<boolean> | null = null;
+
+/**
+ * Fetch GET /user/me and report whether terms are accepted. Cached in a
+ * module-level promise so the router guard runs at most one fetch per page
+ * load; pass refresh to reset the cache after accepting.
+ */
+export function getTermsAccepted(refresh = false): Promise<boolean> {
+    if (refresh || termsAcceptedPromise === null) {
+        termsAcceptedPromise = (async () => {
+            try {
+                const response = await authFetch(`${baseUrl}/user/me`);
+                if (!response.ok) {
+                    return false;
+                }
+                const user = (await response.json()) as { terms_accepted?: boolean };
+                return user.terms_accepted === true;
+            } catch {
+                return false;
+            }
+        })();
+    }
+    return termsAcceptedPromise;
 }
