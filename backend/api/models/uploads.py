@@ -43,7 +43,7 @@ class UserUploadUpdate(BaseModel):
 
 
 class UserUploadRead(BaseModel):
-    """Upload metadata returned by the API."""
+    """Upload metadata returned by the API, excluding internal storage paths."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -53,7 +53,6 @@ class UserUploadRead(BaseModel):
     description: str
     filename: str
     size_bytes: int
-    file_path: str
     status: UploadStatus
     created_at: datetime
     uploaded_at: datetime | None

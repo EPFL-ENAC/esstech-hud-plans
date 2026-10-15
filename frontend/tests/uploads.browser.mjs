@@ -65,7 +65,6 @@ const rows = Array.from({ length: 25 }, (_, index) => ({
     filename:
         index === 0 ? `${'very_long_video_filename_'.repeat(5)}.mp4` : `video-${index + 1}.mp4`,
     size_bytes: index === 2 ? 0 : 12_400_000,
-    file_path: '/private/internal-tusd-path/never-display-this',
     status: ['pending', 'uploaded', 'failed'][index % 3],
     created_at: '2026-10-14T10:00:00Z',
     uploaded_at: index % 3 === 1 ? '2026-10-14T10:05:00Z' : null,
@@ -181,7 +180,6 @@ try {
                 await page.getByText('North facade', { exact: true }).waitFor();
                 const bodyText = await page.locator('body').innerText();
                 assert.ok(!bodyText.includes('TODO'));
-                assert.ok(!bodyText.includes('/private/internal-tusd-path'));
                 assert.ok(!bodyText.includes('browser-user-private-id'));
                 assert.equal(await page.locator('input[type=file]').count(), 0);
                 assert.equal(

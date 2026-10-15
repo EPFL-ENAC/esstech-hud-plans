@@ -9,7 +9,6 @@ export interface UserUpload {
     description: string;
     filename: string;
     size_bytes: number;
-    file_path: string;
     status: UploadStatus;
     created_at: string;
     uploaded_at: string | null;

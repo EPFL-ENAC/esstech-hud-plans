@@ -16,7 +16,7 @@ async def list(
 
 is very bad because the arguments of the function are spread both horizontal or vertically, either choose :
 ```py
-def something(arg2, arg2)
+def something(arg1, arg2)
 ```
 for short arg lists or :
 ```py

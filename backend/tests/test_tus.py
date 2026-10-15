@@ -25,7 +25,7 @@ from api.lib.workflows import splat_generation as splat_workflow
 from api.lib.workflows import tus_cleanup
 from api.models.auth import AuthenticatedUser
 from api.models.building import Building
-from api.models.uploads import UploadStatus, UserUploadRead, UserUploads
+from api.models.uploads import UploadStatus, UserUploads
 from api.models.user import User
 from api.services.auth import require_user
 from api.services.uploads import UserUploadsService
@@ -116,14 +116,13 @@ def tus_hook_api(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     asyncio.run(engine.dispose())
 
 
-def _read_hook_upload(tus_hook_api: TestClient) -> UserUploadRead | None:
+def _read_hook_upload(tus_hook_api: TestClient) -> UserUploads | None:
     assert isinstance(tus_hook_api.app, FastAPI)
     engine = tus_hook_api.app.state.upload_database
 
-    async def read() -> UserUploadRead | None:
+    async def read() -> UserUploads | None:
         async with AsyncSession(engine, expire_on_commit=False) as session:
-            upload = await session.get(UserUploads, UPLOAD_ID)
-            return UserUploadRead.model_validate(upload) if upload is not None else None
+            return await session.get(UserUploads, UPLOAD_ID)
 
     return asyncio.run(read())
 

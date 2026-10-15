@@ -240,7 +240,7 @@ def test_real_tus_registration_resume_completion_and_delete(
     assert record["description"] == ""
     assert record["filename"] == "scan.mp4"
     assert record["size_bytes"] == 11
-    assert record["file_path"] == str(real_tus.upload_directory / upload_id)
+    assert "file_path" not in record
     assert record["status"] == "pending"
     assert record["uploaded_at"] is None
     assert client.post("/uploads", json={}).status_code == 405

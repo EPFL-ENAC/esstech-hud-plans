@@ -146,7 +146,6 @@ try {
                             description: '',
                             filename,
                             size_bytes: Number(request.headers()['upload-length']),
-                            file_path: '/private/file',
                             status: 'pending',
                             created_at: new Date().toISOString(),
                             uploaded_at: null,

@@ -186,6 +186,7 @@ def test_upload_service_crud_preserves_file(
             session.expunge_all()
             persisted = await uploads.get(upload_id, user_id=USER_ID)
             assert persisted is not None
+            assert persisted.file_path == str(file_path)
             original = UserUploadRead.model_validate(persisted).model_dump()
             assert original["size_bytes"] == 2**32
             assert original["status"] == UploadStatus.PENDING
@@ -351,7 +352,6 @@ def test_upload_routes_cover_crud(api_client: TestClient) -> None:
         "description": "",
         "filename": "video.mp4",
         "size_bytes": 11,
-        "file_path": "TODO",
         "status": "uploaded",
         "created_at": created["created_at"],
         "uploaded_at": created["uploaded_at"],
@@ -496,10 +496,13 @@ def test_upload_routes_map_database_failures(
 def test_upload_router_is_registered_in_application() -> None:
     from api.main import app
 
-    paths = app.openapi()["paths"]
+    schema = app.openapi()
+    paths = schema["paths"]
     assert "get" in paths["/uploads"]
     assert "post" not in paths["/uploads"]
     assert {"get", "patch", "delete"} <= paths["/uploads/{upload_id}"].keys()
+    properties = schema["components"]["schemas"]["UserUploadRead"]["properties"]
+    assert "file_path" not in properties
 
 
 def test_upload_migration_preserves_existing_tables_and_cascades() -> None:
