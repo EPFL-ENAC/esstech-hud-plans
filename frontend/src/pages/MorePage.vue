@@ -44,6 +44,19 @@
         <pwa-install-button class="q-mb-md" />
         <q-list class="more-links">
             <q-card flat bordered class="link-card">
+                <q-item clickable v-ripple :to="{ name: 'uploads' }">
+                    <q-item-section>
+                        <q-item-label class="text-subtitle1 text-weight-medium">
+                            {{ t('uploads.title') }}
+                        </q-item-label>
+                    </q-item-section>
+                    <q-item-section side>
+                        <q-icon name="chevron_right" size="20px" color="dark" aria-hidden="true" />
+                    </q-item-section>
+                </q-item>
+            </q-card>
+
+            <q-card flat bordered class="link-card">
                 <q-item clickable v-ripple :to="{ name: 'settings' }">
                     <q-item-section>
                         <q-item-label class="text-subtitle1 text-weight-medium">

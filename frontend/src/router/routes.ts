@@ -39,6 +39,16 @@ const routes: RouteRecordRaw[] = [
                 component: () => import('pages/MorePage.vue'),
             },
             {
+                path: 'uploads',
+                name: 'uploads',
+                component: () => import('pages/UploadsPage.vue'),
+            },
+            {
+                path: 'uploads/new',
+                name: 'new-upload',
+                component: () => import('pages/NewUploadPage.vue'),
+            },
+            {
                 path: 'more/settings',
                 name: 'settings',
                 meta: { drawer: true },

@@ -9,14 +9,38 @@ creation.
 
 from __future__ import annotations
 
+import base64
+import logging
+from collections.abc import Awaitable, Callable
+from typing import Annotated
+from uuid import uuid4
+
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy.exc import SQLAlchemyError
 from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 
 from api.config import config
+from api.lib.tus import (
+    TUS_COMPLETION_TIMEOUT_SECONDS,
+    TUS_HOOK_SECRET_HEADER,
+    TUS_UPLOAD_ID_HEADER,
+    parse_upload_id,
+)
+from api.lib.upload_storage import remove_tus_files
+from api.models.uploads import UploadStatus, UserUploads
+from api.models.user import User
 from api.services.auth import require_user
-from api.views.reconstruction_submission import TUS_UPLOAD_ID_PATTERN
+from api.services.uploads import (
+    UploadConflictError,
+    UploadNotFoundError,
+    UserUploadsService,
+)
+from api.views.uploads import get_uploads_service
+
+logger = logging.getLogger(__name__)
 
 # The browser must not send anything else to tusd. The whitelist keeps
 # hop-by-hop headers and client fingerprinting headers out of tusd.
@@ -56,7 +80,12 @@ def _get_client() -> httpx.AsyncClient:
     if _client is None:
         _client = httpx.AsyncClient(
             base_url=config.TUSD_INTERNAL_URL,
-            timeout=httpx.Timeout(10.0, read=120.0, write=120.0, pool=10.0),
+            timeout=httpx.Timeout(
+                10.0,
+                read=TUS_COMPLETION_TIMEOUT_SECONDS + 30.0,
+                write=120.0,
+                pool=10.0,
+            ),
         )
     return _client
 
@@ -70,7 +99,10 @@ async def close_tus_proxy() -> None:
         _client = None
 
 
-def _forwarded_request_headers(request: Request) -> dict[str, str]:
+def _forwarded_request_headers(
+    request: Request,
+    extra_headers: dict[str, str] | None = None,
+) -> dict[str, str]:
     headers = {
         key: value
         for key, value in request.headers.items()
@@ -79,6 +111,12 @@ def _forwarded_request_headers(request: Request) -> dict[str, str]:
     headers["X-Forwarded-For"] = request.client.host if request.client else ""
     headers["X-Forwarded-Proto"] = request.url.scheme
     headers["X-Forwarded-Host"] = request.headers.get("host", "")
+    if extra_headers:
+        headers.update(extra_headers)
+    if request.method != "OPTIONS":
+        if not config.TUSD_HOOK_SECRET:
+            raise HTTPException(503, "Upload hooks are not configured")
+        headers[TUS_HOOK_SECRET_HEADER] = config.TUSD_HOOK_SECRET
     return headers
 
 
@@ -90,14 +128,20 @@ def _proxied_location(request: Request, location: str) -> str:
     return f"{str(request.base_url).rstrip('/')}/tus{upstream.path}{query}"
 
 
-async def _forward(request: Request, upstream_path: str) -> Response:
+async def _forward(
+    request: Request,
+    upstream_path: str,
+    *,
+    extra_headers: dict[str, str] | None = None,
+    on_head: Callable[[httpx.Response], Awaitable[None]] | None = None,
+) -> Response:
     body = request.stream() if request.method in ("POST", "PATCH") else None
     try:
         upstream = await _get_client().send(
             _get_client().build_request(
                 request.method,
                 upstream_path,
-                headers=_forwarded_request_headers(request),
+                headers=_forwarded_request_headers(request, extra_headers),
                 content=body,
             ),
             stream=True,
@@ -127,8 +171,12 @@ async def _forward(request: Request, upstream_path: str) -> Response:
         ) from exc
 
     if request.method == "HEAD":
-        await upstream.aclose()
-        return Response(status_code=upstream.status_code, headers=forwarded)
+        try:
+            if on_head is not None:
+                await on_head(upstream)
+            return Response(status_code=upstream.status_code, headers=forwarded)
+        finally:
+            await upstream.aclose()
 
     return StreamingResponse(
         upstream.aiter_raw(),
@@ -138,13 +186,80 @@ async def _forward(request: Request, upstream_path: str) -> Response:
     )
 
 
-def _checked_upload_id(upload_id: str) -> str:
-    if not TUS_UPLOAD_ID_PATTERN.fullmatch(upload_id):
+async def get_owned_tus_upload(
+    upload_id: str,
+    current_user: Annotated[User, Depends(require_user)],
+    uploads: Annotated[UserUploadsService, Depends(get_uploads_service)],
+) -> UserUploads:
+    parsed_id = parse_upload_id(upload_id)
+    try:
+        upload = await uploads.get(parsed_id, user_id=current_user.id)
+    except (OSError, SQLAlchemyError) as exc:
+        logger.exception("Upload proxy database operation failed")
+        raise HTTPException(503, "Upload database is unavailable") from exc
+    if upload is None:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid upload id",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Upload not found",
         )
-    return upload_id
+    return upload
+
+
+CurrentTusUpload = Annotated[UserUploads, Depends(get_owned_tus_upload)]
+UploadsService = Annotated[UserUploadsService, Depends(get_uploads_service)]
+
+
+async def reconcile_head(
+    response: httpx.Response,
+    upload: UserUploads,
+    uploads: UserUploadsService,
+) -> None:
+    if upload.status != UploadStatus.PENDING:
+        return
+    if (
+        response.is_success
+        and upload.size_bytes > 0
+        and response.headers.get("Upload-Length") == str(upload.size_bytes)
+        and response.headers.get("Upload-Offset") == str(upload.size_bytes)
+    ):
+        try:
+            await uploads.complete(upload.id)
+        except (OSError, SQLAlchemyError) as exc:
+            logger.exception("Upload HEAD persistence failed")
+            raise HTTPException(503, "Upload persistence is unavailable") from exc
+        except UploadNotFoundError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except UploadConflictError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+
+async def require_stored_upload(
+    upload: UserUploads,
+    uploads: UserUploadsService,
+) -> UserUploads:
+    try:
+        return await uploads.get_completed(upload.id, user_id=upload.user_id)
+    except UploadNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except UploadConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except (OSError, SQLAlchemyError) as exc:
+        logger.exception("Stored upload is unavailable")
+        raise HTTPException(503, "Upload persistence is unavailable") from exc
+
+
+def completed_upload_response(upload: UserUploads, status_code: int) -> Response:
+    filename = base64.b64encode(upload.filename.encode("utf-8")).decode("ascii")
+    return Response(
+        status_code=status_code,
+        headers={
+            "Tus-Resumable": "1.0.0",
+            "Upload-Offset": str(upload.size_bytes),
+            "Upload-Length": str(upload.size_bytes),
+            "Upload-Metadata": f"filename {filename}",
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 router = APIRouter()
@@ -159,19 +274,64 @@ async def proxy_options(request: Request) -> Response:
 @router.post("/files", dependencies=[Depends(require_user)])
 @router.post("/files/", dependencies=[Depends(require_user)])
 async def proxy_create(request: Request) -> Response:
-    return await _forward(request, "/files/")
+    return await _forward(
+        request,
+        "/files/",
+        extra_headers={TUS_UPLOAD_ID_HEADER: uuid4().hex},
+    )
 
 
-@router.head("/files/{upload_id}", dependencies=[Depends(require_user)])
-async def proxy_head(request: Request, upload_id: str) -> Response:
-    return await _forward(request, f"/files/{_checked_upload_id(upload_id)}")
+@router.head("/files/{upload_id}")
+async def proxy_head(
+    request: Request,
+    upload: CurrentTusUpload,
+    uploads: UploadsService,
+) -> Response:
+    if upload.status == UploadStatus.UPLOADED:
+        stored = await require_stored_upload(upload, uploads)
+        return completed_upload_response(stored, 200)
+
+    async def on_head(response: httpx.Response) -> None:
+        await reconcile_head(response, upload, uploads)
+
+    return await _forward(request, f"/files/{upload.id.hex}", on_head=on_head)
 
 
-@router.patch("/files/{upload_id}", dependencies=[Depends(require_user)])
-async def proxy_patch(request: Request, upload_id: str) -> Response:
-    return await _forward(request, f"/files/{_checked_upload_id(upload_id)}")
+@router.patch("/files/{upload_id}")
+async def proxy_patch(
+    request: Request,
+    upload: CurrentTusUpload,
+    uploads: UploadsService,
+) -> Response:
+    if upload.status == UploadStatus.UPLOADED:
+        stored = await require_stored_upload(upload, uploads)
+        if request.headers.get("Tus-Resumable") != "1.0.0":
+            raise HTTPException(412, "Unsupported tus version")
+        if request.headers.get("Content-Type") != "application/offset+octet-stream":
+            raise HTTPException(415, "Invalid upload content type")
+        if request.headers.get("Upload-Offset") != str(stored.size_bytes):
+            raise HTTPException(409, "Upload offset does not match completed upload")
+        async for chunk in request.stream():
+            if chunk:
+                raise HTTPException(409, "Upload is already complete")
+        return completed_upload_response(stored, 204)
+
+    return await _forward(request, f"/files/{upload.id.hex}")
 
 
-@router.delete("/files/{upload_id}", dependencies=[Depends(require_user)])
-async def proxy_delete(request: Request, upload_id: str) -> Response:
-    return await _forward(request, f"/files/{_checked_upload_id(upload_id)}")
+@router.delete("/files/{upload_id}")
+async def proxy_delete(
+    request: Request,
+    upload: CurrentTusUpload,
+    uploads: UploadsService,
+) -> Response:
+    try:
+        uploads.require_uploaded(upload)
+    except UploadConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    await require_stored_upload(upload, uploads)
+    try:
+        await run_in_threadpool(remove_tus_files, upload.id)
+    except OSError as exc:
+        raise HTTPException(503, "Upload staging cleanup is unavailable") from exc
+    return Response(status_code=204, headers={"Tus-Resumable": "1.0.0"})

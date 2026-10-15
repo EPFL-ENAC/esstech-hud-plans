@@ -1,4 +1,3 @@
-import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -75,7 +74,9 @@ class Config(BaseSettings):
     TUSD_UPLOAD_DIR: str = "/tmp/hud-tusd-uploads"
     # Age threshold for the tus cleanup flow
     TUSD_UPLOAD_RETENTION_DAYS: int = 7
-    # Hook endpoint URL tusd calls for pre-create validation (used by the compose command)
+    # Internal credential injected by the API proxy and forwarded to tusd hooks.
+    TUSD_HOOK_SECRET: str = ""
+    # Hook endpoint URL tusd calls for upload lifecycle events (used by compose).
     TUSD_HOOKS_HTTP_URL: str = "http://host.docker.internal:8000/tus/hooks"
     # Internal address of the tusd server. The API proxies upload requests to
     # it, so the browser never reaches tusd. Dev targets the loopback-published

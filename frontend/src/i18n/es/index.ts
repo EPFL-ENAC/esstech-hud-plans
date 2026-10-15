@@ -61,6 +61,46 @@ export default {
         deleteAllDataDone: 'Todos tus datos han sido eliminados. Se cerrará tu sesión.',
         deleteAllDataFailed: 'No se pudieron eliminar tus datos. Inténtalo de nuevo.',
     },
+    uploads: {
+        title: 'Archivos',
+        refresh: 'Actualizar',
+        loading: 'Cargando archivos…',
+        refreshing: 'Actualizando archivos…',
+        loadFailed: 'No se pudieron cargar tus archivos.',
+        refreshFailed:
+            'No se pudieron actualizar tus archivos. Los archivos ya cargados se muestran abajo.',
+        empty: 'Aún no hay archivos subidos.',
+        emptyPage: 'No hay archivos en esta página. Prueba una página anterior.',
+        pagination: 'Paginación de la lista de archivos',
+        created: 'Creado el {date}',
+        uploaded: 'Subido el {date}',
+        new: {
+            title: 'Subir archivo',
+            instructions:
+                'Elige un vídeo e inicia la subida. Puedes seguir usando la aplicación mientras se sube.',
+            start: 'Subir',
+            emptyFile: 'Este archivo está vacío. Elige un vídeo con contenido.',
+            starting: 'Iniciando la subida…',
+            resuming: 'Reanudando la subida…',
+            progress: 'Subiendo {loaded} / {total}',
+            resumedProgress: 'Reanudando la subida: {loaded} / {total}',
+            completed: 'Se ha subido {filename}.',
+            viewUploads: 'Ver archivos',
+            failed: 'La subida se ha interrumpido. Reintenta para reanudarla.',
+            invalidVideo: 'No se pudo aceptar este vídeo. Elige un archivo de vídeo compatible.',
+            authFailed:
+                'No se pudo autorizar la subida. Inicia sesión de nuevo antes de reintentar.',
+            backgroundFailed:
+                'La subida de {filename} se ha interrumpido. Selecciona el mismo archivo en Subir archivo para reanudarla.',
+            navigationFailed:
+                'La subida ha terminado, pero no se pudo abrir la lista de archivos. Usa Ver archivos para reintentar.',
+        },
+        status: {
+            pending: 'Pendiente',
+            uploaded: 'Subido',
+            failed: 'Fallido',
+        },
+    },
     auth: {
         appTitle: 'Points of Home',
         appDescription: 'Escanea, planifica, construye.',

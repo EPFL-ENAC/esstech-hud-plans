@@ -31,11 +31,13 @@ from api.services.reconstructions import (
     ReconstructionCreationError,
     ReconstructionService,
 )
+from api.services.uploads import UserUploadsService
 from api.views.reconstruction_submission import (
     ResumableBuildingFromReconstructionSubmission,
     get_reconstruction_service,
     validate_tus_upload,
 )
+from api.views.uploads import get_uploads_service
 
 logger = logging.getLogger(__name__)
 
@@ -99,8 +101,12 @@ async def create_building(
     status_code=status.HTTP_202_ACCEPTED,
     response_model=BuildingFromReconstructionRead,
     responses={
-        400: {"description": "The tus upload is missing, incomplete, or not a video."},
+        400: {"description": "The upload ID is invalid."},
         401: {"description": "Authentication is required."},
+        404: {
+            "description": "The upload is not owned by the submitting user or is unknown."
+        },
+        409: {"description": "The upload has not completed."},
         422: {"description": "Missing fields or invalid building/workflow settings."},
         503: {
             "model": BuildingFromReconstructionError,
@@ -119,10 +125,15 @@ async def create_building_from_reconstruction_resumable(
     reconstructions: Annotated[
         ReconstructionService, Depends(get_reconstruction_service)
     ],
+    uploads: Annotated[UserUploadsService, Depends(get_uploads_service)],
 ) -> BuildingFromReconstructionRead:
     """Create an owned building, then submit its first reconstruction from a
     completed tus upload."""
-    tus_upload_path, tus_video_filename = validate_tus_upload(payload.tus_upload_id)
+    upload = await validate_tus_upload(
+        payload.tus_upload_id,
+        user_id=current_user.id,
+        uploads=uploads,
+    )
 
     try:
         created_building = await buildings.create(
@@ -136,8 +147,8 @@ async def create_building_from_reconstruction_resumable(
     try:
         reconstruction = await reconstructions.create_from_tus(
             building=created_building,
-            tus_upload_path=str(tus_upload_path),
-            tus_video_filename=tus_video_filename,
+            tus_upload_path=upload.file_path,
+            tus_video_filename=upload.filename,
             settings=payload.settings,
         )
     except ReconstructionCreationError as exc:

@@ -30,12 +30,12 @@ from api.models.reconstruction import (
     ReconstructionRead,
     ReconstructionStatus,
 )
-from api.models.user import User
+from api.models.uploads import UploadStatus, UserUploads
+from api.models.user import User, utc_now
 from api.models.workflows import FramePickerSettings, SplatGenerationWorkflowSettings
 from api.services.auth import require_user
 from api.services.buildings import BuildingService
 from api.services.reconstructions import (
-    ReconstructionSchedulingError,
     ReconstructionService,
     SortOrder,
 )
@@ -352,6 +352,7 @@ def reconstruction_api(
     tus_dir.mkdir()
     monkeypatch.setattr(workflow_common, "WORKFLOW_DATA_DIRECTORY", tmp_path)
     monkeypatch.setattr(config, "TUSD_UPLOAD_DIR", str(tus_dir))
+    monkeypatch.setattr(config, "DATA_DIR", str(tmp_path / "data"))
 
     async def prepare_database() -> None:
         async with engine.begin() as connection:
@@ -385,6 +386,7 @@ def reconstruction_api(
     )
 
     app = FastAPI()
+    app.state.upload_database = engine
     app.include_router(building_views.router, prefix="/buildings")
     app.include_router(
         reconstruction_views.router,
@@ -404,10 +406,13 @@ def reconstruction_api(
 
 
 def _seed_completed_upload(
-    filename: str = "scan.mp4", content: bytes = b"video bytes"
+    client: TestClient,
+    filename: str = "scan.mp4",
+    content: bytes = b"video bytes",
 ) -> str:
     """Create a completed fake tus upload pair in the staging directory."""
 
+    assert isinstance(client.app, FastAPI)
     upload_id = uuid4().hex
     upload_dir = Path(config.TUSD_UPLOAD_DIR)
     (upload_dir / upload_id).write_bytes(content)
@@ -420,11 +425,28 @@ def _seed_completed_upload(
             }
         )
     )
+
+    async def register() -> None:
+        async with AsyncSession(client.app.state.upload_database) as session:
+            session.add(
+                UserUploads(
+                    id=UUID(upload_id),
+                    user_id=USER_ID,
+                    filename=filename,
+                    size_bytes=len(content),
+                    file_path=str(upload_dir / upload_id),
+                    status=UploadStatus.UPLOADED,
+                    uploaded_at=utc_now(),
+                )
+            )
+            await session.commit()
+
+    asyncio.run(register())
     return upload_id
 
 
 def _submit_reconstruction(client: TestClient, building_id: UUID):
-    upload_id = _seed_completed_upload()
+    upload_id = _seed_completed_upload(client)
     return client.post(
         f"/buildings/{building_id}/reconstructions/resumable",
         json={"tus_upload_id": upload_id, "settings": {}},
@@ -432,7 +454,7 @@ def _submit_reconstruction(client: TestClient, building_id: UUID):
 
 
 def _submit_building_from_reconstruction(client: TestClient):
-    upload_id = _seed_completed_upload()
+    upload_id = _seed_completed_upload(client)
     return client.post(
         "/buildings/from-reconstruction/resumable",
         json={"tus_upload_id": upload_id, "building": {}, "settings": {}},
@@ -1140,8 +1162,10 @@ def test_building_from_reconstruction_handles_database_insert_failure(
             client.get(f"/buildings/{detail['building_id']}/reconstructions").json()
             == []
         )
-    # Only the seeded tus staging directory remains; no workflow artifacts.
-    assert [p for p in tmp_path.iterdir() if p.name != "tus-uploads"] == []
+    # The completed upload survives; no reconstruction artifacts were created.
+    assert [
+        p for p in tmp_path.iterdir() if p.name not in {"tus-uploads", "data"}
+    ] == []
 
 
 def test_delete_removes_files_and_row_for_completed_reconstruction(

@@ -1,8 +1,10 @@
 import { i18n } from 'src/i18n/instance';
 import { baseUrl } from 'boot/api';
-import { authFetch } from 'src/lib/auth';
+import { ApiError, requestJson } from 'src/lib/api';
 import type { FetchProgress } from 'src/lib/utils/fetchProgress';
 import { downloadResumable, type ResumableDownloadOptions } from 'src/lib/utils/resumableDownload';
+
+export { ApiError } from 'src/lib/api';
 
 export interface CurrentUser {
     id: string;
@@ -152,33 +154,6 @@ export interface Reconstruction {
 export interface ReconstructionSubmission {
     video: File;
     settings: SplatGenerationSettings;
-}
-
-export class ApiError extends Error {
-    constructor(
-        message: string,
-        readonly status: number,
-        readonly body: unknown,
-    ) {
-        super(message);
-    }
-}
-
-async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await authFetch(`${baseUrl}${path}`, init);
-    const text = await response.text();
-    let body: unknown = null;
-    if (text) {
-        try {
-            body = JSON.parse(text) as unknown;
-        } catch {
-            body = text;
-        }
-    }
-    if (!response.ok) {
-        throw new ApiError(`Request failed with HTTP ${response.status}`, response.status, body);
-    }
-    return body as T;
 }
 
 export function getCurrentUser(): Promise<CurrentUser> {

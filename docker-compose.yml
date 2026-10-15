@@ -56,7 +56,15 @@ services:
       - -hooks-http
       - ${TUSD_HOOKS_HTTP_URL:-http://host.docker.internal:8000/tus/hooks}
       - -hooks-enabled-events
-      - pre-create
+      - pre-create,pre-finish
+      # Completion copies the full file into DATA_DIR before acknowledging it.
+      - -hooks-http-timeout
+      - 1800s
+      - -network-timeout
+      - 1860s
+      - -hooks-http-forward-headers
+      - X-HUD-Tus-Hook-Secret
+      - -disable-concatenation
       - -disable-download
 
 volumes:

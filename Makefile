@@ -39,6 +39,9 @@ db-downgrade:
 db-revision:
 	cd backend && make db-revision name="$(name)"
 
+db-merge:
+	cd backend && make db-merge name="$(name)"
+
 run-all:
 	make run-db && trap 'kill "$${backend_pid}" "$${frontend_pid}" "$${workflows_pid}" 2>/dev/null; make stop-db' INT TERM HUP && { make run-workflows & workflows_pid=$$!; make run-backend & backend_pid=$$!; make run-frontend & frontend_pid=$$!; wait; }
 

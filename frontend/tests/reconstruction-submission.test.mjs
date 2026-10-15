@@ -9,8 +9,7 @@ import { deferred, importTypeScript } from './helpers/typescript.mjs';
 async function fixture(t) {
     const uploads = [];
     const submissions = [];
-    const buildings = await importTypeScript(t, 'src/lib/buildings.ts', {
-        'src/i18n/instance': { i18n: { global: { t: (key) => key } } },
+    const api = await importTypeScript(t, 'src/lib/api.ts', {
         'boot/api': { baseUrl: 'https://hud.test' },
         'src/lib/auth': {
             authFetch(url, init) {
@@ -19,6 +18,11 @@ async function fixture(t) {
                 return gate.promise;
             },
         },
+    });
+    const buildings = await importTypeScript(t, 'src/lib/buildings.ts', {
+        'src/i18n/instance': { i18n: { global: { t: (key) => key } } },
+        'boot/api': { baseUrl: 'https://hud.test' },
+        'src/lib/api': api,
         'src/lib/utils/resumableDownload': { downloadResumable() {} },
     });
     const { useSubmitReconstructionMutation } = await importTypeScript(

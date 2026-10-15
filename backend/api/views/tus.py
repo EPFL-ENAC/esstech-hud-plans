@@ -1,53 +1,51 @@
-"""tusd webhook receiver for resumable video uploads.
-
-tusd calls this endpoint on upload lifecycle events. The `pre-create` hook is
-blocking: tusd rejects the upload creation when this endpoint answers with a
-non-2xx status. The Authorization header of the original upload request is
-forwarded inside the hook payload and validated here with the same JWT logic
-as the rest of the API.
-
-A non-2xx status answers an internal failure only: tusd hides it behind a 500.
-End-user rejections return 200 with a hook response that carries the real
-status code in HTTPResponse, so the browser sees 401 or 400 and not 500.
-"""
+"""Blocking tusd hooks for upload registration and completion."""
 
 from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+import secrets
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials
+from sqlalchemy.exc import SQLAlchemyError
+from sqlmodel.ext.asyncio.session import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
+from api.config import config
+from api.db import get_session
+from api.lib.tus import (
+    TUS_HOOK_SECRET_HEADER,
+    TusUploadEvent,
+    tus_file_path,
+)
+from api.models.uploads import UserUploadCreate, UserUploads
 from api.services.auth import authenticate_user
-from api.views.reconstruction_submission import validate_video_filename
+from api.services.uploads import (
+    UploadConflictError,
+    UploadNotFoundError,
+    UserUploadsService,
+)
+from api.services.users import UserService
 
 logger = logging.getLogger(__name__)
-
 router = APIRouter()
 
 
-def _extract_bearer_token(headers: dict[str, Any]) -> str | None:
-    """Read the bearer token from the forwarded request headers.
-
-    tusd serializes header values as lists and preserves the original key
-    casing, so the lookup is case-insensitive.
-    """
-
-    for key, value in headers.items():
-        if not isinstance(key, str) or key.lower() != "authorization":
-            continue
-        entries = value if isinstance(value, list) else [value]
-        for entry in entries:
-            if isinstance(entry, str) and entry.lower().startswith("bearer "):
-                return entry[len("bearer ") :].strip()
-    return None
+def require_tus_hook_secret(request: Request) -> None:
+    if not config.TUSD_HOOK_SECRET:
+        raise HTTPException(503, "Upload hooks are not configured")
+    supplied = request.headers.get(TUS_HOOK_SECRET_HEADER, "")
+    if not secrets.compare_digest(
+        supplied.encode("utf-8"),
+        config.TUSD_HOOK_SECRET.encode("utf-8"),
+    ):
+        raise HTTPException(403, "Invalid upload hook credential")
 
 
 def _rejection(status_code: int, detail: str) -> dict[str, Any]:
-    """Hook response that rejects the upload with a client-facing status."""
+    """tusd expects creation rejections inside a successful hook response."""
 
     return {
         "HTTPResponse": {
@@ -59,84 +57,83 @@ def _rejection(status_code: int, detail: str) -> dict[str, Any]:
     }
 
 
-def _validate_hook_upload(upload: dict[str, Any]) -> None:
-    """Check the upload metadata declared at creation time."""
-
-    metadata = upload.get("MetaData") or {}
-    validate_video_filename(
-        metadata.get("filename") if isinstance(metadata, dict) else None
+async def handle_pre_create(
+    event: TusUploadEvent,
+    session: AsyncSession,
+) -> dict[str, Any]:
+    if not event.bearer_token:
+        raise HTTPException(401, "Missing bearer token")
+    identity = await run_in_threadpool(
+        authenticate_user,
+        HTTPAuthorizationCredentials(scheme="Bearer", credentials=event.bearer_token),
     )
-    size = upload.get("Size")
+    user = await UserService(session).sync_authenticated_user(identity)
+    upload = await UserUploadsService(session).create(
+        upload_id=event.upload_id,
+        user_id=user.id,
+        payload=UserUploadCreate(),
+        filename=event.filename,
+        size_bytes=event.size_bytes,
+        file_path=tus_file_path(event.upload_id),
+    )
+    return {"ChangeFileInfo": {"ID": upload.id.hex}}
+
+
+async def validate_completion(event: TusUploadEvent, session: AsyncSession) -> None:
+    upload = await session.get(UserUploads, event.upload_id)
+    if upload is None:
+        raise UploadNotFoundError("Upload not found")
     if (
-        upload.get("SizeIsDeferred")
-        or not isinstance(size, int)
-        or isinstance(size, bool)
-        or size <= 0
+        event.filename != upload.filename
+        or event.size_bytes != upload.size_bytes
+        or event.offset != event.size_bytes
     ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Upload size must be known and positive",
+        raise UploadConflictError(
+            "Upload completion does not match registered metadata"
         )
+
+
+async def handle_pre_finish(
+    event: TusUploadEvent,
+    session: AsyncSession,
+) -> dict[str, Any]:
+    await validate_completion(event, session)
+    await UserUploadsService(session).complete(event.upload_id)
+    return {}
 
 
 @router.post("/hooks", status_code=status.HTTP_200_OK)
-async def receive_tusd_hook(request: Request) -> dict[str, Any]:
-    """Receive a tusd lifecycle hook.
-
-    Only `pre-create` is blocking. Every other hook type is acknowledged so
-    that enabling more tusd events later cannot break uploads.
-    """
-
+async def receive_tusd_hook(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, Any]:
+    require_tus_hook_secret(request)
     try:
         payload = await request.json()
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid hook payload",
-        ) from exc
-
+        raise HTTPException(400, "Invalid hook payload") from exc
     if not isinstance(payload, dict):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid hook payload",
-        )
-    if payload.get("Type") != "pre-create":
-        return {"ok": True}
+        raise HTTPException(400, "Invalid hook payload")
 
-    event = payload.get("Event") or {}
-    if not isinstance(event, dict):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid hook event",
-        )
-
-    http_request = event.get("HTTPRequest") or {}
-    request_headers = (
-        http_request.get("Header") if isinstance(http_request, dict) else None
-    )
-    token = _extract_bearer_token(request_headers or {})
-    if token is None:
-        return _rejection(
-            status.HTTP_401_UNAUTHORIZED,
-            "Missing bearer token",
-        )
+    hook_type = payload.get("Type")
+    if hook_type not in ("pre-create", "pre-finish"):
+        return {}
     try:
-        await run_in_threadpool(
-            authenticate_user,
-            HTTPAuthorizationCredentials(scheme="Bearer", credentials=token),
-        )
+        event = TusUploadEvent.from_hooks_payload(payload)
+        if hook_type == "pre-create":
+            return await handle_pre_create(event, session)
+        return await handle_pre_finish(event, session)
+    except (OSError, SQLAlchemyError) as exc:
+        logger.exception("Upload hook persistence failed")
+        # tusd retries HTTP 500 responses; a 503 would not trigger those retries.
+        raise HTTPException(500, "Upload persistence is unavailable") from exc
+    except UploadNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except UploadConflictError as exc:
+        if hook_type == "pre-create":
+            return _rejection(409, str(exc))
+        raise HTTPException(409, str(exc)) from exc
     except HTTPException as exc:
-        return _rejection(exc.status_code, str(exc.detail))
-
-    upload = event.get("Upload") or {}
-    if not isinstance(upload, dict):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid hook upload",
-        )
-    try:
-        _validate_hook_upload(upload)
-    except HTTPException as exc:
-        return _rejection(exc.status_code, str(exc.detail))
-
-    return {"ok": True}
+        if hook_type == "pre-create":
+            return _rejection(exc.status_code, str(exc.detail))
+        raise

@@ -35,5 +35,8 @@ db-downgrade:
 db-revision:
 	uv run dotenv -f "$(env_path)" run alembic revision --autogenerate -m "$(name)"
 
+db-merge:
+	uv run dotenv -f "$(env_path)" run alembic merge -m "$(name)" heads
+
 lint:
 	uv run pre-commit run --all-files
