@@ -30,3 +30,38 @@ async def list(
 ) -> list[UserUploads]: ...
 ```
 for long ones
+
+
+## Code style
+
+### Dependency injection
+
+Parameters that are given via FastAPI's dependency injection system (Depends()) should be explicit.
+
+For example this is bad :
+```py
+UploadsService = Annotated[UserUploadsService, Depends(get_uploads_service)]
+
+async def reconcile_head(
+    response: httpx.Response,
+    upload: UserUploads,
+    uploads: UserUploadsService,
+) -> None:
+    ...
+```
+
+But this is good :
+```py
+async def reconcile_head(
+    response: httpx.Response,
+    upload: UserUploads,
+    uploads: Annotated[UserUploadsService, Depends(get_uploads_service)],
+) -> None:
+    ...
+```
+
+The latter is much clearer, even if that introduces duplication.
+
+### Backwards compatibility
+
+When working on a feature, backward-compatibility considerations should be OPT-IN. If a new feature/fix introduces a breaking change, do not plan a backward compatibility layer unless I explicitly ask for it. You are welcome to ask if I want one, but do not assume it is the case. The priority is always given to simplicity, and understandability of the code.

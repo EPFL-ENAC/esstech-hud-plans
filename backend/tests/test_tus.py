@@ -20,6 +20,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from api.config import config
 from api.db import get_session
 from api.lib.tus import TUS_HOOK_SECRET_HEADER, TUS_UPLOAD_ID_HEADER
+from api.lib.upload_storage import upload_file_path
 from api.lib.workflows import common as workflow_common
 from api.lib.workflows import splat_generation as splat_workflow
 from api.lib.workflows import tus_cleanup
@@ -32,7 +33,6 @@ from api.services.uploads import UserUploadsService
 from api.views import buildings as building_views
 from api.views import reconstructions as reconstruction_views
 from api.views import tus as tus_views
-from api.views.reconstruction_submission import validate_tus_upload
 
 USER_ID = UUID("00000000-0000-0000-0000-000000000001")
 BUILDING_ID = UUID("10000000-0000-0000-0000-000000000001")
@@ -86,6 +86,13 @@ def _accept_any_token(
         return AuthenticatedUser(sub="subject-1")
 
     return authenticate
+
+
+@pytest.fixture(autouse=True)
+def upload_directories(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(config, "DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(config, "TUSD_UPLOAD_DIR", str(tmp_path / "default-tus"))
+    Path(config.TUSD_UPLOAD_DIR).mkdir()
 
 
 @pytest.fixture
@@ -300,103 +307,6 @@ def test_hook_rejects_non_dict_payload(tus_hook_api: TestClient) -> None:
     assert response.status_code == 400
 
 
-def test_validate_tus_upload_returns_path_and_filename(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    monkeypatch.setattr(config, "TUSD_UPLOAD_DIR", str(tmp_path))
-    upload_id = uuid4().hex
-    _make_tus_upload(tmp_path, upload_id, filename="recording.mov")
-
-    binary_path, filename = validate_tus_upload(upload_id)
-
-    assert binary_path == tmp_path / upload_id
-    assert filename == "recording.mov"
-
-
-@pytest.mark.parametrize(
-    "case",
-    ["missing_binary", "missing_info", "empty_binary", "size_mismatch", "deferred"],
-)
-def test_validate_tus_upload_rejects_incomplete_uploads(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    case: str,
-) -> None:
-    monkeypatch.setattr(config, "TUSD_UPLOAD_DIR", str(tmp_path))
-    upload_id = uuid4().hex
-    if case == "missing_binary":
-        _make_tus_upload(tmp_path, upload_id)
-        (tmp_path / upload_id).unlink()
-    elif case == "missing_info":
-        _make_tus_upload(tmp_path, upload_id, with_info=False)
-    elif case == "empty_binary":
-        _make_tus_upload(tmp_path, upload_id, content=b"")
-    elif case == "size_mismatch":
-        _make_tus_upload(tmp_path, upload_id, size=len(b"video bytes") + 5)
-    else:
-        _make_tus_upload(tmp_path, upload_id, size_is_deferred=True)
-
-    with pytest.raises(HTTPException) as exc_info:
-        validate_tus_upload(upload_id)
-
-    assert exc_info.value.status_code == 400
-
-
-@pytest.mark.parametrize(
-    "upload_id",
-    ["../escape", "a/b", "a" * 65, "", "id with space"],
-)
-def test_validate_tus_upload_rejects_unsafe_ids(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    upload_id: str,
-) -> None:
-    monkeypatch.setattr(config, "TUSD_UPLOAD_DIR", str(tmp_path))
-
-    with pytest.raises(HTTPException) as exc_info:
-        validate_tus_upload(upload_id)
-
-    assert exc_info.value.status_code == 400
-
-
-def test_validate_tus_upload_accepts_zero_offset(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    # tusd v2 filestore never rewrites the .info Offset after chunk writes,
-    # so a finished upload keeps Offset 0 on disk while the binary file holds
-    # all bytes.
-    monkeypatch.setattr(config, "TUSD_UPLOAD_DIR", str(tmp_path))
-    upload_id = uuid4().hex
-    _make_tus_upload(tmp_path, upload_id)
-    info = json.loads((tmp_path / f"{upload_id}.info").read_text())
-    info["Offset"] = 0
-    (tmp_path / f"{upload_id}.info").write_text(json.dumps(info))
-
-    binary_path, filename = validate_tus_upload(upload_id)
-
-    assert binary_path == tmp_path / upload_id
-    assert filename == "scan.mp4"
-
-
-def test_validate_tus_upload_accepts_missing_offset(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    monkeypatch.setattr(config, "TUSD_UPLOAD_DIR", str(tmp_path))
-    upload_id = uuid4().hex
-    _make_tus_upload(tmp_path, upload_id)
-    info = json.loads((tmp_path / f"{upload_id}.info").read_text())
-    del info["Offset"]
-    (tmp_path / f"{upload_id}.info").write_text(json.dumps(info))
-
-    binary_path, filename = validate_tus_upload(upload_id)
-
-    assert binary_path == tmp_path / upload_id
-    assert filename == "scan.mp4"
-
-
 @pytest.fixture
 def tus_api(
     monkeypatch: pytest.MonkeyPatch,
@@ -445,6 +355,7 @@ def tus_api(
     )
 
     app = FastAPI()
+    app.state.upload_database = engine
     app.include_router(building_views.router, prefix="/buildings")
     app.include_router(
         reconstruction_views.router,
@@ -462,12 +373,44 @@ def tus_api(
     asyncio.run(engine.dispose())
 
 
+def _register_tus_upload(
+    client: TestClient,
+    upload_id: str,
+    *,
+    filename: str = "scan.mp4",
+    size_bytes: int = 11,
+    status: UploadStatus = UploadStatus.UPLOADED,
+    user_id: UUID = USER_ID,
+) -> None:
+    assert isinstance(client.app, FastAPI)
+
+    async def register() -> None:
+        async with AsyncSession(client.app.state.upload_database) as session:
+            if await session.get(User, user_id) is None:
+                session.add(User(id=user_id, keycloak_sub=str(user_id)))
+                await session.flush()
+            session.add(
+                UserUploads(
+                    id=UUID(upload_id),
+                    user_id=user_id,
+                    filename=filename,
+                    size_bytes=size_bytes,
+                    file_path=str(Path(config.TUSD_UPLOAD_DIR) / upload_id),
+                    status=status,
+                )
+            )
+            await session.commit()
+
+    asyncio.run(register())
+
+
 def test_resumable_reconstruction_submission_schedules_copy(
     tus_api: tuple[TestClient, UUID, Path],
 ) -> None:
     client, building_id, tus_dir = tus_api
     upload_id = uuid4().hex
     _make_tus_upload(tus_dir, upload_id)
+    _register_tus_upload(client, upload_id)
 
     response = client.post(
         f"/buildings/{building_id}/reconstructions/resumable",
@@ -488,6 +431,7 @@ def test_resumable_reconstruction_submission_passes_tus_parameters(
     client, building_id, tus_dir = tus_api
     upload_id = uuid4().hex
     _make_tus_upload(tus_dir, upload_id, filename="recording.mov")
+    _register_tus_upload(client, upload_id, filename="recording.mov")
     captured: dict[str, object] = {}
 
     async def fake_schedule(**kwargs: object) -> UUID:
@@ -505,7 +449,9 @@ def test_resumable_reconstruction_submission_passes_tus_parameters(
 
     assert response.status_code == 202
     created = response.json()
-    assert captured["tus_upload_path"] == str(tus_dir / upload_id)
+    assert captured["tus_upload_path"] == str(
+        upload_file_path(UUID(upload_id), "recording.mov")
+    )
     assert captured["tus_video_filename"] == "recording.mov"
     assert captured["owner_id"] == USER_ID
     assert captured["reconstruction_id"] == UUID(created["id"])
@@ -514,12 +460,88 @@ def test_resumable_reconstruction_submission_passes_tus_parameters(
     assert str(parameters.video_path).endswith("video/input.mov")
 
 
+def test_permanent_upload_can_be_submitted_twice(
+    monkeypatch: pytest.MonkeyPatch,
+    tus_api: tuple[TestClient, UUID, Path],
+) -> None:
+    async def schedule(**kwargs: object) -> UUID:
+        return uuid4()
+
+    monkeypatch.setattr(splat_workflow, "schedule_splat_generation_from_tus", schedule)
+    client, building_id, tus_dir = tus_api
+    upload_id = uuid4().hex
+    _make_tus_upload(tus_dir, upload_id)
+    _register_tus_upload(client, upload_id)
+    url = f"/buildings/{building_id}/reconstructions/resumable"
+    first = client.post(url, json={"tus_upload_id": upload_id})
+    assert first.status_code == 202
+    assert not (tus_dir / upload_id).exists()
+    second = client.post(url, json={"tus_upload_id": upload_id})
+    assert second.status_code == 202
+    assert first.json()["id"] != second.json()["id"]
+    assert upload_file_path(UUID(upload_id), "scan.mp4").read_bytes() == b"video bytes"
+
+
+@pytest.mark.parametrize("new_building", [False, True])
+@pytest.mark.parametrize("case", ["unknown", "unowned", "pending", "failed", "missing"])
+def test_reconstruction_rejects_unavailable_upload_before_creating_records(
+    tus_api: tuple[TestClient, UUID, Path],
+    new_building: bool,
+    case: str,
+) -> None:
+    client, building_id, tus_dir = tus_api
+    upload_id = uuid4().hex
+    if case != "unknown":
+        if case != "missing":
+            _make_tus_upload(tus_dir, upload_id)
+        _register_tus_upload(
+            client,
+            upload_id,
+            status={
+                "pending": UploadStatus.PENDING,
+                "failed": UploadStatus.FAILED,
+            }.get(case, UploadStatus.UPLOADED),
+            user_id=uuid4() if case == "unowned" else USER_ID,
+        )
+    before = client.get("/buildings").json()
+    url = (
+        "/buildings/from-reconstruction/resumable"
+        if new_building
+        else f"/buildings/{building_id}/reconstructions/resumable"
+    )
+    response = client.post(url, json={"tus_upload_id": upload_id})
+    expected = {
+        "unknown": 404,
+        "unowned": 404,
+        "pending": 409,
+        "failed": 409,
+        "missing": 503,
+    }
+    assert response.status_code == expected[case]
+    assert client.get("/buildings").json() == before
+    assert client.get(f"/buildings/{building_id}/reconstructions").json() == []
+
+
+@pytest.mark.parametrize("upload_id", ["../escape", "a/b", "a" * 65, "", "not-a-uuid"])
+def test_reconstruction_rejects_invalid_upload_id(
+    tus_api: tuple[TestClient, UUID, Path],
+    upload_id: str,
+) -> None:
+    client, building_id, _ = tus_api
+    response = client.post(
+        f"/buildings/{building_id}/reconstructions/resumable",
+        json={"tus_upload_id": upload_id},
+    )
+    assert response.status_code == 400
+
+
 def test_resumable_building_from_reconstruction_creates_linked_records(
     tus_api: tuple[TestClient, UUID, Path],
 ) -> None:
     client, _, tus_dir = tus_api
     upload_id = uuid4().hex
     _make_tus_upload(tus_dir, upload_id)
+    _register_tus_upload(client, upload_id)
 
     response = client.post(
         "/buildings/from-reconstruction/resumable",
@@ -544,13 +566,14 @@ def test_resumable_submission_rejects_incomplete_upload(
     client, building_id, tus_dir = tus_api
     upload_id = uuid4().hex
     _make_tus_upload(tus_dir, upload_id, size=len(b"video bytes") + 5)
+    _register_tus_upload(client, upload_id, status=UploadStatus.PENDING)
 
     response = client.post(
         f"/buildings/{building_id}/reconstructions/resumable",
         json={"tus_upload_id": upload_id, "settings": {}},
     )
 
-    assert response.status_code == 400
+    assert response.status_code == 409
     assert client.get(f"/buildings/{building_id}/reconstructions").json() == []
 
 
@@ -561,6 +584,7 @@ def test_resumable_submission_maps_scheduling_failure_to_503(
     client, building_id, tus_dir = tus_api
     upload_id = uuid4().hex
     _make_tus_upload(tus_dir, upload_id)
+    _register_tus_upload(client, upload_id)
 
     async def fail_schedule(**kwargs: object) -> UUID:
         raise RuntimeError("Prefect unavailable")
@@ -590,7 +614,7 @@ def _fake_flow_logger(monkeypatch: pytest.MonkeyPatch, module: object) -> None:
     monkeypatch.setattr(module, "get_run_logger", lambda: FakeRunLogger())
 
 
-def test_copy_video_from_tus_upload_moves_and_cleans(
+def test_copy_video_from_tus_upload_preserves_original(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -613,8 +637,8 @@ def test_copy_video_from_tus_upload_moves_and_cleans(
 
     assert result == str(video_path)
     assert video_path.read_bytes() == b"video bytes"
-    assert not binary.exists()
-    assert not (tus_dir / f"{upload_id}.info").exists()
+    assert binary.read_bytes() == b"video bytes"
+    assert (tus_dir / f"{upload_id}.info").exists()
     assert not video_path.with_name("input.mp4.tmp").exists()
 
 
@@ -716,6 +740,7 @@ def test_pre_finish_marks_uploaded_before_acknowledging(
     monkeypatch.setattr(tus_views, "authenticate_user", _accept_any_token([]))
     creation = _hook_payload()
     assert tus_hook_api.post("/tus/hooks", json=creation).status_code == 200
+    staging = _make_tus_upload(Path(config.TUSD_UPLOAD_DIR), UPLOAD_ID.hex)
     completion = _hook_payload(hook_type="pre-finish", headers={})
     response = tus_hook_api.post("/tus/hooks", json=completion)
     assert response.status_code == 200
@@ -724,6 +749,10 @@ def test_pre_finish_marks_uploaded_before_acknowledging(
     assert uploaded is not None
     assert uploaded.status == UploadStatus.UPLOADED
     assert uploaded.uploaded_at is not None
+    assert uploaded.file_path == str(upload_file_path(UPLOAD_ID, "scan.mp4"))
+    assert Path(uploaded.file_path).read_bytes() == b"video bytes"
+    assert not staging.exists()
+    assert not staging.with_name(staging.name + ".info").exists()
     assert tus_hook_api.post("/tus/hooks", json=completion).status_code == 200
     assert tus_hook_api.post("/tus/hooks", json=creation).status_code == 200
     assert _read_hook_upload(tus_hook_api) == uploaded
@@ -834,17 +863,19 @@ def test_creation_rejects_conflicting_registration(
     assert upload.size_bytes == 11
 
 
-@pytest.mark.parametrize("operation", ["create", "mark_uploaded"])
+@pytest.mark.parametrize("operation", ["create", "complete"])
 def test_hook_database_failures_are_retryable(
     monkeypatch: pytest.MonkeyPatch,
     tus_hook_api: TestClient,
     operation: str,
 ) -> None:
     monkeypatch.setattr(tus_views, "authenticate_user", _accept_any_token([]))
-    if operation == "mark_uploaded":
+    if operation == "complete":
         assert tus_hook_api.post("/tus/hooks", json=_hook_payload()).status_code == 200
+    if operation == "complete":
+        _make_tus_upload(Path(config.TUSD_UPLOAD_DIR), UPLOAD_ID.hex)
     payload = _hook_payload(
-        hook_type="pre-finish" if operation == "mark_uploaded" else "pre-create",
+        hook_type="pre-finish" if operation == "complete" else "pre-create",
     )
     with monkeypatch.context() as patches:
         patches.setattr(

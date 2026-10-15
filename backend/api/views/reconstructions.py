@@ -36,6 +36,7 @@ from api.services.reconstructions import (
     ReconstructionService,
     SortOrder,
 )
+from api.services.uploads import UserUploadsService
 from api.utils.responses import inline_file_response
 from api.views.buildings import get_current_building
 from api.views.reconstruction_submission import (
@@ -43,6 +44,7 @@ from api.views.reconstruction_submission import (
     get_reconstruction_service,
     validate_tus_upload,
 )
+from api.views.uploads import get_uploads_service
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +180,7 @@ async def create_reconstruction_from_tus(
         ReconstructionService,
         Depends(get_reconstruction_service),
     ],
+    uploads: Annotated[UserUploadsService, Depends(get_uploads_service)],
 ) -> Reconstruction:
     """Schedule the reconstruction of a video uploaded through tus.
 
@@ -185,13 +188,17 @@ async def create_reconstruction_from_tus(
     completed upload, creates the reconstruction row, and schedules the
     workflow, whose first task copies the video into the artifact layout.
     """
-    tus_upload_path, tus_video_filename = validate_tus_upload(payload.tus_upload_id)
+    upload = await validate_tus_upload(
+        payload.tus_upload_id,
+        user_id=building.user_id,
+        uploads=uploads,
+    )
 
     try:
         return await reconstructions.create_from_tus(
             building=building,
-            tus_upload_path=str(tus_upload_path),
-            tus_video_filename=tus_video_filename,
+            tus_upload_path=upload.file_path,
+            tus_video_filename=upload.filename,
             settings=payload.settings,
         )
     except ReconstructionCreationError as exc:

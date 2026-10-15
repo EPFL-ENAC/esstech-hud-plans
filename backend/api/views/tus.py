@@ -98,7 +98,7 @@ async def handle_pre_finish(
     session: AsyncSession,
 ) -> dict[str, Any]:
     await validate_completion(event, session)
-    await UserUploadsService(session).mark_uploaded(event.upload_id)
+    await UserUploadsService(session).complete(event.upload_id)
     return {}
 
 
@@ -124,9 +124,9 @@ async def receive_tusd_hook(
             return await handle_pre_create(event, session)
         return await handle_pre_finish(event, session)
     except (OSError, SQLAlchemyError) as exc:
-        logger.exception("Upload hook database operation failed")
+        logger.exception("Upload hook persistence failed")
         # tusd retries HTTP 500 responses; a 503 would not trigger those retries.
-        raise HTTPException(500, "Upload database is unavailable") from exc
+        raise HTTPException(500, "Upload persistence is unavailable") from exc
     except UploadNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
     except UploadConflictError as exc:

@@ -16,6 +16,7 @@ from api.config import config
 TUS_UPLOAD_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 TUS_UPLOAD_ID_HEADER = "X-HUD-Upload-ID"
 TUS_HOOK_SECRET_HEADER = "X-HUD-Tus-Hook-Secret"
+TUS_COMPLETION_TIMEOUT_SECONDS = 30 * 60
 
 
 @dataclass(frozen=True)

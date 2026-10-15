@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
@@ -34,6 +34,9 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from api.config import config
 from api.db import get_session
 from api.lib.tus import TUS_HOOK_SECRET_HEADER, TUS_UPLOAD_ID_HEADER
+from api.lib.upload_storage import upload_file_path
+from api.lib.workflows import common as workflow_common
+from api.lib.workflows import splat_generation as splat_workflow
 from api.main import app
 from api.models.auth import AuthenticatedUser
 from api.models.user import User
@@ -114,6 +117,10 @@ def real_tus(
     monkeypatch.setattr(app.router, "lifespan_context", lifespan)
     monkeypatch.setattr(config, "TUSD_HOOK_SECRET", hook_secret)
     monkeypatch.setattr(config, "TUSD_UPLOAD_DIR", str(upload_directory))
+    monkeypatch.setattr(config, "DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(
+        workflow_common, "WORKFLOW_DATA_DIRECTORY", config.DATA_PATH / "workflows"
+    )
 
     api_socket = socket.socket()
     api_socket.bind(("0.0.0.0", 0))
@@ -157,6 +164,8 @@ def real_tus(
                 "-port=8080",
                 f"-hooks-http=http://host.docker.internal:{api_port}/tus/hooks",
                 "-hooks-enabled-events=pre-create,pre-finish",
+                "-hooks-http-timeout=1800s",
+                "-network-timeout=1860s",
                 f"-hooks-http-forward-headers={TUS_HOOK_SECRET_HEADER}",
                 "-disable-concatenation",
                 "-disable-download",
@@ -278,16 +287,90 @@ def test_real_tus_registration_resume_completion_and_delete(
     uploaded = client.get(f"/uploads/{upload_id}").json()
     assert uploaded["status"] == "uploaded"
     assert uploaded["uploaded_at"] is not None
-    assert (real_tus.upload_directory / upload_id).read_bytes() == b"video bytes"
+    stored = upload_file_path(UUID(upload_id), "scan.mp4")
+    assert stored.read_bytes() == b"video bytes"
+    assert not (real_tus.upload_directory / upload_id).exists()
+    assert not (real_tus.upload_directory / f"{upload_id}.info").exists()
     assert client.head(location).headers["Upload-Offset"] == "11"
     assert (
         client.get(f"/uploads/{upload_id}").json()["uploaded_at"]
         == uploaded["uploaded_at"]
     )
+    empty_retry = client.patch(
+        location,
+        headers={
+            "Content-Type": "application/offset+octet-stream",
+            "Upload-Offset": "11",
+        },
+        content=b"",
+    )
+    assert empty_retry.status_code == 204
+    assert empty_retry.headers["Upload-Offset"] == "11"
+    assert (
+        client.patch(
+            location,
+            headers={
+                "Content-Type": "application/offset+octet-stream",
+                "Upload-Offset": "11",
+            },
+            content=b"extra",
+        ).status_code
+        == 409
+    )
     assert client.delete(location).status_code == 204
     assert not (real_tus.upload_directory / upload_id).exists()
     assert not (real_tus.upload_directory / f"{upload_id}.info").exists()
+    assert stored.read_bytes() == b"video bytes"
     assert client.delete(f"/uploads/{upload_id}").status_code == 204
+    assert stored.read_bytes() == b"video bytes"
+
+
+def test_real_tus_upload_is_reusable_for_both_reconstruction_routes(
+    monkeypatch: pytest.MonkeyPatch,
+    real_tus: TusIntegration,
+) -> None:
+    scheduled: list[dict[str, Any]] = []
+
+    async def schedule(**kwargs: Any) -> UUID:
+        scheduled.append(kwargs)
+        return uuid4()
+
+    monkeypatch.setattr(splat_workflow, "schedule_splat_generation_from_tus", schedule)
+    client = real_tus.client
+    location, upload_id = _start_upload(real_tus)
+    response = client.patch(
+        location,
+        headers={
+            "Content-Type": "application/offset+octet-stream",
+            "Upload-Offset": "0",
+        },
+        content=b"video bytes",
+    )
+    assert response.status_code == 204
+    first = client.post(
+        "/buildings/from-reconstruction/resumable",
+        json={"tus_upload_id": upload_id},
+    )
+    assert first.status_code == 202, first.text
+    building_id = first.json()["building"]["id"]
+    second = client.post(
+        f"/buildings/{building_id}/reconstructions/resumable",
+        json={"tus_upload_id": upload_id},
+    )
+    assert second.status_code == 202, second.text
+    source = upload_file_path(UUID(upload_id), "scan.mp4")
+    assert len(scheduled) == 2
+    for parameters in scheduled:
+        assert parameters["tus_upload_path"] == str(source)
+        artifact = parameters["artifact"]
+        splat_workflow._copy_tus_upload(
+            str(source), "scan.mp4", str(artifact.video_path)
+        )
+        assert artifact.video_path.read_bytes() == b"video bytes"
+        assert source.read_bytes() == b"video bytes"
+    assert not (real_tus.upload_directory / upload_id).exists()
+    assert client.delete(f"/uploads/{upload_id}").status_code == 204
+    assert source.read_bytes() == b"video bytes"
 
 
 def test_real_tus_recovers_failed_pre_finish(
@@ -300,7 +383,7 @@ def test_real_tus_recovers_failed_pre_finish(
         raise OSError("simulated database outage")
 
     with monkeypatch.context() as patches:
-        patches.setattr(UserUploadsService, "mark_uploaded", fail_completion)
+        patches.setattr(UserUploadsService, "complete", fail_completion)
         failed = real_tus.client.patch(
             location,
             headers={
@@ -357,6 +440,7 @@ def test_concurrent_hook_delivery_preserves_one_row_and_timestamp(
 
     assert all(response.status_code == 200 for response in asyncio.run(deliver()))
     assert len(real_tus.client.get("/uploads").json()) == 1
+    (real_tus.upload_directory / upload_id).write_bytes(b"video bytes")
     payload["Type"] = "pre-finish"
     payload["Event"]["Upload"]["ID"] = upload_id
     payload["Event"]["Upload"]["Offset"] = 11

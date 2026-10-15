@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import AsyncIterator, Iterator
+from pathlib import Path
 from unittest.mock import AsyncMock
 from uuid import UUID
 
@@ -15,6 +16,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from api.config import config
 from api.db import get_session
 from api.lib.tus import TUS_HOOK_SECRET_HEADER, TUS_UPLOAD_ID_HEADER
+from api.lib.upload_storage import upload_file_path
 from api.models.uploads import UploadStatus, UserUploadRead, UserUploads
 from api.models.user import User
 from api.services.auth import require_user
@@ -24,6 +26,13 @@ from api.views import tus_proxy
 UPSTREAM_BASE = "http://tusd:8080"
 USER_ID = UUID(int=1)
 OTHER_USER_ID = UUID(int=2)
+
+
+@pytest.fixture(autouse=True)
+def upload_directories(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(config, "DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(config, "TUSD_UPLOAD_DIR", str(tmp_path / "tus"))
+    Path(config.TUSD_UPLOAD_DIR).mkdir()
 
 
 @pytest.fixture(autouse=True)
@@ -80,7 +89,9 @@ def tus_client() -> Iterator[TestClient]:
                             user_id=USER_ID,
                             filename="video.mp4",
                             size_bytes=11,
-                            file_path="TODO",
+                            file_path=str(
+                                Path(config.TUSD_UPLOAD_DIR) / (character * 32)
+                            ),
                         )
                         for character in ("c", "d")
                     ],
@@ -88,6 +99,10 @@ def tus_client() -> Iterator[TestClient]:
             )
             await session.commit()
 
+    for character in ("c", "d"):
+        staging = Path(config.TUSD_UPLOAD_DIR) / (character * 32)
+        staging.write_bytes(b"video bytes")
+        staging.with_name(staging.name + ".info").write_text("{}")
     asyncio.run(prepare())
 
     async def session_override() -> AsyncIterator[AsyncSession]:
@@ -371,7 +386,7 @@ def _complete_proxy_upload(tus_client: TestClient, upload_id: UUID) -> None:
 
     async def complete() -> None:
         async with AsyncSession(engine, expire_on_commit=False) as session:
-            await UserUploadsService(session).mark_uploaded(upload_id)
+            await UserUploadsService(session).complete(upload_id)
 
     asyncio.run(complete())
 
@@ -391,7 +406,7 @@ def test_pending_tus_delete_has_no_side_effects(
     assert _read_proxy_upload(tus_client, upload_id) == before
 
 
-def test_completed_tus_delete_forwards_to_tusd(
+def test_completed_tus_delete_preserves_stored_file(
     monkeypatch: pytest.MonkeyPatch,
     tus_client: TestClient,
 ) -> None:
@@ -406,7 +421,8 @@ def test_completed_tus_delete_forwards_to_tusd(
     response = tus_client.delete(f"/tus/files/{upload_id.hex}")
     assert response.status_code == 204
     assert response.content == b""
-    assert received[0].headers[TUS_HOOK_SECRET_HEADER] == "test-hook-secret"
+    assert received == []
+    assert upload_file_path(upload_id, "video.mp4").read_bytes() == b"video bytes"
     assert _read_proxy_upload(tus_client, upload_id).status == UploadStatus.UPLOADED
 
 
@@ -477,7 +493,7 @@ def test_head_closes_upstream_on_database_failure(
     )
     monkeypatch.setattr(
         UserUploadsService,
-        "mark_uploaded",
+        "complete",
         AsyncMock(side_effect=OSError("database unavailable")),
     )
     response = tus_client.head(f"/tus/files/{'d' * 32}")
@@ -493,8 +509,6 @@ def test_head_does_not_rewrite_completed_upload(
     upload_id = UUID("d" * 32)
     _complete_proxy_upload(tus_client, upload_id)
     before = _read_proxy_upload(tus_client, upload_id)
-    mark_uploaded = AsyncMock()
-    monkeypatch.setattr(UserUploadsService, "mark_uploaded", mark_uploaded)
     received: list[httpx.Request] = []
     _install_transport(
         monkeypatch,
@@ -507,8 +521,73 @@ def test_head_does_not_rewrite_completed_upload(
         received,
     )
     assert tus_client.head(f"/tus/files/{upload_id.hex}").status_code == 200
-    mark_uploaded.assert_not_awaited()
+    assert received == []
     assert _read_proxy_upload(tus_client, upload_id) == before
+
+
+def test_completed_head_reports_metadata_without_tusd(
+    monkeypatch: pytest.MonkeyPatch,
+    tus_client: TestClient,
+) -> None:
+    upload_id = UUID("c" * 32)
+    _complete_proxy_upload(tus_client, upload_id)
+    received: list[httpx.Request] = []
+    _install_transport(monkeypatch, {}, received)
+    response = tus_client.head(f"/tus/files/{upload_id.hex}")
+    assert response.status_code == 200
+    assert response.content == b""
+    assert response.headers["Upload-Offset"] == "11"
+    assert response.headers["Upload-Length"] == "11"
+    assert response.headers["Tus-Resumable"] == "1.0.0"
+    assert response.headers["Cache-Control"] == "no-store"
+    assert response.headers["Upload-Metadata"] == "filename dmlkZW8ubXA0"
+    assert received == []
+
+
+@pytest.mark.parametrize("method", ["HEAD", "PATCH", "DELETE"])
+def test_completed_requests_verify_permanent_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tus_client: TestClient,
+    method: str,
+) -> None:
+    upload_id = UUID("c" * 32)
+    _complete_proxy_upload(tus_client, upload_id)
+    upload_file_path(upload_id, "video.mp4").unlink()
+    received: list[httpx.Request] = []
+    _install_transport(monkeypatch, {}, received)
+    assert tus_client.request(method, f"/tus/files/{upload_id.hex}").status_code == 503
+    assert received == []
+
+
+@pytest.mark.parametrize(
+    ("offset", "content", "expected_status"),
+    [("11", b"", 204), ("0", b"", 409), ("11", b"extra", 409)],
+)
+def test_completed_patch_only_accepts_empty_retry_at_final_offset(
+    monkeypatch: pytest.MonkeyPatch,
+    tus_client: TestClient,
+    offset: str,
+    content: bytes,
+    expected_status: int,
+) -> None:
+    upload_id = UUID("c" * 32)
+    _complete_proxy_upload(tus_client, upload_id)
+    received: list[httpx.Request] = []
+    _install_transport(monkeypatch, {}, received)
+    response = tus_client.patch(
+        f"/tus/files/{upload_id.hex}",
+        headers={
+            "Tus-Resumable": "1.0.0",
+            "Content-Type": "application/offset+octet-stream",
+            "Upload-Offset": offset,
+        },
+        content=content,
+    )
+    assert response.status_code == expected_status
+    if expected_status == 204:
+        assert response.headers["Upload-Offset"] == "11"
+    assert upload_file_path(upload_id, "video.mp4").read_bytes() == b"video bytes"
+    assert received == []
 
 
 def test_proxy_database_failure_prevents_upstream_request(

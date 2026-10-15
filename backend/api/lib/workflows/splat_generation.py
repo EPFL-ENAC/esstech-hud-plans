@@ -1,6 +1,5 @@
 import logging
 import math
-import os
 import shutil
 import time
 from collections.abc import AsyncIterator
@@ -33,6 +32,7 @@ from api.lib.compute.progress import (
     FfmpegProgressEstimator,
     ReportProgress,
 )
+from api.lib.upload_storage import copy_completed_file
 from api.lib.utils.commands import (
     CommandExecutionEnvironment,
     LocalCommandExecutionEnvironment,
@@ -359,21 +359,12 @@ async def copy_video_from_tus_upload(
 
 
 def _copy_tus_upload(
-    tus_upload_path: str, tus_video_filename: str, video_path: str
+    tus_upload_path: str,
+    tus_video_filename: str,
+    video_path: str,
 ) -> None:
     source = Path(tus_upload_path)
-    destination = Path(video_path)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = destination.with_name(destination.name + ".tmp")
-    try:
-        shutil.copyfile(source, temp_path)
-        os.replace(temp_path, destination)
-    except Exception:
-        temp_path.unlink(missing_ok=True)
-        raise
-    info_path = source.with_name(source.name + ".info")
-    source.unlink(missing_ok=True)
-    info_path.unlink(missing_ok=True)
+    copy_completed_file(source, Path(video_path), expected_size=source.stat().st_size)
 
 
 # Reporting is an execution detail, not an input to the cached computation.
@@ -543,8 +534,8 @@ async def splat_generation_flow(
     if tus_upload_path is not None:
         if tus_video_filename is None:
             raise ValueError("A tus upload requires its path and filename")
-        # The uploaded video exists only in the tusd staging directory; the
-        # pipeline starts by moving it into the artifact layout.
+        # The permanent upload remains reusable; the pipeline copies its
+        # video into this reconstruction's artifact layout.
         await copy_video_from_tus_upload(
             tus_upload_path=tus_upload_path,
             tus_video_filename=tus_video_filename,
@@ -673,8 +664,8 @@ async def schedule_splat_generation_from_tus(
 ) -> UUID:
     """Schedule the splat generation of an already-uploaded tus video.
 
-    The video still lives in the tusd staging directory; the flow's first
-    task copies it into the artifact layout before frame extraction.
+    The flow's first task copies the permanent upload into the artifact
+    layout before frame extraction, preserving the original upload.
     """
 
     parameters: dict[str, object] = _splat_generation_parameters(

@@ -33,7 +33,9 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from api.config import config
 from api.db import get_session
+from api.lib.upload_storage import upload_file_path
 from api.models.building import Building
 from api.models.reconstruction import Reconstruction
 from api.models.uploads import (
@@ -43,7 +45,7 @@ from api.models.uploads import (
     UserUploads,
     UserUploadUpdate,
 )
-from api.models.user import User
+from api.models.user import User, utc_now
 from api.services.auth import require_user
 from api.services.uploads import (
     SortOrder,
@@ -55,6 +57,13 @@ from api.views import uploads as upload_views
 
 USER_ID = UUID(int=1)
 OTHER_USER_ID = UUID(int=2)
+
+
+@pytest.fixture(autouse=True)
+def upload_directories(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(config, "DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(config, "TUSD_UPLOAD_DIR", str(tmp_path / "tus"))
+    Path(config.TUSD_UPLOAD_DIR).mkdir()
 
 
 @pytest.fixture
@@ -129,7 +138,11 @@ def _create_upload(
                 file_path="TODO",
             )
             if uploaded:
-                upload = await uploads.mark_uploaded(upload.id)
+                upload.status = UploadStatus.UPLOADED
+                upload.uploaded_at = utc_now()
+                session.add(upload)
+                await session.commit()
+                await session.refresh(upload)
             return UserUploadRead.model_validate(upload).model_dump(mode="json")
 
     return asyncio.run(create())
@@ -202,7 +215,9 @@ def test_upload_service_crud_preserves_file(
                 "description": "A building",
             }
             assert await uploads.update(updated, UserUploadUpdate()) is updated
-            await uploads.mark_uploaded(upload_id)
+            updated.status = UploadStatus.UPLOADED
+            session.add(updated)
+            await session.commit()
             await uploads.delete(updated)
             assert await uploads.get(upload_id, user_id=USER_ID) is None
 
@@ -321,7 +336,9 @@ def test_failed_mutation_rolls_back(
             )
             upload_id = created.id
             if operation == "delete":
-                await uploads.mark_uploaded(upload_id)
+                created.status = UploadStatus.UPLOADED
+                session.add(created)
+                await session.commit()
             with monkeypatch.context() as patches:
                 patches.setattr(
                     session,
@@ -675,9 +692,18 @@ def test_upload_registration_and_completion_are_idempotent(
                 "size_bytes": 11,
                 "file_path": "TODO",
             }
+            staging = Path(config.TUSD_UPLOAD_DIR) / upload_id.hex
+            staging.write_bytes(b"video bytes")
+            staging.with_name(staging.name + ".info").write_text("{}")
+            values["file_path"] = str(staging)
             first = await uploads.create(**values)
             await uploads.update(first, UserUploadUpdate(name="Renamed"))
-            completed = await uploads.mark_uploaded(upload_id)
+            completed = await uploads.complete(upload_id)
+            destination = upload_file_path(upload_id, "video.mp4")
+            assert completed.file_path == str(destination)
+            assert destination.read_bytes() == b"video bytes"
+            assert not staging.exists()
+            assert not staging.with_name(staging.name + ".info").exists()
             timestamp = completed.uploaded_at
             assert timestamp is not None
             repeated = await uploads.create(**values)
@@ -686,7 +712,7 @@ def test_upload_registration_and_completion_are_idempotent(
             assert repeated.status == UploadStatus.UPLOADED
             assert repeated.uploaded_at == timestamp
             session.expunge_all()
-            repeated = await uploads.mark_uploaded(upload_id)
+            repeated = await uploads.complete(upload_id)
             assert repeated.uploaded_at == timestamp
             assert len(await uploads.list(user_id=USER_ID)) == 1
 
@@ -699,7 +725,6 @@ def test_upload_registration_and_completion_are_idempotent(
         {"user_id": OTHER_USER_ID},
         {"filename": "different.mp4"},
         {"size_bytes": 12},
-        {"file_path": "different"},
     ],
 )
 def test_upload_registration_rejects_conflicting_ids(
@@ -767,7 +792,7 @@ def test_upload_completion_rejects_missing_or_failed_rows(
     async def run() -> None:
         async with uploads_service(database) as (uploads, session):
             with pytest.raises(UploadNotFoundError):
-                await uploads.mark_uploaded(uuid4())
+                await uploads.complete(uuid4())
             failed = UserUploads(
                 user_id=USER_ID,
                 filename="video.mp4",
@@ -779,7 +804,7 @@ def test_upload_completion_rejects_missing_or_failed_rows(
             await session.commit()
             upload_id = failed.id
             with pytest.raises(UploadConflictError):
-                await uploads.mark_uploaded(upload_id)
+                await uploads.complete(upload_id)
             persisted = await uploads.get(upload_id, user_id=USER_ID)
             assert persisted is not None
             assert persisted.status == UploadStatus.FAILED
@@ -788,20 +813,27 @@ def test_upload_completion_rejects_missing_or_failed_rows(
     asyncio.run(run())
 
 
-def test_failed_completion_rolls_back(
+def test_failed_completion_rolls_back_and_reuses_copied_file(
     database: AsyncEngine,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    upload_id = uuid4()
+    source = Path(config.TUSD_UPLOAD_DIR) / upload_id.hex
+    source.write_bytes(b"video bytes")
+    info = source.with_name(source.name + ".info")
+    info.write_text("{}")
+    destination = upload_file_path(upload_id, "video.mp4")
+
     async def run() -> None:
         async with uploads_service(database) as (uploads, session):
-            upload = await uploads.create(
+            await uploads.create(
+                upload_id=upload_id,
                 user_id=USER_ID,
                 payload=UserUploadCreate(),
                 filename="video.mp4",
                 size_bytes=11,
-                file_path="TODO",
+                file_path=str(source),
             )
-            upload_id = upload.id
             with monkeypatch.context() as patches:
                 patches.setattr(
                     session,
@@ -809,10 +841,132 @@ def test_failed_completion_rolls_back(
                     AsyncMock(side_effect=OperationalError("commit", {}, Exception())),
                 )
                 with pytest.raises(OperationalError):
-                    await uploads.mark_uploaded(upload_id)
+                    await uploads.complete(upload_id)
             persisted = await uploads.get(upload_id, user_id=USER_ID)
             assert persisted is not None
             assert persisted.status == UploadStatus.PENDING
             assert persisted.uploaded_at is None
+            assert persisted.file_path == str(source)
+            assert source.read_bytes() == b"video bytes"
+            assert info.exists()
+            assert destination.read_bytes() == b"video bytes"
+
+            def unexpected_copy(*args: object) -> None:
+                raise AssertionError("A complete destination must be reused")
+
+            with monkeypatch.context() as patches:
+                patches.setattr(
+                    "api.lib.upload_storage.shutil.copyfile", unexpected_copy
+                )
+                completed = await uploads.complete(upload_id)
+            assert completed.file_path == str(destination)
+            assert completed.status == UploadStatus.UPLOADED
+            assert completed.uploaded_at is not None
+            assert not source.exists()
+            assert not info.exists()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("contents", [None, b"", b"partial"])
+def test_completion_does_not_publish_missing_or_incomplete_file(
+    database: AsyncEngine,
+    contents: bytes | None,
+) -> None:
+    upload_id = uuid4()
+    source = Path(config.TUSD_UPLOAD_DIR) / upload_id.hex
+    if contents is not None:
+        source.write_bytes(contents)
+
+    async def run() -> None:
+        async with uploads_service(database) as (uploads, session):
+            await uploads.create(
+                upload_id=upload_id,
+                user_id=USER_ID,
+                payload=UserUploadCreate(),
+                filename="video.mp4",
+                size_bytes=11,
+                file_path=str(source),
+            )
+            with pytest.raises(OSError):
+                await uploads.complete(upload_id)
+            persisted = await uploads.get(upload_id, user_id=USER_ID)
+            assert persisted is not None
+            assert persisted.status == UploadStatus.PENDING
+            assert persisted.uploaded_at is None
+            assert persisted.file_path == str(source)
+            assert not upload_file_path(upload_id, "video.mp4").exists()
+
+    asyncio.run(run())
+
+
+def test_completion_retries_cleanup_without_losing_stored_file(
+    database: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    upload_id = uuid4()
+    source = Path(config.TUSD_UPLOAD_DIR) / upload_id.hex
+    source.write_bytes(b"video bytes")
+
+    async def run() -> None:
+        async with uploads_service(database) as (uploads, session):
+            await uploads.create(
+                upload_id=upload_id,
+                user_id=USER_ID,
+                payload=UserUploadCreate(),
+                filename="video.mp4",
+                size_bytes=11,
+                file_path=str(source),
+            )
+
+            def fail_cleanup(upload_id: UUID) -> None:
+                raise OSError("Busy")
+
+            with monkeypatch.context() as patches:
+                patches.setattr("api.services.uploads.remove_tus_files", fail_cleanup)
+                stored = await uploads.complete(upload_id)
+            timestamp = stored.uploaded_at
+            assert stored.status == UploadStatus.UPLOADED
+            assert Path(stored.file_path).read_bytes() == b"video bytes"
+            assert source.exists()
+            retried = await uploads.get_completed(upload_id, user_id=USER_ID)
+            assert retried.uploaded_at == timestamp
+            assert not source.exists()
+            assert Path(retried.file_path).read_bytes() == b"video bytes"
+
+    asyncio.run(run())
+
+
+def test_get_completed_checks_ownership_before_moving_file(
+    database: AsyncEngine,
+) -> None:
+    upload_id = uuid4()
+    source = Path(config.TUSD_UPLOAD_DIR) / upload_id.hex
+    source.write_bytes(b"video bytes")
+
+    async def run() -> None:
+        async with uploads_service(database) as (uploads, session):
+            upload = await uploads.create(
+                upload_id=upload_id,
+                user_id=USER_ID,
+                payload=UserUploadCreate(),
+                filename="video.mp4",
+                size_bytes=11,
+                file_path=str(source),
+            )
+            with pytest.raises(UploadConflictError):
+                await uploads.get_completed(upload_id, user_id=USER_ID)
+            upload.status = UploadStatus.UPLOADED
+            upload.uploaded_at = datetime(2026, 10, 14, tzinfo=UTC)
+            session.add(upload)
+            await session.commit()
+            with pytest.raises(UploadNotFoundError):
+                await uploads.get_completed(upload_id, user_id=OTHER_USER_ID)
+            assert source.read_bytes() == b"video bytes"
+            stored = await uploads.get_completed(upload_id, user_id=USER_ID)
+            assert stored.uploaded_at is not None
+            assert stored.uploaded_at.date() == datetime(2026, 10, 14).date()
+            assert not source.exists()
+            assert Path(stored.file_path).read_bytes() == b"video bytes"
 
     asyncio.run(run())

@@ -1,12 +1,20 @@
 from __future__ import annotations
 
+import logging
+from pathlib import Path
 from typing import Literal
 from uuid import UUID, uuid4
 
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
+from api.lib.upload_storage import (
+    copy_completed_file,
+    remove_tus_files,
+    upload_file_path,
+)
 from api.models.uploads import (
     UploadStatus,
     UserUploadCreate,
@@ -16,6 +24,7 @@ from api.models.uploads import (
 from api.models.user import utc_now
 
 SortOrder = Literal["asc", "desc"]
+logger = logging.getLogger(__name__)
 
 
 class UploadNotFoundError(Exception):
@@ -27,7 +36,7 @@ class UploadConflictError(Exception):
 
 
 class UserUploadsService:
-    """Create, query, update, and delete user-owned upload metadata."""
+    """Manage user-owned upload metadata and completed-file persistence."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -74,7 +83,7 @@ class UserUploadsService:
         existing: UserUploads,
         candidate: UserUploads,
     ) -> UserUploads:
-        for field_name in ("user_id", "filename", "size_bytes", "file_path"):
+        for field_name in ("user_id", "filename", "size_bytes"):
             if getattr(existing, field_name) != getattr(candidate, field_name):
                 raise UploadConflictError(
                     "Upload ID is already registered with different metadata"
@@ -143,25 +152,51 @@ class UserUploadsService:
         await self._commit_and_refresh(upload)
         return upload
 
-    async def mark_uploaded(self, upload_id: UUID) -> UserUploads:
-        """Complete an upload once, preserving its first completion timestamp."""
+    async def complete(self, upload_id: UUID) -> UserUploads:
+        """Persist completed bytes before publishing the uploaded status."""
 
         try:
             upload = await self._get_for_update(upload_id)
-            if upload.status == UploadStatus.UPLOADED:
-                await self._session.commit()
-                return upload
-            if upload.status != UploadStatus.PENDING:
-                raise UploadConflictError("Upload is not pending")
+            if upload.status not in (UploadStatus.PENDING, UploadStatus.UPLOADED):
+                raise UploadConflictError("Upload cannot be completed")
 
+            destination = upload_file_path(upload.id, upload.filename).resolve()
+            await run_in_threadpool(
+                copy_completed_file,
+                Path(upload.file_path),
+                destination,
+                upload.size_bytes,
+            )
+
+            upload.file_path = str(destination)
             upload.status = UploadStatus.UPLOADED
-            upload.uploaded_at = utc_now()
+            if upload.uploaded_at is None:
+                upload.uploaded_at = utc_now()
             self._session.add(upload)
             await self._commit_and_refresh(upload)
-            return upload
         except Exception:
             await self._session.rollback()
             raise
+
+        # Never remove the recoverable staging copy before the DB commit.
+        try:
+            await run_in_threadpool(remove_tus_files, upload_id)
+        except OSError:
+            logger.exception("Could not remove staging files for upload %s", upload_id)
+        return upload
+
+    async def get_completed(
+        self,
+        upload_id: UUID,
+        *,
+        user_id: UUID,
+    ) -> UserUploads:
+        upload = await self.get(upload_id, user_id=user_id)
+        if upload is None:
+            raise UploadNotFoundError("Upload not found")
+        self.require_uploaded(upload)
+        # Older completed rows may still point at the tus staging directory.
+        return await self.complete(upload.id)
 
     def require_uploaded(self, upload: UserUploads) -> None:
         if upload.status != UploadStatus.UPLOADED:

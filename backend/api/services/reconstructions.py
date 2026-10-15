@@ -102,9 +102,9 @@ class ReconstructionService:
     ) -> Reconstruction:
         """Schedule the reconstruction of a video uploaded through tus.
 
-        The video already lives in the tusd staging directory; no bytes are
-        stored at submission time. The flow's first task copies it into the
-        artifact layout.
+        The video already lives in permanent upload storage; no bytes are
+        copied at submission time. The flow's first task copies it into the
+        artifact layout and preserves the upload original.
         """
 
         reconstruction = Reconstruction(
