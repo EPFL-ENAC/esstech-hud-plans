@@ -6,4 +6,5 @@ window.env = {
     KEYCLOAK_CLIENT_ID: 'esstech-poh',
     SENTRY_ENVIRONMENT: 'local',
     SENTRY_RATE: '0.00',
+    PLAN_2D_VIEW: 'points',
 };

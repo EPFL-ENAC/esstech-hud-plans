@@ -7,6 +7,7 @@ interface CustomWindow extends Window {
         KEYCLOAK_CLIENT_ID: string;
         SENTRY_ENVIRONMENT?: string;
         SENTRY_RATE?: string;
+        PLAN_2D_VIEW: 'points' | 'splat';
     };
 }
 
@@ -21,3 +22,6 @@ export const keycloakClientId = appEnv.KEYCLOAK_CLIENT_ID;
 export const tusEndpoint = `${baseUrl}/tus/files/`;
 
 export const keycloakRedirectUri = `${window.location.origin}${window.location.pathname}#/callback`;
+
+// Any value other than 'splat' falls back to the point-cloud viewer.
+export const plan2dView: 'points' | 'splat' = appEnv.PLAN_2D_VIEW === 'splat' ? 'splat' : 'points';

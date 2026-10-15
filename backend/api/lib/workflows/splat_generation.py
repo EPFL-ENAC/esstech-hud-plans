@@ -26,6 +26,7 @@ from api.lib.compute.brush import run_brush_training
 from api.lib.compute.colmap import run_colmap_reconstruction
 from api.lib.compute.evaluate_video_frame import pick_frames
 from api.lib.compute.ffmpeg import run_frame_extraction
+from api.lib.compute.point_cloud import generate_plan_point_cloud
 from api.lib.compute.progress import (
     BrushProgressEstimator,
     ColmapProgressEstimator,
@@ -500,6 +501,18 @@ async def train_with_brush_task(
     return str(output_path)
 
 
+@task(name="generate-plan-point-cloud", cache_policy=DEFAULT - "report_progress")
+async def generate_plan_point_cloud_task(
+    splat_path: str,
+    colmap_directory: str,
+) -> None:
+    run_logger = get_run_logger()
+    await run_in_threadpool(
+        generate_plan_point_cloud, Path(splat_path), Path(colmap_directory)
+    )
+    run_logger.info("Generated plan point cloud for %s", splat_path)
+
+
 @flow(
     name="splat-generation",
     on_running=[_reconstruction_running_hook],
@@ -607,7 +620,16 @@ async def splat_generation_flow(
         splat_path=splat_path,
         settings=settings.brush,
         execution_environment=gpu_execution_environment,
-        report_progress=_progress_callback(reconstruction_id, 0.70, 0.95),
+        report_progress=_progress_callback(reconstruction_id, 0.70, 0.92),
+    )
+    await _record_reconstruction_progress(
+        reconstruction_id,
+        progress=0.92,
+        artifacts=ReconstructionArtifactUpdate(splat_path=generated_splat_path),
+    )
+    await generate_plan_point_cloud_task(
+        splat_path=splat_path,
+        colmap_directory=colmap_directory,
     )
     await _record_reconstruction_progress(
         reconstruction_id,

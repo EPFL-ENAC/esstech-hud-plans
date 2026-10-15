@@ -417,6 +417,10 @@ export default {
             viewer: 'Interactive splat viewer',
             downloadPly: 'Download 3D reconstruction (.ply)',
         },
+        points: {
+            pointSize: 'Point size',
+            pointOpacity: 'Point opacity',
+        },
     },
     settings: {
         frames: {

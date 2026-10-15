@@ -438,6 +438,10 @@ export default {
             viewer: 'Visionneuse interactive de splats',
             downloadPly: 'Télécharger la reconstruction 3D (.ply)',
         },
+        points: {
+            pointSize: 'Taille des points',
+            pointOpacity: 'Opacité des points',
+        },
     },
     settings: {
         frames: {

@@ -6,7 +6,7 @@
         <page-header :title="t('plans.building2dTitle')" />
 
         <div
-            class="row justify-center q-gutter-x-xl q-py-sm q-mb-md"
+            class="row justify-center q-gutter-x-xl q-py-sm"
             style="border-bottom: 1px solid #e5e5ea"
         >
             <q-btn
@@ -24,11 +24,11 @@
         </div>
 
         <QueryStateSwitcher
-            v-if="reconstructionId"
+            v-if="reconstructionId && splatQuery"
             class="splat-query"
-            :state="state"
-            :async-status="asyncStatus"
-            :retry="refetch"
+            :state="splatQuery.state"
+            :async-status="splatQuery.asyncStatus"
+            :retry="splatQuery.refetch"
             :loading-message="t('plans.splat.loading')"
             :error-message="t('plans.splat.unavailable')"
         >
@@ -39,22 +39,46 @@
                 <splat-download-progress role="presentation" />
             </template>
             <template #success="{ data }">
-                <template v-if="showSplat">
-                    <div class="viewer-wrapper">
-                        <interactive-blueprint-viewer
-                            :splat-data="data"
-                            :fetch-geometry="
-                                () =>
-                                    fetchReconstructionBlueprintGeometryJSON(
-                                        buildingId,
-                                        reconstructionId,
-                                    )
-                            "
-                            :params="DEFAULT_BLUEPRINT_PARAMS"
-                            fill
-                        />
-                    </div>
-                </template>
+                <div v-if="showSplat" class="viewer-wrapper">
+                    <interactive-blueprint-viewer
+                        :splat-data="data"
+                        :fetch-geometry="
+                            () =>
+                                fetchReconstructionBlueprintGeometryJSON(
+                                    buildingId,
+                                    reconstructionId,
+                                )
+                        "
+                        :params="DEFAULT_BLUEPRINT_PARAMS"
+                        fill
+                    />
+                </div>
+            </template>
+        </QueryStateSwitcher>
+        <QueryStateSwitcher
+            v-else-if="reconstructionId && pointCloudQuery"
+            class="splat-query"
+            :state="pointCloudQuery.state"
+            :async-status="pointCloudQuery.asyncStatus"
+            :retry="pointCloudQuery.refetch"
+            :loading-message="t('plans.splat.loading')"
+            :error-message="t('plans.splat.unavailable')"
+        >
+            <template #pending>
+                <splat-download-progress role="presentation" />
+            </template>
+            <template #refreshing>
+                <splat-download-progress role="presentation" />
+            </template>
+            <template #success="{ data }">
+                <div v-if="showPointCloud" class="viewer-wrapper">
+                    <plan-point-cloud-viewer
+                        :buffer="data.buffer"
+                        :meta="data.meta"
+                        :reconstruction-id="reconstructionId"
+                        fill
+                    />
+                </div>
             </template>
         </QueryStateSwitcher>
     </q-page>
@@ -62,11 +86,15 @@
 
 <script setup lang="ts">
 import QueryStateSwitcher from 'src/components/QueryStateSwitcher.vue';
-import { computed, defineAsyncComponent, ref } from 'vue';
+import { computed, defineAsyncComponent, reactive, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import PageHeader from 'src/components/PageHeader.vue';
 import { ApiError } from 'src/lib/buildings';
-import { useReconstructionSplatQuery } from 'src/queries/reconstructions';
+import { plan2dView } from 'boot/api';
+import {
+    useReconstructionPointCloudQuery,
+    useReconstructionSplatQuery,
+} from 'src/queries/reconstructions';
 import { fetchReconstructionBlueprintGeometryJSON } from 'src/lib/maths/blueprintGeometry';
 import { DEFAULT_BLUEPRINT_PARAMS } from 'src/lib/blueprintParams';
 import SplatDownloadProgress from 'src/components/SplatDownloadProgress.vue';
@@ -78,20 +106,40 @@ const InteractiveBlueprintViewer = defineAsyncComponent(
     () => import('src/components/InteractiveBlueprintViewer.vue'),
 );
 
+const PlanPointCloudViewer = defineAsyncComponent(
+    () => import('src/components/PlanPointCloudViewer.vue'),
+);
+
 const route = useRoute();
 const buildingId = computed(() => (typeof route.params.id === 'string' ? route.params.id : ''));
 const reconstructionId = computed(() =>
     typeof route.query.reconstruction === 'string' ? route.query.reconstruction : '',
 );
-const { data, error, state, asyncStatus, refetch } = useReconstructionSplatQuery(
-    buildingId,
-    reconstructionId,
-);
+// Only one renderer mode exists per deployment, so only one query is ever created.
+const splatQuery =
+    plan2dView === 'splat'
+        ? reactive(useReconstructionSplatQuery(buildingId, reconstructionId))
+        : null;
+const pointCloudQuery =
+    plan2dView === 'splat'
+        ? null
+        : reactive(useReconstructionPointCloudQuery(buildingId, reconstructionId));
+
+const hasViewerError = (error: unknown) =>
+    error instanceof ApiError && [401, 403, 404].includes(error.status);
 const showSplat = computed(
     () =>
-        data.value !== undefined &&
+        splatQuery !== null &&
+        splatQuery.data !== undefined &&
         reconstructionId.value !== '' &&
-        !(error.value instanceof ApiError && [401, 403, 404].includes(error.value.status)),
+        !hasViewerError(splatQuery.error),
+);
+const showPointCloud = computed(
+    () =>
+        pointCloudQuery !== null &&
+        pointCloudQuery.data !== undefined &&
+        reconstructionId.value !== '' &&
+        !hasViewerError(pointCloudQuery.error),
 );
 
 const activeTool = ref('measure');
@@ -120,6 +168,5 @@ const tools = computed(() => [
     position: relative;
     flex: 1;
     min-height: 0;
-    overflow: hidden;
 }
 </style>

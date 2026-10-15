@@ -48,6 +48,9 @@ class Config(BaseSettings):
 
     MIN_COLMAP_IMAGES_KEEP: int = 20
 
+    # Density cutoff for the plan point cloud conversion, scaled by scene radius cubed
+    PLAN_DENSITY_THRESHOLD: float = 1e3
+
     USE_RUNAI: bool = False
     RUNAI_REGISTRY: str = ""
     RUNAI_PVC_SCRATCH_NAME: str = ""

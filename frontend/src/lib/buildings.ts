@@ -299,6 +299,41 @@ export async function getReconstructionSplat(
     return blob.arrayBuffer();
 }
 
+export interface ReconstructionPointCloudMeta {
+    count: number;
+    bounds: [[number, number, number], [number, number, number]];
+    cm_per_unit: number | null;
+}
+
+export async function getReconstructionPointCloud(
+    buildingId: string,
+    reconstructionId: string,
+    signal: AbortSignal,
+    onProgress?: (progress: FetchProgress) => void,
+): Promise<ArrayBuffer> {
+    const options: ResumableDownloadOptions = {};
+    if (onProgress) options.onProgress = onProgress;
+    const blob = await downloadResumable(
+        `${baseUrl}/buildings/${encodeURIComponent(buildingId)}/reconstructions/${encodeURIComponent(reconstructionId)}/point-cloud`,
+        { signal },
+        options,
+    );
+    return blob.arrayBuffer();
+}
+
+export function getReconstructionPointCloudMeta(
+    buildingId: string,
+    reconstructionId: string,
+    signal?: AbortSignal | null,
+): Promise<ReconstructionPointCloudMeta> {
+    const init: RequestInit = {};
+    if (signal !== undefined && signal !== null) init.signal = signal;
+    return requestJson(
+        `/buildings/${encodeURIComponent(buildingId)}/reconstructions/${encodeURIComponent(reconstructionId)}/point-cloud/meta`,
+        init,
+    );
+}
+
 /** Submit a video already uploaded through the API upload proxy for reconstruction. */
 export function createReconstructionResumable(
     buildingId: string,

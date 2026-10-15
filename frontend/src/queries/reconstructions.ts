@@ -14,10 +14,13 @@ import type { FetchProgress } from 'src/lib/utils/fetchProgress';
 import { useSplatDownloadStore } from 'src/stores/splatDownload';
 import { useVideoDownloadStore } from 'src/stores/videoDownload';
 import {
+    getReconstructionPointCloud,
+    getReconstructionPointCloudMeta,
     getReconstructionSplat,
     getReconstructionStep,
     getReconstructionVideo,
     listReconstructions,
+    type ReconstructionPointCloudMeta,
 } from 'src/lib/buildings';
 
 export const RECONSTRUCTIONS_PAGE_SIZE = 20;
@@ -202,6 +205,54 @@ export function useReconstructionVideoQuery(
         cache.cancelQueries({ key: key.value, exact: true });
     }
     return { ...query, cancel };
+}
+
+export interface ReconstructionPointCloudData {
+    buffer: ArrayBuffer;
+    meta: ReconstructionPointCloudMeta | null;
+}
+
+export function useReconstructionPointCloudQuery(
+    buildingId: Ref<string>,
+    reconstructionId: Ref<string>,
+) {
+    const subject = getAuthSubject();
+    const splatDownload = useSplatDownloadStore();
+
+    // A different building or reconstruction must restart the progress bar.
+    watch([buildingId, reconstructionId], () => splatDownload.reset());
+
+    function reportProgress(progress: FetchProgress): void {
+        splatDownload.update(progress);
+    }
+
+    return useQuery({
+        key: () => [
+            ...reconstructionKey(subject, buildingId.value),
+            'point-cloud',
+            reconstructionId.value,
+        ],
+        enabled: () => subject !== null && buildingId.value !== '' && reconstructionId.value !== '',
+        query: ({ signal }) => {
+            splatDownload.reset();
+            return Promise.all([
+                getReconstructionPointCloud(
+                    buildingId.value,
+                    reconstructionId.value,
+                    signal,
+                    reportProgress,
+                ),
+                getReconstructionPointCloudMeta(
+                    buildingId.value,
+                    reconstructionId.value,
+                    signal,
+                ).catch(() => null),
+            ]).then(([buffer, meta]) => ({ buffer, meta }));
+        },
+        staleTime: Infinity,
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
+    });
 }
 
 export function useReconstructionSplatQuery(

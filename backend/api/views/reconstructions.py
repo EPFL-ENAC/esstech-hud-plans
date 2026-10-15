@@ -16,6 +16,10 @@ from starlette.concurrency import run_in_threadpool
 from api.config import config
 from api.lib.compute import scitas as scitas_compute
 from api.lib.compute.colmap_geometric_data import colmap_compute_geometric_data
+from api.lib.compute.point_cloud import (
+    POINT_CLOUD_BINARY_FILENAME,
+    POINT_CLOUD_META_FILENAME,
+)
 from api.lib.workflows import common as workflow_common
 from api.lib.workflows.common import (
     WorkflowNotFoundError,
@@ -165,6 +169,50 @@ def get_reconstruction_splat(
             workflow_common.WORKFLOW_DATA_DIRECTORY.resolve() / reconstruction.id.hex
         ),
         media_type="application/octet-stream",
+    )
+
+
+@router.get("/{reconstruction_id}/point-cloud", response_class=FileResponse)
+def get_reconstruction_point_cloud(
+    reconstruction: CurrentReconstruction,
+) -> FileResponse:
+    if (
+        reconstruction.status != ReconstructionStatus.COMPLETED
+        or not reconstruction.splat_path
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Reconstruction point cloud not found",
+        )
+
+    return inline_file_response(
+        Path(reconstruction.splat_path).with_name(POINT_CLOUD_BINARY_FILENAME),
+        root_directory=(
+            workflow_common.WORKFLOW_DATA_DIRECTORY.resolve() / reconstruction.id.hex
+        ),
+        media_type="application/octet-stream",
+    )
+
+
+@router.get("/{reconstruction_id}/point-cloud/meta", response_class=FileResponse)
+def get_reconstruction_point_cloud_meta(
+    reconstruction: CurrentReconstruction,
+) -> FileResponse:
+    if (
+        reconstruction.status != ReconstructionStatus.COMPLETED
+        or not reconstruction.splat_path
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Reconstruction point cloud meta not found",
+        )
+
+    return inline_file_response(
+        Path(reconstruction.splat_path).with_name(POINT_CLOUD_META_FILENAME),
+        root_directory=(
+            workflow_common.WORKFLOW_DATA_DIRECTORY.resolve() / reconstruction.id.hex
+        ),
+        media_type="application/json",
     )
 
 
