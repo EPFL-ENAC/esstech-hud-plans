@@ -1,4 +1,4 @@
-"""Shared dependencies and validation for resumable video reconstruction submissions."""
+"""Shared dependencies and validation for video reconstruction submissions."""
 
 import logging
 from typing import Annotated
@@ -49,6 +49,41 @@ class ResumableBuildingFromReconstructionSubmission(BaseModel):
     settings: SplatGenerationWorkflowSettings = Field(
         default_factory=SplatGenerationWorkflowSettings
     )
+
+
+class UploadReconstructionSubmission(BaseModel):
+    """Submit a video already stored in UserUploads."""
+
+    upload_id: UUID
+    settings: SplatGenerationWorkflowSettings = Field(
+        default_factory=SplatGenerationWorkflowSettings
+    )
+
+
+class BuildingFromUploadReconstructionSubmission(UploadReconstructionSubmission):
+    building: BuildingCreate = Field(default_factory=BuildingCreate)
+
+
+async def validate_user_upload(
+    upload_id: UUID,
+    *,
+    user_id: UUID,
+    uploads: UserUploadsService,
+) -> UserUploads:
+    """Resolve an owned, completed upload before creating any destination rows."""
+
+    try:
+        return await uploads.get_completed(upload_id, user_id=user_id)
+    except UploadNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except UploadConflictError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except (OSError, SQLAlchemyError) as exc:
+        logger.exception("Reconstruction upload is unavailable")
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Upload persistence is unavailable",
+        ) from exc
 
 
 async def validate_tus_upload(

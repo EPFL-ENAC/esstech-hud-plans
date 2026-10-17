@@ -19,6 +19,7 @@ from api.models.reconstruction import (
     ReconstructionArtifactUpdate,
     ReconstructionStatus,
 )
+from api.models.uploads import UserUploads
 from api.models.user import utc_now
 from api.models.workflows import SplatGenerationWorkflowSettings
 
@@ -111,6 +112,22 @@ class ReconstructionService:
             .limit(limit)
         )
         return list(result.all())
+
+    async def create_from_upload(
+        self,
+        *,
+        building: Building,
+        upload: UserUploads,
+        settings: SplatGenerationWorkflowSettings,
+    ) -> Reconstruction:
+        """Schedule a reconstruction while preserving the reusable source upload."""
+
+        return await self.create_from_tus(
+            building=building,
+            tus_upload_path=upload.file_path,
+            tus_video_filename=upload.filename,
+            settings=settings,
+        )
 
     async def create_from_tus(
         self,

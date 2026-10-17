@@ -48,6 +48,11 @@ async function fixture(t, initialSubject = 'user-a') {
         query(offset = ref(0)) {
             return app.runWithContext(() => scope.run(() => queries.useMyUploadsQuery(offset)));
         },
+        uploadedVideosQuery(offset, open) {
+            return app.runWithContext(() =>
+                scope.run(() => queries.useUploadedVideosQuery(offset, open)),
+            );
+        },
     };
 }
 
@@ -169,6 +174,51 @@ test('an unauthenticated query does not start a request', async (t) => {
     await nextTurn();
     assert.equal(query.state.value.status, 'pending');
     assert.equal(f.requests.length, 0);
+});
+
+test('uploaded videos query filters on the server and stays inactive while closed', async (t) => {
+    const f = await fixture(t);
+    const offset = ref(0);
+    const open = ref(false);
+    const query = f.uploadedVideosQuery(offset, open);
+    await nextTurn();
+    assert.equal(f.requests.length, 0);
+    open.value = true;
+    await nextTick();
+    assert.equal(
+        f.requests[0].url,
+        'https://hud.test/api/uploads?offset=0&limit=21&sort_order=desc&status=uploaded',
+    );
+    respond(f.requests[0], rows('uploaded', 21));
+    await nextTurn();
+    assert.equal(query.data.value.length, 21);
+    open.value = false;
+    offset.value = 20;
+    await nextTick();
+    assert.equal(f.requests.length, 1);
+    open.value = true;
+    await nextTick();
+    assert.equal(
+        f.requests[1].url,
+        'https://hud.test/api/uploads?offset=20&limit=21&sort_order=desc&status=uploaded',
+    );
+    respond(f.requests[1], []);
+    await nextTurn();
+    assert.deepEqual(query.data.value, []);
+});
+
+test('uploaded video queries have separate caches for each account', async (t) => {
+    const f = await fixture(t);
+    const first = f.uploadedVideosQuery(ref(0), ref(true));
+    respond(f.requests[0], rows('first-user'));
+    await nextTurn();
+    f.setSubject('second-user');
+    const second = f.uploadedVideosQuery(ref(0), ref(true));
+    assert.equal(second.data.value, undefined);
+    respond(f.requests[1], rows('second-user'));
+    await nextTurn();
+    assert.deepEqual(first.data.value, rows('first-user'));
+    assert.deepEqual(second.data.value, rows('second-user'));
 });
 
 test('refresh failures preserve cached rows and retry can recover', async (t) => {

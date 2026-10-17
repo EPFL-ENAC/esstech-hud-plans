@@ -665,6 +665,62 @@ def test_upload_migration_preserves_existing_tables_and_cascades() -> None:
         engine.dispose()
 
 
+@pytest.mark.parametrize("sort_order", ["asc", "desc"])
+def test_upload_status_filter_precedes_pagination(
+    api_client: TestClient,
+    database: AsyncEngine,
+    sort_order: SortOrder,
+) -> None:
+    async def insert() -> None:
+        async with AsyncSession(database) as session:
+            for index, upload_status in enumerate(
+                [
+                    UploadStatus.UPLOADED,
+                    UploadStatus.PENDING,
+                    UploadStatus.UPLOADED,
+                    UploadStatus.FAILED,
+                    UploadStatus.UPLOADED,
+                ]
+            ):
+                session.add(
+                    UserUploads(
+                        id=UUID(int=100 + index),
+                        user_id=USER_ID,
+                        filename=f"video-{index}.mp4",
+                        size_bytes=11,
+                        file_path="TODO",
+                        status=upload_status,
+                        created_at=datetime(2026, 10, 13, tzinfo=UTC)
+                        + timedelta(days=index),
+                    )
+                )
+            session.add(
+                UserUploads(
+                    user_id=OTHER_USER_ID,
+                    filename="foreign.mp4",
+                    size_bytes=11,
+                    file_path="TODO",
+                    status=UploadStatus.UPLOADED,
+                )
+            )
+            await session.commit()
+
+    asyncio.run(insert())
+    expected = ["video-0.mp4", "video-2.mp4", "video-4.mp4"]
+    if sort_order == "desc":
+        expected.reverse()
+    for offset in range(4):
+        response = api_client.get(
+            f"/uploads?status=uploaded&offset={offset}&limit=1&sort_order={sort_order}"
+        )
+        assert response.status_code == 200
+        assert [upload["filename"] for upload in response.json()] == expected[
+            offset : offset + 1
+        ]
+    assert len(api_client.get("/uploads").json()) == 5
+    assert api_client.get("/uploads?status=invalid").status_code == 422
+
+
 def test_upload_post_is_removed(api_client: TestClient) -> None:
     assert api_client.post("/uploads", json={}).status_code == 405
     assert api_client.get("/uploads").json() == []

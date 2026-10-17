@@ -21,7 +21,25 @@
                     accept="video/*"
                     :disable="sourceSelectionDisabled"
                 />
+                <span class="text-grey text-italic">{{ t('common.or') }}</span>
+                <q-btn
+                    :label="t('uploads.picker.action')"
+                    :disable="sourceSelectionDisabled"
+                    icon="video_library"
+                    color="primary"
+                    outline
+                    no-caps
+                    @click="pickerOpen = true"
+                />
             </div>
+            <uploaded-video-picker-dialog v-model="pickerOpen" @select="selectUpload" />
+            <uploaded-video-details
+                v-if="selectedUpload"
+                :upload="selectedUpload"
+                :disable="sourceSelectionDisabled"
+                class="q-mb-md"
+                @clear="selectedUpload = null"
+            />
             <video-preview
                 :file="videoFile"
                 :fallback-duration-seconds="fallbackDurationSeconds"
@@ -106,9 +124,12 @@ import { useUiStore } from 'src/stores/ui';
 import VideoUploadProgress from 'src/components/VideoUploadProgress.vue';
 import FilePickerButton from 'src/components/FilePickerButton.vue';
 import VideoPreview from 'src/components/VideoPreview.vue';
+import UploadedVideoDetails from 'src/components/UploadedVideoDetails.vue';
+import UploadedVideoPickerDialog from 'src/components/UploadedVideoPickerDialog.vue';
 import type { VideoMetadata } from 'src/components/VideoPreview.types';
 import BuildingPicker from 'src/components/BuildingPicker.vue';
-import type { BuildingSelection } from 'src/lib/buildings';
+import type { BuildingSelection, ReconstructionSubmission } from 'src/lib/buildings';
+import type { UserUpload } from 'src/lib/uploads';
 import ReconstructionSettings from 'src/components/ReconstructionSettings.vue';
 import {
     type ReconstructionPreset,
@@ -175,6 +196,8 @@ const hasValidSettings = computed(
     () => preset.value !== 'advanced' || isValidReconstructionSettings(advancedSettings.value),
 );
 const videoFile = ref<File | null>(draft.videoFile);
+const selectedUpload = ref<UserUpload | null>(draft.selectedUpload);
+const pickerOpen = ref(false);
 const fallbackDurationSeconds = computed(() =>
     capturedVideo.value && videoFile.value === capturedVideo.value.file
         ? capturedVideo.value.durationSeconds
@@ -184,6 +207,7 @@ watch(
     videoFile,
     (file) => {
         if (file !== capturedVideo.value?.file) capturedVideo.value = null;
+        if (file) selectedUpload.value = null;
     },
     { flush: 'sync' },
 );
@@ -195,11 +219,17 @@ const sourceSelectionDisabled = computed(
 const canSubmit = computed(
     () =>
         !sourceSelectionDisabled.value &&
-        videoFile.value !== null &&
-        videoMetadata.value !== null &&
+        (selectedUpload.value !== null ||
+            (videoFile.value !== null && videoMetadata.value !== null)) &&
         hasValidSettings.value &&
         hasValidBuilding.value,
 );
+
+function selectUpload(upload: UserUpload): void {
+    if (sourceSelectionDisabled.value) return;
+    videoFile.value = null;
+    selectedUpload.value = upload;
+}
 
 async function openRecorder(): Promise<void> {
     if (sourceSelectionDisabled.value) return;
@@ -208,6 +238,7 @@ async function openRecorder(): Promise<void> {
     captureStore.saveDraft({
         returnTo: route.fullPath,
         videoFile: videoFile.value,
+        selectedUpload: selectedUpload.value,
         capturedVideo: capturedVideo.value,
         buildingSelection: buildingSelection.value,
         preset: preset.value,
@@ -228,16 +259,21 @@ async function openRecorder(): Promise<void> {
 }
 
 async function startProcessing(): Promise<void> {
-    if (!canSubmit.value || !videoFile.value) return;
+    if (!canSubmit.value) return;
 
-    const submission = {
-        video: videoFile.value,
-        settings: toSplatGenerationSettings(
-            preset.value === 'advanced'
-                ? advancedSettings.value
-                : makeDefaultReconstructionSettings(preset.value),
-        ),
-    };
+    const settings = toSplatGenerationSettings(
+        preset.value === 'advanced'
+            ? advancedSettings.value
+            : makeDefaultReconstructionSettings(preset.value),
+    );
+    let submission: ReconstructionSubmission;
+    if (selectedUpload.value) {
+        submission = { uploadId: selectedUpload.value.id, settings };
+    } else if (videoFile.value) {
+        submission = { video: videoFile.value, settings };
+    } else {
+        return;
+    }
     navigationError.value = '';
     // Colada exposes submission errors through mutationError, including retained IDs.
     await submitReconstruction({ ...submission, ...buildingSelection.value }).catch(
@@ -274,8 +310,8 @@ async function openBuilding(buildingId: string): Promise<void> {
 }
 
 .video-source-actions {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) max-content minmax(0, 1fr);
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 12px;
     margin-bottom: 24px;
@@ -287,7 +323,23 @@ async function openBuilding(buildingId: string): Promise<void> {
     overflow-wrap: anywhere;
 }
 
+.video-source-actions > .q-btn,
+.video-source-actions > :deep(.file-picker-button) {
+    flex: 1 1 160px;
+}
+
 .capture-video-preview {
     margin-bottom: 24px;
+}
+
+@media (max-width: 599px) {
+    .video-source-actions > span {
+        display: none;
+    }
+
+    .video-source-actions > .q-btn,
+    .video-source-actions > :deep(.file-picker-button) {
+        flex-basis: 100%;
+    }
 }
 </style>

@@ -7,6 +7,8 @@ import {
     type Reconstruction,
     type ReconstructionSubmission,
     createBuildingFromReconstructionResumable,
+    createBuildingFromReconstructionUpload,
+    createReconstructionFromUpload,
     createReconstructionResumable,
     getFailedBuildingId,
     getFailedReconstructionId,
@@ -37,8 +39,24 @@ export function useSubmitReconstructionMutation() {
     const submissionState = shallowRef<ReconstructionSubmissionState>({ phase: 'idle' });
     const mutation = useMutation<Reconstruction, SubmitReconstructionVariables, unknown>({
         mutation: async (variables) => {
-            submissionState.value = { phase: 'uploading', progress: null, resumed: false };
             try {
+                if ('uploadId' in variables) {
+                    submissionState.value = { phase: 'submitting' };
+                    if (variables.buildingId === null) {
+                        const result = await createBuildingFromReconstructionUpload(
+                            variables.building,
+                            variables.uploadId,
+                            variables.settings,
+                        );
+                        return result.reconstruction;
+                    }
+                    return await createReconstructionFromUpload(
+                        variables.buildingId,
+                        variables.uploadId,
+                        variables.settings,
+                    );
+                }
+                submissionState.value = { phase: 'uploading', progress: null, resumed: false };
                 const { uploadId } = await uploadVideoResumable(variables.video, {
                     onProgress(progress) {
                         if (submissionState.value.phase !== 'uploading') return;

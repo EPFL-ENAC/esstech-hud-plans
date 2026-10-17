@@ -100,9 +100,8 @@ async function submit(submission: ReconstructionSubmission): Promise<void> {
         return;
     }
 
-    // Resumable upload through the API upload proxy, then one call that
-    // creates the building and schedules the reconstruction. The mutation
-    // drives the upload progress shown by VideoUploadProgress.
+    // The mutation uploads local files or reuses the selected stored upload,
+    // then creates the building and schedules its first reconstruction.
     await submitReconstruction({
         ...submission,
         buildingId: null,

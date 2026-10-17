@@ -10,6 +10,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from api.db import get_session
 from api.models.uploads import (
+    UploadStatus,
     UserUploadRead,
     UserUploads,
     UserUploadUpdate,
@@ -66,6 +67,7 @@ async def list_uploads(
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 100,
     sort_order: SortOrder = "desc",
+    upload_status: Annotated[UploadStatus | None, Query(alias="status")] = None,
 ) -> list[UserUploads]:
     try:
         return await uploads.list(
@@ -73,6 +75,7 @@ async def list_uploads(
             offset=offset,
             limit=limit,
             sort_order=sort_order,
+            status=upload_status,
         )
     except (OSError, SQLAlchemyError) as exc:
         raise _database_unavailable(exc) from exc

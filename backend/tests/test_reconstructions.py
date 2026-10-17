@@ -14,12 +14,13 @@ from pydantic import BaseModel
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel
+from sqlmodel import SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from api.config import config
 from api.db import get_session
 from api.lib.compute import scitas as scitas_compute
+from api.lib.upload_storage import upload_file_path
 from api.lib.workflows import common as workflow_common
 from api.lib.workflows import splat_generation as splat_workflow
 from api.lib.workflows.common import WorkflowNotFoundError
@@ -459,6 +460,185 @@ def _submit_building_from_reconstruction(client: TestClient):
         "/buildings/from-reconstruction/resumable",
         json={"tus_upload_id": upload_id, "building": {}, "settings": {}},
     )
+
+
+def _seed_stored_upload(
+    client: TestClient,
+    *,
+    status: UploadStatus = UploadStatus.UPLOADED,
+    user_id: UUID = USER_ID,
+) -> tuple[UUID, Path]:
+    upload_id = uuid4()
+    path = upload_file_path(upload_id, "stored.mp4")
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"stored video bytes")
+
+    async def insert() -> None:
+        async with AsyncSession(client.app.state.upload_database) as session:
+            session.add(
+                UserUploads(
+                    id=upload_id,
+                    user_id=user_id,
+                    filename="stored.mp4",
+                    file_path=str(path),
+                    size_bytes=path.stat().st_size,
+                    status=status,
+                    uploaded_at=utc_now() if status == UploadStatus.UPLOADED else None,
+                )
+            )
+            await session.commit()
+
+    asyncio.run(insert())
+    return upload_id, path
+
+
+def _from_upload_url(building_id: UUID, new_building: bool) -> str:
+    if new_building:
+        return "/buildings/from-reconstruction/from-upload"
+    return f"/buildings/{building_id}/reconstructions/from-upload"
+
+
+@pytest.mark.parametrize("new_building", [False, True])
+def test_reconstruction_from_stored_upload_is_reusable(
+    reconstruction_api: tuple[TestClient, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+    new_building: bool,
+) -> None:
+    client, building_id = reconstruction_api
+    upload_id, path = _seed_stored_upload(client)
+    scheduled: list[dict] = []
+
+    async def schedule(**kwargs: object) -> UUID:
+        scheduled.append(kwargs)
+        return uuid4()
+
+    monkeypatch.setattr(splat_workflow, "schedule_splat_generation_from_tus", schedule)
+    results = []
+    for _ in range(2):
+        response = client.post(
+            _from_upload_url(building_id, new_building),
+            json={
+                "upload_id": str(upload_id),
+                "building": {"name": "From stored video"},
+                "settings": {"ffmpeg": {"fps": 4}},
+            },
+        )
+        assert response.status_code == 202
+        result = response.json()
+        reconstruction = result["reconstruction"] if new_building else result
+        assert reconstruction["status"] == "scheduled"
+        assert reconstruction["settings"]["ffmpeg"]["fps"] == 4
+        if new_building:
+            assert result["building"]["name"] == "From stored video"
+        else:
+            assert reconstruction["building_id"] == str(building_id)
+        results.append(reconstruction)
+
+    assert results[0]["id"] != results[1]["id"]
+    assert results[0]["input_video_path"] != results[1]["input_video_path"]
+    assert len(scheduled) == 2
+    for call in scheduled:
+        assert call["tus_upload_path"] == str(path)
+        assert call["tus_video_filename"] == "stored.mp4"
+        assert call["owner_id"] == USER_ID
+    assert path.read_bytes() == b"stored video bytes"
+
+
+@pytest.mark.parametrize("new_building", [False, True])
+@pytest.mark.parametrize(
+    ("case", "expected_status"),
+    [
+        ("unknown", 404),
+        ("foreign", 404),
+        ("pending", 409),
+        ("failed", 409),
+        ("missing_file", 503),
+        ("invalid_id", 422),
+        ("invalid_settings", 422),
+        ("unauthenticated", 401),
+    ],
+)
+def test_reconstruction_from_upload_rejects_before_creating_rows(
+    reconstruction_api: tuple[TestClient, UUID],
+    new_building: bool,
+    case: str,
+    expected_status: int,
+) -> None:
+    client, building_id = reconstruction_api
+    upload_id, path = _seed_stored_upload(
+        client,
+        user_id=OTHER_USER_ID if case == "foreign" else USER_ID,
+        status=UploadStatus(case)
+        if case in {"pending", "failed"}
+        else UploadStatus.UPLOADED,
+    )
+    payload: dict = {"upload_id": str(upload_id)}
+    if case == "unknown":
+        payload["upload_id"] = str(uuid4())
+    elif case == "invalid_id":
+        payload["upload_id"] = "invalid"
+    elif case == "invalid_settings":
+        payload["settings"] = {"ffmpeg": {"fps": 0}}
+    elif case == "missing_file":
+        path.unlink()
+    elif case == "unauthenticated":
+        client.app.dependency_overrides.pop(require_user)
+
+    response = client.post(_from_upload_url(building_id, new_building), json=payload)
+    assert response.status_code == expected_status
+
+    async def assert_no_rows() -> None:
+        async with AsyncSession(client.app.state.upload_database) as session:
+            assert list((await session.exec(select(Reconstruction))).all()) == []
+            assert len((await session.exec(select(Building))).all()) == 1
+
+    asyncio.run(assert_no_rows())
+
+
+def test_reconstruction_from_upload_rejects_foreign_building(
+    reconstruction_api: tuple[TestClient, UUID],
+) -> None:
+    client, building_id = reconstruction_api
+    upload_id, _ = _seed_stored_upload(client, user_id=OTHER_USER_ID)
+    client.app.dependency_overrides[require_user] = lambda: User(
+        id=OTHER_USER_ID,
+        keycloak_sub="subject-2",
+    )
+    response = client.post(
+        _from_upload_url(building_id, False),
+        json={"upload_id": str(upload_id)},
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize("new_building", [False, True])
+def test_reconstruction_from_upload_retains_rows_on_scheduling_failure(
+    reconstruction_api: tuple[TestClient, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+    new_building: bool,
+) -> None:
+    client, building_id = reconstruction_api
+    upload_id, path = _seed_stored_upload(client)
+
+    async def fail_schedule(**kwargs: object) -> UUID:
+        raise OSError("Scheduler unavailable")
+
+    monkeypatch.setattr(
+        splat_workflow, "schedule_splat_generation_from_tus", fail_schedule
+    )
+    response = client.post(
+        _from_upload_url(building_id, new_building),
+        json={"upload_id": str(upload_id)},
+    )
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    destination = detail["building_id"] if new_building else str(building_id)
+    reconstruction = client.get(
+        f"/buildings/{destination}/reconstructions/{detail['reconstruction_id']}"
+    )
+    assert reconstruction.status_code == 200
+    assert reconstruction.json()["status"] == "failed"
+    assert path.read_bytes() == b"stored video bytes"
 
 
 def test_nested_reconstruction_routes_create_list_and_get(

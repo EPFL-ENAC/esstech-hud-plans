@@ -111,6 +111,7 @@ class UserUploadsService:
         offset: int = 0,
         limit: int = 100,
         sort_order: SortOrder = "desc",
+        status: UploadStatus | None = None,
     ) -> list[UserUploads]:
         if offset < 0:
             raise ValueError("offset must be non-negative")
@@ -124,12 +125,11 @@ class UserUploadsService:
             if sort_order == "asc"
             else (col(UserUploads.created_at).desc(), col(UserUploads.id).desc())
         )
+        query = select(UserUploads).where(UserUploads.user_id == user_id)
+        if status is not None:
+            query = query.where(UserUploads.status == status)
         result = await self._session.exec(
-            select(UserUploads)
-            .where(UserUploads.user_id == user_id)
-            .order_by(*ordering)
-            .offset(offset)
-            .limit(limit)
+            query.order_by(*ordering).offset(offset).limit(limit)
         )
         return list(result.all())
 

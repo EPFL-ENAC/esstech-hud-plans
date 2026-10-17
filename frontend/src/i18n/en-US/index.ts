@@ -60,6 +60,12 @@ export default {
         deleteAllDataFailed: 'Could not delete your data. Please try again.',
     },
     uploads: {
+        picker: {
+            action: 'Uploaded video',
+            title: 'Choose an uploaded video',
+            empty: 'No completed video uploads yet.',
+            useVideo: 'Use video',
+        },
         title: 'Uploads',
         refresh: 'Refresh',
         loading: 'Loading uploads…',

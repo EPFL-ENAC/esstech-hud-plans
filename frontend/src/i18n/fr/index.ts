@@ -62,6 +62,12 @@ export default {
         deleteAllDataFailed: 'Impossible de supprimer vos données. Veuillez réessayer.',
     },
     uploads: {
+        picker: {
+            action: 'Vidéo déjà envoyée',
+            title: 'Choisir une vidéo envoyée',
+            empty: 'Aucun envoi de vidéo terminé pour le moment.',
+            useVideo: 'Utiliser la vidéo',
+        },
         title: 'Envois',
         refresh: 'Actualiser',
         loading: 'Chargement des envois…',

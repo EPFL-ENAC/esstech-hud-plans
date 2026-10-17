@@ -18,17 +18,20 @@ export interface ListUploadsOptions {
     offset?: number;
     limit?: number;
     sort_order?: 'asc' | 'desc';
+    status?: UploadStatus;
 }
 
 export function listUploads({
     offset = 0,
     limit = 100,
     sort_order = 'desc',
+    status,
 }: ListUploadsOptions = {}): Promise<UserUpload[]> {
     const params = new URLSearchParams({
         offset: String(offset),
         limit: String(limit),
         sort_order,
     });
+    if (status !== undefined) params.set('status', status);
     return requestJson(`/uploads?${params}`);
 }

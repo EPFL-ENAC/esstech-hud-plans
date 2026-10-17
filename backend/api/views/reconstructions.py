@@ -41,8 +41,10 @@ from api.utils.responses import inline_file_response
 from api.views.buildings import get_current_building
 from api.views.reconstruction_submission import (
     ResumableReconstructionSubmission,
+    UploadReconstructionSubmission,
     get_reconstruction_service,
     validate_tus_upload,
+    validate_user_upload,
 )
 from api.views.uploads import get_uploads_service
 
@@ -199,6 +201,45 @@ async def create_reconstruction_from_tus(
             building=building,
             tus_upload_path=upload.file_path,
             tus_video_filename=upload.filename,
+            settings=payload.settings,
+        )
+    except ReconstructionCreationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "message": str(exc),
+                "reconstruction_id": str(exc.reconstruction.id),
+            },
+        ) from exc
+    except (OSError, SQLAlchemyError) as exc:
+        raise _database_unavailable(exc) from exc
+
+
+@router.post(
+    "/from-upload",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=ReconstructionRead,
+)
+async def create_reconstruction_from_upload(
+    payload: UploadReconstructionSubmission,
+    building: Annotated[Building, Depends(get_current_building)],
+    reconstructions: Annotated[
+        ReconstructionService,
+        Depends(get_reconstruction_service),
+    ],
+    uploads: Annotated[UserUploadsService, Depends(get_uploads_service)],
+) -> Reconstruction:
+    """Schedule a reconstruction from an existing, completed user upload."""
+
+    upload = await validate_user_upload(
+        payload.upload_id,
+        user_id=building.user_id,
+        uploads=uploads,
+    )
+    try:
+        return await reconstructions.create_from_upload(
+            building=building,
+            upload=upload,
             settings=payload.settings,
         )
     except ReconstructionCreationError as exc:

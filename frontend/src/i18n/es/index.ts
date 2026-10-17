@@ -62,6 +62,12 @@ export default {
         deleteAllDataFailed: 'No se pudieron eliminar tus datos. Inténtalo de nuevo.',
     },
     uploads: {
+        picker: {
+            action: 'Vídeo ya subido',
+            title: 'Elegir un vídeo subido',
+            empty: 'Aún no hay vídeos subidos por completo.',
+            useVideo: 'Usar vídeo',
+        },
         title: 'Archivos',
         refresh: 'Actualizar',
         loading: 'Cargando archivos…',

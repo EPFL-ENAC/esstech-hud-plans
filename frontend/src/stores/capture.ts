@@ -3,6 +3,7 @@ import { computed, shallowRef } from 'vue';
 import { i18n } from 'src/i18n/instance';
 import type { CapturedVideo } from 'src/lib/captured-video';
 import type { BuildingSelection } from 'src/lib/buildings';
+import type { UserUpload } from 'src/lib/uploads';
 import {
     makeDefaultReconstructionSettings,
     type ReconstructionPreset,
@@ -12,6 +13,7 @@ import {
 export interface CaptureFormDraft {
     returnTo: string;
     videoFile: File | null;
+    selectedUpload: UserUpload | null;
     capturedVideo: CapturedVideo | null;
     buildingSelection: BuildingSelection;
     preset: ReconstructionPreset;
@@ -22,6 +24,7 @@ export function makeEmptyCaptureDraft(returnTo: string = '/capture'): CaptureFor
     return {
         returnTo,
         videoFile: null,
+        selectedUpload: null,
         capturedVideo: null,
         buildingSelection: {
             buildingId: null,
@@ -49,6 +52,7 @@ export const useCaptureStore = defineStore('capture', () => {
         draft.value = {
             ...ensureDraft(),
             videoFile: video.file,
+            selectedUpload: null,
             capturedVideo: video,
         };
     }

@@ -244,6 +244,87 @@ for (const buildingId of ['existing-building', null]) {
     });
 }
 
+for (const buildingId of ['existing-building', null]) {
+    for (const fail of [false, true]) {
+        test(`stored upload skips tus for ${buildingId ?? 'new building'} (${fail ? 'failure' : 'success'})`, async (t) => {
+            const f = await fixture(t);
+            const mutation = f.mutation();
+            const { video, ...rest } = variables(buildingId);
+            const input = { ...rest, uploadId: 'stored-upload' };
+            const promise = mutation.mutateAsync(input);
+            const failed = fail ? assert.rejects(promise, { status: 503 }) : null;
+            await nextTurn();
+            assert.equal(f.uploads.length, 0);
+            assert.deepEqual(mutation.submissionState.value, { phase: 'submitting' });
+            assert.equal(mutation.isLoading.value, true);
+            assert.equal(f.submissions.length, 1);
+            const request = f.submissions[0];
+            assert.equal(
+                request.url,
+                buildingId === null
+                    ? 'https://hud.test/buildings/from-reconstruction/from-upload'
+                    : 'https://hud.test/buildings/existing-building/reconstructions/from-upload',
+            );
+            assert.deepEqual(JSON.parse(request.init.body), {
+                upload_id: 'stored-upload',
+                settings: input.settings,
+                ...(buildingId === null ? { building: input.building } : {}),
+            });
+            const destination = buildingId ?? 'created-building';
+            const reconstruction = { id: 'reconstruction-id', building_id: destination };
+            if (fail) {
+                respond(
+                    request,
+                    {
+                        detail: {
+                            message: 'Scheduling failed',
+                            reconstruction_id: reconstruction.id,
+                            ...(buildingId === null ? { building_id: destination } : {}),
+                        },
+                    },
+                    503,
+                );
+                await failed;
+                assert.equal(mutation.errorMessage.value, 'Scheduling failed');
+            } else {
+                respond(
+                    request,
+                    buildingId === null
+                        ? { building: { id: destination }, reconstruction }
+                        : reconstruction,
+                );
+                assert.deepEqual(await promise, reconstruction);
+            }
+            assert.deepEqual(mutation.submissionState.value, { phase: 'idle' });
+            assert.equal(mutation.destinationBuildingId.value, destination);
+            assert.deepEqual(
+                f.invalidation.mock.calls.map((call) => call.arguments[0]),
+                expectedInvalidations(destination),
+            );
+        });
+    }
+}
+
+test('rejected stored uploads allow retry without retaining a destination', async (t) => {
+    const f = await fixture(t);
+    const mutation = f.mutation();
+    const input = { uploadId: 'stored-upload', settings: {}, buildingId: 'existing-building' };
+    const attempt = mutation.mutateAsync(input);
+    const failure = assert.rejects(attempt, { status: 409 });
+    await nextTurn();
+    respond(f.submissions[0], { detail: 'Upload has not finished uploading' }, 409);
+    await failure;
+    assert.equal(mutation.destinationBuildingId.value, null);
+    assert.deepEqual(mutation.submissionState.value, { phase: 'idle' });
+    assert.equal(f.invalidation.mock.callCount(), 0);
+    const retry = mutation.mutateAsync(input);
+    await nextTurn();
+    respond(f.submissions[1], { id: 'retry', building_id: 'existing-building' });
+    await retry;
+    assert.equal(f.uploads.length, 0);
+    assert.equal(mutation.destinationBuildingId.value, 'existing-building');
+});
+
 test('cache refresh failure does not change a successful submission', async (t) => {
     const f = await fixture(t);
     const warn = t.mock.method(console, 'warn', () => {});
