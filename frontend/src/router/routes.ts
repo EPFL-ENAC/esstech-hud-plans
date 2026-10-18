@@ -184,6 +184,11 @@ const routes: RouteRecordRaw[] = [
         path: '/capture/record',
         component: () => import('pages/CaptureRecordPage.vue'),
     },
+    {
+        path: '/uploads/record',
+        name: 'record-upload',
+        component: () => import('pages/RecordUploadPage.vue'),
+    },
 
     // Auth routes, outside the main layout (no header/drawer)
     {

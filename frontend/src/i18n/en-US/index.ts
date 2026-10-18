@@ -77,6 +77,11 @@ export default {
         pagination: 'Upload list pagination',
         created: 'Created {date}',
         uploaded: 'Uploaded {date}',
+        record: {
+            action: 'Take a video',
+            failed: 'The upload of {filename} failed.',
+            navigationFailed: 'Could not open the uploads list. Please try again.',
+        },
         new: {
             title: 'New upload',
             instructions:

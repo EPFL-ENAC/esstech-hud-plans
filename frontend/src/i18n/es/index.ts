@@ -80,6 +80,11 @@ export default {
         pagination: 'Paginación de la lista de archivos',
         created: 'Creado el {date}',
         uploaded: 'Subido el {date}',
+        record: {
+            action: 'Grabar un vídeo',
+            failed: 'La subida de {filename} ha fallado.',
+            navigationFailed: 'No se pudo abrir la lista de archivos. Inténtalo de nuevo.',
+        },
         new: {
             title: 'Subir archivo',
             instructions:

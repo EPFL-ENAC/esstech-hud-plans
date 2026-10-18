@@ -14,6 +14,15 @@
                 flat
                 no-caps
                 color="primary"
+                icon="videocam"
+                :label="$q.screen.lt.sm ? undefined : t('uploads.record.action')"
+                :aria-label="t('uploads.record.action')"
+                :to="{ name: 'record-upload' }"
+            />
+            <q-btn
+                flat
+                no-caps
+                color="primary"
                 icon="refresh"
                 :label="t('uploads.refresh')"
                 :disable="isLoading"

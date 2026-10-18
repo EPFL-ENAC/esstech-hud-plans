@@ -80,6 +80,11 @@ export default {
         pagination: 'Pagination de la liste des envois',
         created: 'Créé le {date}',
         uploaded: 'Envoyé le {date}',
+        record: {
+            action: 'Filmer une vidéo',
+            failed: 'L’envoi de {filename} a échoué.',
+            navigationFailed: 'Impossible d’ouvrir la liste des envois. Veuillez réessayer.',
+        },
         new: {
             title: 'Nouvel envoi',
             instructions:

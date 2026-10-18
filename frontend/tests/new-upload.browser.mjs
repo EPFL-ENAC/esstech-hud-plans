@@ -90,6 +90,7 @@ try {
                                 name: 'Tester',
                                 username: 'tester',
                                 email: 'test@example.test',
+                                terms_accepted: true,
                             },
                         });
                     if (path === '/uploads') {
