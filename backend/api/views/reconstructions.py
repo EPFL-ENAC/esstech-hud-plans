@@ -184,12 +184,7 @@ async def create_reconstruction_from_tus(
     ],
     uploads: Annotated[UserUploadsService, Depends(get_uploads_service)],
 ) -> Reconstruction:
-    """Schedule the reconstruction of a video uploaded through tus.
-
-    The upload was already streamed to tusd; this endpoint validates the
-    completed upload, creates the reconstruction row, and schedules the
-    workflow, whose first task copies the video into the artifact layout.
-    """
+    """Create a reconstruction, waiting for its tus upload when necessary."""
     upload = await validate_tus_upload(
         payload.tus_upload_id,
         user_id=building.user_id,
@@ -197,10 +192,9 @@ async def create_reconstruction_from_tus(
     )
 
     try:
-        return await reconstructions.create_from_tus(
+        return await reconstructions.create_from_upload(
             building=building,
-            tus_upload_path=upload.file_path,
-            tus_video_filename=upload.filename,
+            upload=upload,
             settings=payload.settings,
         )
     except ReconstructionCreationError as exc:
@@ -229,7 +223,7 @@ async def create_reconstruction_from_upload(
     ],
     uploads: Annotated[UserUploadsService, Depends(get_uploads_service)],
 ) -> Reconstruction:
-    """Schedule a reconstruction from an existing, completed user upload."""
+    """Create a reconstruction from a pending or completed user upload."""
 
     upload = await validate_user_upload(
         payload.upload_id,
@@ -319,6 +313,16 @@ async def cancel_reconstruction(
         Depends(get_reconstruction_service),
     ],
 ) -> Reconstruction:
+    if reconstruction.status == ReconstructionStatus.WAITING_FOR_UPLOAD:
+        try:
+            reconstruction = await reconstructions.cancel_waiting(reconstruction.id)
+        except ReconstructionNotFoundError as exc:
+            raise HTTPException(404, "Reconstruction not found") from exc
+        except (OSError, SQLAlchemyError) as exc:
+            raise _database_unavailable(exc) from exc
+        if reconstruction.status == ReconstructionStatus.CANCELLED:
+            return reconstruction
+
     if reconstruction.status not in (
         ReconstructionStatus.PREPARING,
         ReconstructionStatus.SCHEDULED,

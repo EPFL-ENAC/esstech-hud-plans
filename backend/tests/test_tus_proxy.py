@@ -17,6 +17,9 @@ from api.config import config
 from api.db import get_session
 from api.lib.tus import TUS_HOOK_SECRET_HEADER, TUS_UPLOAD_ID_HEADER
 from api.lib.upload_storage import upload_file_path
+from api.lib.workflows import splat_generation as splat_workflow
+from api.models.building import Building
+from api.models.reconstruction import Reconstruction, ReconstructionStatus
 from api.models.uploads import UploadStatus, UserUploadRead, UserUploads
 from api.models.user import User
 from api.services.auth import require_user
@@ -300,6 +303,57 @@ def test_head_forwards_offset_and_returns_no_body(
     completed = _read_proxy_upload(tus_client, UUID(upload_id))
     assert completed.status == UploadStatus.UPLOADED
     assert completed.uploaded_at is not None
+
+
+def test_head_completion_dispatches_waiting_reconstruction(
+    monkeypatch: pytest.MonkeyPatch,
+    tus_client: TestClient,
+) -> None:
+    upload_id = UUID("d" * 32)
+    building_id = UUID(int=100)
+    reconstruction_id = UUID(int=200)
+
+    async def prepare() -> None:
+        async with AsyncSession(tus_client.app.state.upload_database) as session:
+            session.add(Building(id=building_id, user_id=USER_ID, name="Waiting"))
+            await session.flush()
+            session.add(
+                Reconstruction(
+                    id=reconstruction_id,
+                    building_id=building_id,
+                    upload_id=upload_id,
+                    status=ReconstructionStatus.WAITING_FOR_UPLOAD,
+                    settings={},
+                )
+            )
+            await session.commit()
+
+    asyncio.run(prepare())
+    schedule = AsyncMock(return_value=UUID(int=300))
+    monkeypatch.setattr(splat_workflow, "schedule_splat_generation_from_tus", schedule)
+    _install_transport(
+        monkeypatch,
+        {
+            ("HEAD", f"/files/{upload_id.hex}"): _upstream_response(
+                200, headers={"Upload-Offset": "11", "Upload-Length": "11"}
+            ),
+        },
+        [],
+    )
+    assert tus_client.head(f"/tus/files/{upload_id.hex}").status_code == 200
+    schedule.assert_awaited_once()
+    assert schedule.call_args.kwargs["reconstruction_id"] == reconstruction_id
+    assert schedule.call_args.kwargs["tus_upload_path"] == str(
+        upload_file_path(upload_id, "video.mp4")
+    )
+
+    async def read() -> None:
+        async with AsyncSession(tus_client.app.state.upload_database) as session:
+            row = await session.get(Reconstruction, reconstruction_id)
+            assert row is not None
+            assert row.status == ReconstructionStatus.SCHEDULED
+
+    asyncio.run(read())
 
 
 def test_options_forwards_tus_capabilities(

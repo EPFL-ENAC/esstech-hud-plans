@@ -12,7 +12,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from api.db import get_session
 from api.lib.tus import parse_upload_id
 from api.models.building import BuildingCreate
-from api.models.uploads import UserUploads
+from api.models.uploads import UploadStatus, UserUploads
 from api.models.workflows import SplatGenerationWorkflowSettings
 from api.services.reconstructions import ReconstructionService
 from api.services.uploads import (
@@ -52,7 +52,7 @@ class ResumableBuildingFromReconstructionSubmission(BaseModel):
 
 
 class UploadReconstructionSubmission(BaseModel):
-    """Submit a video already stored in UserUploads."""
+    """Submit a pending or completed user upload."""
 
     upload_id: UUID
     settings: SplatGenerationWorkflowSettings = Field(
@@ -70,9 +70,14 @@ async def validate_user_upload(
     user_id: UUID,
     uploads: UserUploadsService,
 ) -> UserUploads:
-    """Resolve an owned, completed upload before creating any destination rows."""
+    """Resolve an owned pending or completed upload before creating rows."""
 
     try:
+        upload = await uploads.get(upload_id, user_id=user_id)
+        if upload is None:
+            raise UploadNotFoundError("Upload not found")
+        if upload.status == UploadStatus.PENDING:
+            return upload
         return await uploads.get_completed(upload_id, user_id=user_id)
     except UploadNotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
@@ -92,18 +97,7 @@ async def validate_tus_upload(
     user_id: UUID,
     uploads: UserUploadsService,
 ) -> UserUploads:
-    """Resolve a completed video belonging to the submitting user."""
+    """Resolve a pending or completed tus upload belonging to the user."""
 
     parsed_id = parse_upload_id(upload_id)
-    try:
-        return await uploads.get_completed(parsed_id, user_id=user_id)
-    except UploadNotFoundError as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
-    except UploadConflictError as exc:
-        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
-    except (OSError, SQLAlchemyError) as exc:
-        logger.exception("Reconstruction upload is unavailable")
-        raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            "Upload persistence is unavailable",
-        ) from exc
+    return await validate_user_upload(parsed_id, user_id=user_id, uploads=uploads)

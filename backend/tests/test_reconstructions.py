@@ -20,6 +20,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from api.config import config
 from api.db import get_session
 from api.lib.compute import scitas as scitas_compute
+from api.lib.tus import TUS_HOOK_SECRET_HEADER
 from api.lib.upload_storage import upload_file_path
 from api.lib.workflows import common as workflow_common
 from api.lib.workflows import splat_generation as splat_workflow
@@ -42,6 +43,7 @@ from api.services.reconstructions import (
 )
 from api.views import buildings as building_views
 from api.views import reconstructions as reconstruction_views
+from api.views import tus as tus_views
 
 USER_ID = UUID("00000000-0000-0000-0000-000000000001")
 OTHER_USER_ID = UUID("00000000-0000-0000-0000-000000000002")
@@ -354,6 +356,7 @@ def reconstruction_api(
     monkeypatch.setattr(workflow_common, "WORKFLOW_DATA_DIRECTORY", tmp_path)
     monkeypatch.setattr(config, "TUSD_UPLOAD_DIR", str(tus_dir))
     monkeypatch.setattr(config, "DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(config, "TUSD_HOOK_SECRET", "test-hook-secret")
 
     async def prepare_database() -> None:
         async with engine.begin() as connection:
@@ -389,6 +392,7 @@ def reconstruction_api(
     app = FastAPI()
     app.state.upload_database = engine
     app.include_router(building_views.router, prefix="/buildings")
+    app.include_router(tus_views.router, prefix="/tus")
     app.include_router(
         reconstruction_views.router,
         prefix="/buildings/{building_id}/reconstructions",
@@ -498,6 +502,216 @@ def _from_upload_url(building_id: UUID, new_building: bool) -> str:
     return f"/buildings/{building_id}/reconstructions/from-upload"
 
 
+def _finish_upload(client: TestClient, upload_id: UUID):
+    return client.post(
+        "/tus/hooks",
+        headers={TUS_HOOK_SECRET_HEADER: "test-hook-secret"},
+        json={
+            "Type": "pre-finish",
+            "Event": {
+                "HTTPRequest": {"Header": {}},
+                "Upload": {
+                    "ID": upload_id.hex,
+                    "Size": len(b"stored video bytes"),
+                    "Offset": len(b"stored video bytes"),
+                    "MetaData": {"filename": "stored.mp4"},
+                },
+            },
+        },
+    )
+
+
+@pytest.mark.parametrize("new_building", [False, True])
+@pytest.mark.parametrize("resumable", [False, True])
+def test_pending_upload_submission_persists_without_scheduling(
+    reconstruction_api: tuple[TestClient, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+    new_building: bool,
+    resumable: bool,
+) -> None:
+    client, building_id = reconstruction_api
+    upload_id, path = _seed_stored_upload(client, status=UploadStatus.PENDING)
+    path.unlink()  # Pending submissions must not require completed bytes.
+
+    async def unexpected_schedule(**kwargs: object) -> UUID:
+        pytest.fail("A pending upload must not start a workflow")
+
+    monkeypatch.setattr(
+        splat_workflow, "schedule_splat_generation_from_tus", unexpected_schedule
+    )
+    url = _from_upload_url(building_id, new_building)
+    if resumable:
+        url = url.removesuffix("from-upload") + "resumable"
+    response = client.post(
+        url,
+        json={
+            "tus_upload_id" if resumable else "upload_id": str(upload_id),
+            "building": {"name": "Waiting building"},
+            "settings": {"ffmpeg": {"fps": 4}},
+        },
+    )
+    assert response.status_code == 202
+    body = response.json()
+    row = body["reconstruction"] if new_building else body
+    assert row["status"] == "waiting_for_upload"
+    assert row["upload_id"] == str(upload_id)
+    assert row["settings"]["ffmpeg"]["fps"] == 4
+    assert row["progress"] == 0
+    for field in ("prefect_workflow_id", "workspace_directory", "input_video_path"):
+        assert row[field] is None
+    destination = row["building_id"]
+    assert client.get(f"/buildings/{destination}/reconstructions").json() == [row]
+    assert (
+        client.get(
+            f"/buildings/{destination}/reconstructions/{row['id']}/current-step"
+        ).json()
+        is None
+    )
+    assert (
+        client.get(
+            f"/buildings/{destination}/reconstructions/{row['id']}/logs"
+        ).status_code
+        == 409
+    )
+
+
+@pytest.mark.parametrize("fail_first", [False, True])
+def test_completion_dispatches_all_waiting_settings_and_skips_repeated_hooks(
+    reconstruction_api: tuple[TestClient, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+    fail_first: bool,
+) -> None:
+    client, building_id = reconstruction_api
+    upload_id, path = _seed_stored_upload(client, status=UploadStatus.PENDING)
+    rows = []
+    for fps in (3, 5):
+        response = client.post(
+            _from_upload_url(building_id, new_building=True),
+            json={"upload_id": str(upload_id), "settings": {"ffmpeg": {"fps": fps}}},
+        )
+        assert response.status_code == 202
+        rows.append(response.json()["reconstruction"])
+
+    calls = []
+
+    async def schedule(**kwargs):
+        calls.append(kwargs)
+        assert kwargs["tus_upload_path"] == str(path)
+        assert path.read_bytes() == b"stored video bytes"
+        assert kwargs["owner_id"] == USER_ID
+        if fail_first and kwargs["settings"].ffmpeg.fps == 3:
+            raise RuntimeError("Scheduler unavailable")
+        return uuid4()
+
+    monkeypatch.setattr(splat_workflow, "schedule_splat_generation_from_tus", schedule)
+    assert _finish_upload(client, upload_id).status_code == 200
+    assert _finish_upload(client, upload_id).status_code == 200
+    assert len(calls) == 2
+    assert {call["reconstruction_id"] for call in calls} == {
+        UUID(row["id"]) for row in rows
+    }
+    assert [call["settings"].ffmpeg.fps for call in calls] == [3, 5]
+    for index, row in enumerate(rows):
+        saved = client.get(
+            f"/buildings/{row['building_id']}/reconstructions/{row['id']}"
+        ).json()
+        failed = fail_first and index == 0
+        assert saved["status"] == ("failed" if failed else "scheduled")
+        assert (saved["prefect_workflow_id"] is None) == failed
+        if failed:
+            assert saved["error_message"] == "RuntimeError: Scheduler unavailable"
+
+
+@pytest.mark.parametrize("action", ["cancel", "delete", "delete_building"])
+def test_waiting_reconstruction_can_be_cancelled_or_deleted_before_completion(
+    reconstruction_api: tuple[TestClient, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+) -> None:
+    client, building_id = reconstruction_api
+    upload_id, _ = _seed_stored_upload(client, status=UploadStatus.PENDING)
+    row = client.post(
+        _from_upload_url(building_id, False), json={"upload_id": str(upload_id)}
+    ).json()
+    url = f"/buildings/{building_id}/reconstructions/{row['id']}"
+
+    async def unexpected_call(*args: object, **kwargs: object):
+        pytest.fail("Waiting reconstructions must not contact Prefect")
+
+    monkeypatch.setattr(workflow_common, "cancel_workflow", unexpected_call)
+    monkeypatch.setattr(
+        splat_workflow, "schedule_splat_generation_from_tus", unexpected_call
+    )
+    if action == "cancel":
+        response = client.post(f"{url}/cancel")
+        assert response.status_code == 202
+        assert response.json()["status"] == "cancelled"
+        assert response.json()["prefect_workflow_id"] is None
+    else:
+        target = f"/buildings/{building_id}" if action == "delete_building" else url
+        assert client.delete(target).status_code == 204
+    assert _finish_upload(client, upload_id).status_code == 200
+    if action == "cancel":
+        assert client.get(url).json()["status"] == "cancelled"
+    else:
+        assert client.get(url).status_code == 404
+
+
+def test_cancel_refreshes_when_completion_claimed_the_waiting_row(
+    reconstruction_api: tuple[TestClient, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, building_id = reconstruction_api
+    upload_id, _ = _seed_stored_upload(client, status=UploadStatus.PENDING)
+    row = client.post(
+        _from_upload_url(building_id, False), json={"upload_id": str(upload_id)}
+    ).json()
+    original_cancel = ReconstructionService.cancel_waiting
+    cancelled_workflows = []
+
+    async def complete_before_cancel(service, reconstruction_id):
+        from api.services.uploads import UserUploadsService
+
+        await UserUploadsService(service._session).complete(upload_id)
+        await service.schedule_waiting_for_upload(upload_id)
+        return await original_cancel(service, reconstruction_id)
+
+    async def cancel_workflow(workflow_id):
+        cancelled_workflows.append(workflow_id)
+
+    monkeypatch.setattr(ReconstructionService, "cancel_waiting", complete_before_cancel)
+    monkeypatch.setattr(reconstruction_views, "cancel_workflow", cancel_workflow)
+    response = client.post(
+        f"/buildings/{building_id}/reconstructions/{row['id']}/cancel"
+    )
+    assert response.status_code == 202
+    assert response.json()["status"] == "cancelled"
+    assert cancelled_workflows == [WORKFLOW_ID]
+
+
+def test_completion_dispatch_database_error_keeps_hook_failure_response(
+    reconstruction_api: tuple[TestClient, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, building_id = reconstruction_api
+    upload_id, _ = _seed_stored_upload(client, status=UploadStatus.PENDING)
+    row = client.post(
+        _from_upload_url(building_id, False), json={"upload_id": str(upload_id)}
+    ).json()
+
+    async def fail_claim(*args, **kwargs):
+        raise OperationalError("UPDATE", {}, RuntimeError("Database unavailable"))
+
+    with monkeypatch.context() as patches:
+        patches.setattr(ReconstructionService, "_transition_waiting", fail_claim)
+        response = _finish_upload(client, upload_id)
+    assert response.status_code == 500
+    url = f"/buildings/{building_id}/reconstructions/{row['id']}"
+    assert client.get(url).json()["status"] == "waiting_for_upload"
+    assert _finish_upload(client, upload_id).status_code == 200
+    assert client.get(url).json()["status"] == "scheduled"
+
+
 @pytest.mark.parametrize("new_building", [False, True])
 def test_reconstruction_from_stored_upload_is_reusable(
     reconstruction_api: tuple[TestClient, UUID],
@@ -550,7 +764,7 @@ def test_reconstruction_from_stored_upload_is_reusable(
     [
         ("unknown", 404),
         ("foreign", 404),
-        ("pending", 409),
+        ("foreign_pending", 404),
         ("failed", 409),
         ("missing_file", 503),
         ("invalid_id", 422),
@@ -567,9 +781,11 @@ def test_reconstruction_from_upload_rejects_before_creating_rows(
     client, building_id = reconstruction_api
     upload_id, path = _seed_stored_upload(
         client,
-        user_id=OTHER_USER_ID if case == "foreign" else USER_ID,
-        status=UploadStatus(case)
-        if case in {"pending", "failed"}
+        user_id=OTHER_USER_ID if case in {"foreign", "foreign_pending"} else USER_ID,
+        status=UploadStatus.PENDING
+        if case == "foreign_pending"
+        else UploadStatus.FAILED
+        if case == "failed"
         else UploadStatus.UPLOADED,
     )
     payload: dict = {"upload_id": str(upload_id)}

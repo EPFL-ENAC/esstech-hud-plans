@@ -108,7 +108,7 @@ async def create_building(
         404: {
             "description": "The upload is not owned by the submitting user or is unknown."
         },
-        409: {"description": "The upload has not completed."},
+        409: {"description": "The upload has failed."},
         422: {"description": "Missing fields or invalid building/workflow settings."},
         503: {
             "model": BuildingFromReconstructionError,
@@ -129,8 +129,7 @@ async def create_building_from_reconstruction_resumable(
     ],
     uploads: Annotated[UserUploadsService, Depends(get_uploads_service)],
 ) -> BuildingFromReconstructionRead:
-    """Create an owned building, then submit its first reconstruction from a
-    completed tus upload."""
+    """Create a building and reconstruction from a pending or completed tus upload."""
     upload = await validate_tus_upload(
         payload.tus_upload_id,
         user_id=current_user.id,
@@ -147,10 +146,9 @@ async def create_building_from_reconstruction_resumable(
     # Keep response data available even if reconstruction rollback expires ORM rows.
     building_read = BuildingRead.model_validate(created_building)
     try:
-        reconstruction = await reconstructions.create_from_tus(
+        reconstruction = await reconstructions.create_from_upload(
             building=created_building,
-            tus_upload_path=upload.file_path,
-            tus_video_filename=upload.filename,
+            upload=upload,
             settings=payload.settings,
         )
     except ReconstructionCreationError as exc:
@@ -185,7 +183,7 @@ async def create_building_from_reconstruction_resumable(
     responses={
         401: {"description": "Authentication is required."},
         404: {"description": "The upload is unknown or belongs to another user."},
-        409: {"description": "The upload has not completed."},
+        409: {"description": "The upload has failed."},
         422: {"description": "Invalid upload ID, building, or workflow settings."},
         503: {"model": BuildingFromReconstructionError},
     },
@@ -200,7 +198,7 @@ async def create_building_from_reconstruction_upload(
     ],
     uploads: Annotated[UserUploadsService, Depends(get_uploads_service)],
 ) -> BuildingFromReconstructionRead:
-    """Create a building and its first reconstruction from a stored user upload."""
+    """Create a building and reconstruction from a pending or completed upload."""
 
     upload = await validate_user_upload(
         payload.upload_id,

@@ -1,4 +1,5 @@
 import importlib.util
+from io import StringIO
 from pathlib import Path
 from types import ModuleType
 
@@ -17,6 +18,26 @@ def _load_revision(filename: str) -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_pending_upload_migration_generates_reversible_postgres_constraints() -> None:
+    revision = _load_revision(
+        "2026_10_18_2201-45148aa70325_support_pending_upload_reconstructions.py"
+    )
+    output = StringIO()
+    context = MigrationContext.configure(
+        dialect_name="postgresql", opts={"as_sql": True, "output_buffer": output}
+    )
+    with Operations.context(context):
+        revision.upgrade()
+        revision.downgrade()
+    sql = output.getvalue()
+    assert "ADD COLUMN upload_id UUID" in sql
+    assert "CREATE INDEX ix_reconstructions_upload_id" in sql
+    assert "ON DELETE SET NULL" in sql
+    assert "waiting_for_upload" in sql
+    assert "DROP CONSTRAINT fk_reconstructions_upload_id" in sql
+    assert "DROP COLUMN upload_id" in sql
 
 
 def test_application_migrations_preserve_parent_and_unmanaged_tables() -> None:

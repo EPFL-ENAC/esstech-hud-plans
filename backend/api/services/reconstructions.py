@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import builtins
 import logging
 from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
+from sqlalchemy import update
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 from starlette.concurrency import run_in_threadpool
@@ -19,7 +21,7 @@ from api.models.reconstruction import (
     ReconstructionArtifactUpdate,
     ReconstructionStatus,
 )
-from api.models.uploads import UserUploads
+from api.models.uploads import UploadStatus, UserUploads
 from api.models.user import utc_now
 from api.models.workflows import SplatGenerationWorkflowSettings
 
@@ -90,7 +92,7 @@ class ReconstructionService:
         offset: int = 0,
         limit: int = 100,
         sort_order: SortOrder = "desc",
-    ) -> list[Reconstruction]:
+    ) -> builtins.list[Reconstruction]:
         if offset < 0:
             raise ValueError("offset must be non-negative")
         if not 1 <= limit <= 100:
@@ -120,36 +122,111 @@ class ReconstructionService:
         upload: UserUploads,
         settings: SplatGenerationWorkflowSettings,
     ) -> Reconstruction:
-        """Schedule a reconstruction while preserving the reusable source upload."""
-
-        return await self.create_from_tus(
-            building=building,
-            tus_upload_path=upload.file_path,
-            tus_video_filename=upload.filename,
-            settings=settings,
-        )
-
-    async def create_from_tus(
-        self,
-        *,
-        building: Building,
-        tus_upload_path: str,
-        tus_video_filename: str,
-        settings: SplatGenerationWorkflowSettings,
-    ) -> Reconstruction:
-        """Schedule the reconstruction of a video uploaded through tus.
-
-        The video already lives in permanent upload storage; no bytes are
-        copied at submission time. The flow's first task copies it into the
-        artifact layout and preserves the upload original.
-        """
+        """Persist a reconstruction, then schedule it if its upload is ready."""
 
         reconstruction = Reconstruction(
             building_id=building.id,
+            upload_id=upload.id,
+            status=ReconstructionStatus.WAITING_FOR_UPLOAD,
             settings=settings.model_dump(mode="json"),
         )
         self._session.add(reconstruction)
         await self._commit_and_refresh(reconstruction)
+
+        # Publish the waiting row before rereading readiness. If completion's
+        # scan missed this row, this read will observe the completed upload.
+        return await self._schedule_if_ready(reconstruction.id)
+
+    async def schedule_waiting_for_upload(self, upload_id: UUID) -> None:
+        """Dispatch waiting rows independently after upload persistence succeeds."""
+
+        result = await self._session.exec(
+            select(Reconstruction.id)
+            .where(
+                Reconstruction.upload_id == upload_id,
+                Reconstruction.status == ReconstructionStatus.WAITING_FOR_UPLOAD,
+            )
+            .order_by(col(Reconstruction.created_at), col(Reconstruction.id))
+        )
+        for reconstruction_id in result.all():
+            try:
+                await self._schedule_if_ready(reconstruction_id)
+            except ReconstructionNotFoundError:
+                # A waiting row may have been deleted after the scan.
+                continue
+            except ReconstructionSchedulingError:
+                # The existing scheduling path records the failure on this row.
+                # A failed reconstruction must not reject a completed upload.
+                logger.exception(
+                    "Failed to schedule reconstruction %s after upload %s",
+                    reconstruction_id,
+                    upload_id,
+                )
+
+    async def cancel_waiting(self, reconstruction_id: UUID) -> Reconstruction:
+        """Cancel only while waiting; otherwise return the freshly read row."""
+
+        await self._transition_waiting(
+            reconstruction_id,
+            ReconstructionStatus.CANCELLED,
+            error_message="Cancellation requested",
+        )
+        return await self._get_or_raise(reconstruction_id)
+
+    async def _transition_waiting(
+        self,
+        reconstruction_id: UUID,
+        status: ReconstructionStatus,
+        *,
+        error_message: str | None = None,
+    ) -> bool:
+        """Commit an atomic claim shared by scheduling and cancellation."""
+
+        try:
+            result = await self._session.exec(
+                update(Reconstruction)
+                .where(
+                    col(Reconstruction.id) == reconstruction_id,
+                    col(Reconstruction.status)
+                    == ReconstructionStatus.WAITING_FOR_UPLOAD,
+                )
+                .values(
+                    status=status,
+                    error_message=error_message,
+                    updated_at=utc_now(),
+                )
+                .returning(col(Reconstruction.id))
+                .execution_options(synchronize_session=False)
+            )
+            changed = result.scalar_one_or_none() is not None
+            await self._session.commit()
+            return changed
+        except Exception:
+            await self._session.rollback()
+            raise
+
+    async def _schedule_if_ready(
+        self,
+        reconstruction_id: UUID,
+    ) -> Reconstruction:
+        reconstruction = await self._get_or_raise(reconstruction_id)
+        if reconstruction.status != ReconstructionStatus.WAITING_FOR_UPLOAD:
+            return reconstruction
+
+        result = await self._session.exec(
+            select(UserUploads)
+            .where(UserUploads.id == reconstruction.upload_id)
+            .execution_options(populate_existing=True)
+        )
+        upload = result.first()
+        if upload is None or upload.status != UploadStatus.UPLOADED:
+            return reconstruction
+
+        if not await self._transition_waiting(
+            reconstruction.id,
+            ReconstructionStatus.PREPARING,
+        ):
+            return await self._get_or_raise(reconstruction.id)
 
         # Imports stay local so the Prefect flow can call this service to publish
         # lifecycle updates without creating a module import cycle.
@@ -158,9 +235,7 @@ class ReconstructionService:
             schedule_splat_generation_from_tus,
         )
 
-        video_format = (
-            Path(tus_video_filename).suffix.removeprefix(".").lower() or "mp4"
-        )
+        video_format = Path(upload.filename).suffix.removeprefix(".").lower() or "mp4"
         artifact = SplatGenerationArtifact(
             reconstruction.id,
             workflow_common.WORKFLOW_DATA_DIRECTORY,
@@ -179,10 +254,12 @@ class ReconstructionService:
         try:
             workflow_id = await schedule_splat_generation_from_tus(
                 artifact=artifact,
-                tus_upload_path=tus_upload_path,
-                tus_video_filename=tus_video_filename,
-                settings=settings,
-                owner_id=building.user_id,
+                tus_upload_path=upload.file_path,
+                tus_video_filename=upload.filename,
+                settings=SplatGenerationWorkflowSettings.model_validate(
+                    reconstruction.settings
+                ),
+                owner_id=upload.user_id,
                 reconstruction_id=reconstruction.id,
             )
         except Exception as exc:
@@ -370,10 +447,14 @@ class ReconstructionService:
             return fallback
 
     async def _get_or_raise(self, reconstruction_id: UUID) -> Reconstruction:
-        reconstruction = await self._session.get(Reconstruction, reconstruction_id)
+        result = await self._session.exec(
+            select(Reconstruction)
+            .where(Reconstruction.id == reconstruction_id)
+            .execution_options(populate_existing=True)
+        )
+        reconstruction = result.first()
         if reconstruction is None:
             raise ReconstructionNotFoundError
-        await self._session.refresh(reconstruction)
         return reconstruction
 
     async def _save(self, reconstruction: Reconstruction) -> Reconstruction:

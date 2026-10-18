@@ -22,6 +22,7 @@ from api.lib.tus import (
 )
 from api.models.uploads import UserUploadCreate, UserUploads
 from api.services.auth import authenticate_user
+from api.services.reconstructions import ReconstructionService
 from api.services.uploads import (
     UploadConflictError,
     UploadNotFoundError,
@@ -98,7 +99,8 @@ async def handle_pre_finish(
     session: AsyncSession,
 ) -> dict[str, Any]:
     await validate_completion(event, session)
-    await UserUploadsService(session).complete(event.upload_id)
+    upload = await UserUploadsService(session).complete(event.upload_id)
+    await ReconstructionService(session).schedule_waiting_for_upload(upload.id)
     return {}
 
 

@@ -484,7 +484,7 @@ def test_permanent_upload_can_be_submitted_twice(
 
 
 @pytest.mark.parametrize("new_building", [False, True])
-@pytest.mark.parametrize("case", ["unknown", "unowned", "pending", "failed", "missing"])
+@pytest.mark.parametrize("case", ["unknown", "unowned", "failed", "missing"])
 def test_reconstruction_rejects_unavailable_upload_before_creating_records(
     tus_api: tuple[TestClient, UUID, Path],
     new_building: bool,
@@ -561,7 +561,7 @@ def test_resumable_building_from_reconstruction_creates_linked_records(
     assert body["reconstruction"]["status"] == "scheduled"
 
 
-def test_resumable_submission_rejects_incomplete_upload(
+def test_resumable_submission_waits_for_incomplete_upload(
     tus_api: tuple[TestClient, UUID, Path],
 ) -> None:
     client, building_id, tus_dir = tus_api
@@ -574,8 +574,12 @@ def test_resumable_submission_rejects_incomplete_upload(
         json={"tus_upload_id": upload_id, "settings": {}},
     )
 
-    assert response.status_code == 409
-    assert client.get(f"/buildings/{building_id}/reconstructions").json() == []
+    assert response.status_code == 202
+    assert response.json()["status"] == "waiting_for_upload"
+    assert response.json()["prefect_workflow_id"] is None
+    assert client.get(f"/buildings/{building_id}/reconstructions").json() == [
+        response.json()
+    ]
 
 
 def test_resumable_submission_maps_scheduling_failure_to_503(

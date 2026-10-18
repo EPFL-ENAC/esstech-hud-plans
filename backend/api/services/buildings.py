@@ -23,6 +23,7 @@ SortOrder = Literal["asc", "desc"]
 ReconstructionStatusFilter = Literal["processing", "idle"]
 
 ACTIVE_RECONSTRUCTION_STATUSES = (
+    ReconstructionStatus.WAITING_FOR_UPLOAD,
     ReconstructionStatus.PREPARING,
     ReconstructionStatus.SCHEDULED,
     ReconstructionStatus.RUNNING,
@@ -81,7 +82,9 @@ class BuildingService:
         )
         statement = (
             select(Building, Reconstruction)
-            .outerjoin(Reconstruction, Reconstruction.id == latest_reconstruction_id)
+            .outerjoin(
+                Reconstruction, col(Reconstruction.id) == latest_reconstruction_id
+            )
             .where(Building.user_id == user_id)
         )
         if reconstruction_status is not None:
