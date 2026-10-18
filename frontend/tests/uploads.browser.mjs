@@ -125,6 +125,7 @@ try {
                                 email: 'tester@example.test',
                                 created_at: '2026-10-14T10:00:00Z',
                                 updated_at: '2026-10-14T10:00:00Z',
+                                terms_accepted: true,
                             },
                         });
                     }

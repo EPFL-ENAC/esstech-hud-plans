@@ -356,3 +356,38 @@ test('a newly created upload reserves its URL and reports availability once per 
     f.uploads[1].options.onSuccess();
     await Promise.all([first, second]);
 });
+
+for (const resumed of [false, true]) {
+    test(`availability delivers the ID before completion (resumed: ${resumed})`, async (t) => {
+        const f = await fixture(t);
+        const available = [];
+        let complete = false;
+        const promise = f.upload({ onUploadAvailable: (id) => available.push(id) });
+        void promise.then(() => {
+            complete = true;
+        });
+        f.lookup.resolve(resumed ? [{ uploadUrl: 'https://hud.test/tus/files/upload-id' }] : []);
+        await nextTurn();
+        f.uploads[0].options.onUploadUrlAvailable();
+        assert.deepEqual(available, ['upload-id']);
+        assert.equal(complete, false);
+        f.uploads[0].options.onSuccess();
+        assert.deepEqual(await promise, { uploadId: 'upload-id', resumed });
+    });
+}
+
+for (const url of [null, 'https://hud.test/tus/files/']) {
+    test(`availability rejects a missing ID (${url}) without reporting it`, async (t) => {
+        const f = await fixture(t);
+        const available = [];
+        const promise = f.upload({ onUploadAvailable: (id) => available.push(id) });
+        const failure = assert.rejects(promise, { message: 'Upload has no location ID' });
+        f.lookup.resolve([]);
+        await nextTurn();
+        f.uploads[0].url = url;
+        f.uploads[0].options.onUploadUrlAvailable();
+        await failure;
+        assert.deepEqual(available, []);
+        assert.deepEqual(f.uploads[0].aborts, [false]);
+    });
+}

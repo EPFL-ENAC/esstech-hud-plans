@@ -50,110 +50,42 @@
             />
         </section>
 
-        <section class="q-mb-xl">
-            <h2 class="text-h6 text-weight-bold">{{ t('capture.destinationBuilding') }}</h2>
-            <building-picker
-                v-model="buildingSelection"
-                :disable="submitting || destinationBuildingId !== null"
-                class="q-mb-md"
-                @valid="hasValidBuilding = $event"
-            />
-        </section>
-
-        <section class="q-mb-xl">
-            <h2 class="text-h6 text-weight-bold">{{ t('capture.reconstructionSettings') }}</h2>
-            <q-select
-                v-model="preset"
-                outlined
-                :options="presetOptions"
-                emit-value
-                map-options
-                :label="t('capture.preset')"
-                class="q-mb-xl"
-            />
-            <section
-                v-if="preset === 'advanced'"
-                class="q-mb-xl"
-                :aria-label="t('capture.advancedSettings')"
-            >
-                <reconstruction-settings v-model="advancedSettings" />
-                <p v-if="!hasValidSettings" class="text-negative q-mt-md" role="alert">
-                    {{ t('capture.invalidSettings') }}
-                </p>
-            </section>
-            <q-banner v-if="submissionError" class="bg-red-1 text-negative q-mb-md" role="alert">
-                {{ submissionError }}
-                <template v-if="destinationBuildingId" #action>
-                    <q-btn
-                        flat
-                        no-caps
-                        :label="t('buildings.view')"
-                        @click="openBuilding(destinationBuildingId)"
-                    />
-                </template>
-            </q-banner>
-        </section>
-
-        <video-upload-progress
-            v-if="submissionState.phase !== 'idle'"
-            :state="submissionState"
-            class="q-mb-md"
-        />
-
-        <q-btn
-            :label="t('capture.startProcessing')"
-            color="primary"
-            class="full-width"
-            unelevated
-            no-caps
-            :loading="submitting"
-            :disable="!canSubmit"
-            @click="startProcessing"
+        <q-banner v-if="navigationError" class="bg-red-1 text-negative q-mb-md" role="alert">
+            {{ navigationError }}
+        </q-banner>
+        <reconstruction-form
+            ref="form"
+            v-model:building-selection="buildingSelection"
+            v-model:preset="preset"
+            v-model:advanced-settings="advancedSettings"
+            :source="source"
+            :disabled="openingRecorder"
         />
     </q-page>
 </template>
 
 <script setup lang="ts">
 import PageHeader from 'src/components/PageHeader.vue';
-import { computed, ref, shallowRef, watch } from 'vue';
+import { computed, ref, shallowRef, useTemplateRef, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { useQuasar } from 'quasar';
-import { useSubmitReconstructionMutation } from 'src/mutations/reconstructions';
 import { makeEmptyCaptureDraft, useCaptureStore } from 'src/stores/capture';
-import { useUiStore } from 'src/stores/ui';
-import VideoUploadProgress from 'src/components/VideoUploadProgress.vue';
 import FilePickerButton from 'src/components/FilePickerButton.vue';
 import VideoPreview from 'src/components/VideoPreview.vue';
 import UploadedVideoDetails from 'src/components/UploadedVideoDetails.vue';
 import UploadedVideoPickerDialog from 'src/components/UploadedVideoPickerDialog.vue';
 import type { VideoMetadata } from 'src/components/VideoPreview.types';
-import BuildingPicker from 'src/components/BuildingPicker.vue';
-import type { BuildingSelection, ReconstructionSubmission } from 'src/lib/buildings';
+import type { BuildingSelection, ReconstructionSource } from 'src/lib/buildings';
 import type { UserUpload } from 'src/lib/uploads';
-import ReconstructionSettings from 'src/components/ReconstructionSettings.vue';
-import {
-    type ReconstructionPreset,
-    isValidReconstructionSettings,
-    makeDefaultReconstructionSettings,
-    toSplatGenerationSettings,
-} from 'src/lib/reconstruction-settings';
+import type { ReconstructionPreset } from 'src/lib/reconstruction-settings';
+import ReconstructionForm from 'src/components/ReconstructionForm.vue';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
 
 const router = useRouter();
 const route = useRoute();
-const ui = useUiStore();
-const $q = useQuasar();
-const {
-    mutateAsync: submitReconstruction,
-    isLoading: submitting,
-    submissionState,
-    destinationBuildingId,
-    errorMessage: mutationError,
-} = useSubmitReconstructionMutation();
 const navigationError = ref('');
-const submissionError = computed(() => navigationError.value || mutationError.value);
+const form = useTemplateRef<InstanceType<typeof ReconstructionForm>>('form');
 
 const captureStore = useCaptureStore();
 const savedDraft = captureStore.takeDraft();
@@ -177,7 +109,6 @@ function defaultBuildingSelection(): BuildingSelection {
 const buildingSelection = ref<BuildingSelection>(
     hasMatchingDraft ? draft.buildingSelection : defaultBuildingSelection(),
 );
-const hasValidBuilding = ref(false);
 watch(
     () => route.query.buildingId,
     () => {
@@ -186,15 +117,7 @@ watch(
 );
 
 const preset = ref<ReconstructionPreset>(draft.preset);
-const presetOptions = computed(() => [
-    { value: 'indoors', label: t('capture.presets.indoors') },
-    { value: 'outdoors', label: t('capture.presets.outdoors') },
-    { value: 'advanced', label: t('capture.presets.advanced') },
-]);
 const advancedSettings = ref(draft.advancedSettings);
-const hasValidSettings = computed(
-    () => preset.value !== 'advanced' || isValidReconstructionSettings(advancedSettings.value),
-);
 const videoFile = ref<File | null>(draft.videoFile);
 const selectedUpload = ref<UserUpload | null>(draft.selectedUpload);
 const pickerOpen = ref(false);
@@ -214,16 +137,13 @@ watch(
 const videoMetadata = ref<VideoMetadata | null>(null);
 const openingRecorder = ref(false);
 const sourceSelectionDisabled = computed(
-    () => openingRecorder.value || submitting.value || destinationBuildingId.value !== null,
+    () => openingRecorder.value || form.value?.locked === true,
 );
-const canSubmit = computed(
-    () =>
-        !sourceSelectionDisabled.value &&
-        (selectedUpload.value !== null ||
-            (videoFile.value !== null && videoMetadata.value !== null)) &&
-        hasValidSettings.value &&
-        hasValidBuilding.value,
-);
+const source = computed<ReconstructionSource | null>(() => {
+    if (selectedUpload.value) return { uploadId: selectedUpload.value.id };
+    if (videoFile.value && videoMetadata.value) return { video: videoFile.value };
+    return null;
+});
 
 function selectUpload(upload: UserUpload): void {
     if (sourceSelectionDisabled.value) return;
@@ -255,49 +175,6 @@ async function openRecorder(): Promise<void> {
         navigationError.value = t('capture.record.openFailed');
     } finally {
         openingRecorder.value = false;
-    }
-}
-
-async function startProcessing(): Promise<void> {
-    if (!canSubmit.value) return;
-
-    const settings = toSplatGenerationSettings(
-        preset.value === 'advanced'
-            ? advancedSettings.value
-            : makeDefaultReconstructionSettings(preset.value),
-    );
-    let submission: ReconstructionSubmission;
-    if (selectedUpload.value) {
-        submission = { uploadId: selectedUpload.value.id, settings };
-    } else if (videoFile.value) {
-        submission = { video: videoFile.value, settings };
-    } else {
-        return;
-    }
-    navigationError.value = '';
-    // Colada exposes submission errors through mutationError, including retained IDs.
-    await submitReconstruction({ ...submission, ...buildingSelection.value }).catch(
-        () => undefined,
-    );
-
-    if (destinationBuildingId.value === null) return;
-    $q.notify({
-        type: mutationError.value ? 'negative' : 'positive',
-        message: mutationError.value || t('reconstructions.submitted'),
-        position: 'top',
-    });
-    await openBuilding(destinationBuildingId.value);
-}
-
-async function openBuilding(buildingId: string): Promise<void> {
-    ui.setBackground('library');
-    try {
-        const failure = await router.push(`/building/${encodeURIComponent(buildingId)}`);
-        if (failure) {
-            navigationError.value = t('buildings.savedNavigationFailed');
-        }
-    } catch {
-        navigationError.value = t('buildings.savedNavigationFailed');
     }
 }
 </script>

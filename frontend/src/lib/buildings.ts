@@ -71,6 +71,7 @@ export interface BuildingLocation {
 }
 
 export type ReconstructionStatus =
+    | 'waiting_for_upload'
     | 'preparing'
     | 'scheduled'
     | 'running'
@@ -151,9 +152,11 @@ export interface Reconstruction {
     updated_at: string;
 }
 
-export type ReconstructionSubmission =
-    | { video: File; settings: SplatGenerationSettings }
-    | { uploadId: string; settings: SplatGenerationSettings };
+export type ReconstructionSource = { video: File } | { uploadId: string };
+
+export type ReconstructionSubmission = ReconstructionSource & {
+    settings: SplatGenerationSettings;
+};
 
 export function getCurrentUser(): Promise<CurrentUser> {
     return requestJson('/user/me');

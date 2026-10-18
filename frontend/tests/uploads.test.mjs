@@ -53,6 +53,9 @@ async function fixture(t, initialSubject = 'user-a') {
                 scope.run(() => queries.useUploadedVideosQuery(offset, open)),
             );
         },
+        uploadQuery(uploadId) {
+            return app.runWithContext(() => scope.run(() => queries.useUploadQuery(uploadId)));
+        },
     };
 }
 
@@ -89,6 +92,72 @@ test('listUploads preserves explicit offset, limit, and ordering', async (t) => 
     );
     respond(f.requests[0], []);
     assert.deepEqual(await promise, []);
+});
+
+test('getUpload encodes the ID and uses the authenticated detail endpoint', async (t) => {
+    const f = await fixture(t);
+    const promise = f.uploads.getUpload('video/with spaces');
+    assert.equal(f.requests[0].url, 'https://hud.test/api/uploads/video%2Fwith%20spaces');
+    const upload = rows('detail')[0];
+    respond(f.requests[0], upload);
+    assert.deepEqual(await promise, upload);
+});
+
+test('upload detail queries follow ID changes without exposing the previous upload', async (t) => {
+    const f = await fixture(t);
+    const id = ref('first');
+    const query = f.uploadQuery(id);
+    respond(f.requests[0], rows('first')[0]);
+    await nextTurn();
+    assert.equal(query.data.value.id, 'first-0');
+    id.value = 'second';
+    await nextTick();
+    assert.equal(query.data.value, undefined);
+    assert.equal(f.requests[1].url, 'https://hud.test/api/uploads/second');
+    respond(f.requests[1], rows('second')[0]);
+    await nextTurn();
+    assert.equal(query.data.value.id, 'second-0');
+});
+
+test('upload details are cached separately for each account', async (t) => {
+    const f = await fixture(t);
+    const first = f.uploadQuery(ref('shared-id'));
+    respond(f.requests[0], rows('private-a')[0]);
+    await nextTurn();
+    f.setSubject('user-b');
+    const second = f.uploadQuery(ref('shared-id'));
+    assert.equal(second.data.value, undefined);
+    respond(f.requests[1], { detail: 'Not found' }, 404);
+    await nextTurn();
+    assert.equal(second.state.value.status, 'error');
+    assert.equal(second.data.value, undefined);
+    assert.equal(first.data.value.id, 'private-a-0');
+});
+
+test('detail refresh errors retain data and retry recovers its status', async (t) => {
+    const f = await fixture(t);
+    const query = f.uploadQuery(ref('pending'));
+    respond(f.requests[0], { ...rows('pending')[0], status: 'pending' });
+    await nextTurn();
+    const failed = query.refetch();
+    respond(f.requests[1], { detail: 'Unavailable' }, 503);
+    await failed;
+    assert.equal(query.state.value.status, 'error');
+    assert.equal(query.data.value.status, 'pending');
+    const retry = query.refetch();
+    respond(f.requests[2], { ...rows('pending')[0], status: 'uploaded' });
+    await retry;
+    assert.equal(query.state.value.status, 'success');
+    assert.equal(query.data.value.status, 'uploaded');
+});
+
+test('unauthenticated or empty-ID detail queries make no request', async (t) => {
+    const f = await fixture(t, null);
+    f.uploadQuery(ref('private'));
+    assert.equal(f.requests.length, 0);
+    f.setSubject('user-a');
+    f.uploadQuery(ref(''));
+    assert.equal(f.requests.length, 0);
 });
 
 for (const status of [401, 503]) {

@@ -61,7 +61,23 @@ async function fixture(t) {
 
 const file = { name: 'scan.mp4', size: 100 };
 
-test('upload mutation reports progress/resume and invalidates only its user upload lists', async (t) => {
+test('availability forwards the ID before transfer completion and still refreshes caches', async (t) => {
+    const f = await fixture(t);
+    const { mutation } = f.mutation();
+    const available = [];
+    const promise = mutation.mutateAsync({ file, onUploadAvailable: (id) => available.push(id) });
+    await nextTurn();
+    f.uploads[0].options.onUploadAvailable('pending-id');
+    assert.deepEqual(available, ['pending-id']);
+    assert.equal(f.invalidation.mock.callCount(), 1);
+    assert.equal(mutation.isLoading.value, true);
+    assert.equal(mutation.data.value, undefined);
+    f.uploads[0].gate.resolve({ uploadId: 'pending-id', resumed: false });
+    await promise;
+    assert.equal(f.invalidation.mock.callCount(), 2);
+});
+
+test('upload mutation reports progress/resume and invalidates only its user upload lists and details', async (t) => {
     const f = await fixture(t);
     const { mutation } = f.mutation();
     assert.equal(isReadonly(mutation.transferState), true);
@@ -78,9 +94,7 @@ test('upload mutation reports progress/resume and invalidates only its user uplo
         resumed: true,
     });
     upload.options.onUploadAvailable();
-    assert.deepEqual(f.invalidation.mock.calls[0].arguments, [
-        { key: ['uploads', 'user-a', 'list'] },
-    ]);
+    assert.deepEqual(f.invalidation.mock.calls[0].arguments, [{ key: ['uploads', 'user-a'] }]);
     upload.gate.resolve({ uploadId: 'uuid-hex', resumed: true });
     assert.deepEqual(await promise, { uploadId: 'uuid-hex', resumed: true });
     assert.equal(mutation.isLoading.value, false);

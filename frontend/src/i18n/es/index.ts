@@ -338,6 +338,17 @@ export default {
         },
     },
     reconstructions: {
+        fromUpload: {
+            openForm: 'Abrir el formulario de reconstrucción',
+            navigationFailed:
+                'No se pudo abrir el formulario de reconstrucción. Inténtalo de nuevo.',
+            pickerNavigationFailed:
+                'No se pudo abrir la selección de archivos. Inténtalo de nuevo.',
+            title: 'Elegir un archivo',
+            unavailable: 'Este archivo no está disponible o no tienes acceso a él.',
+            loadFailed: 'No se pudo cargar este archivo. Inténtalo de nuevo.',
+            failedUpload: 'La subida ha fallado y no se puede usar para una reconstrucción.',
+        },
         title: 'Reconstrucciones',
         new: 'Nueva reconstrucción',
         named: 'Reconstrucción {id}',
@@ -361,6 +372,7 @@ export default {
         pagination: 'Paginación de las reconstrucciones',
         noReconstruction: 'Aún no hay ninguna reconstrucción',
         status: {
+            waiting_for_upload: 'Esperando la subida',
             preparing: 'Preparando',
             scheduled: 'Programada',
             running: 'Procesando',

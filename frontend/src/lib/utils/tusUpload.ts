@@ -22,7 +22,8 @@ export interface ResumableUploadOptions {
     onProgress?: (progress: FetchProgress) => void;
     /** Called when a previously started upload is continued, before it starts. */
     onResumed?: () => void;
-    onUploadAvailable?: () => void;
+    /** Called after creation or validated resume, before the transfer completes. */
+    onUploadAvailable?: (uploadId: string) => void;
     signal?: AbortSignal;
     /** Scope resume records and requests to this account. */
     subject?: string;
@@ -129,8 +130,15 @@ export function uploadVideoResumable(
             },
             onUploadUrlAvailable: () => {
                 if (settled) return;
+                requireAccount();
+                const uploadId = upload.url?.split('/').pop() ?? '';
+                if (!uploadId) {
+                    finish(() => reject(new ApiError('Upload has no location ID', 0, null)));
+                    pause();
+                    return;
+                }
                 reserveUrl(upload.url);
-                opts.onUploadAvailable?.();
+                opts.onUploadAvailable?.(uploadId);
             },
             onProgress: (bytesSent, bytesTotal) => {
                 if (settled) return;

@@ -346,6 +346,17 @@ export default {
         },
     },
     reconstructions: {
+        fromUpload: {
+            openForm: 'Ouvrir le formulaire de reconstruction',
+            navigationFailed:
+                'Impossible d’ouvrir le formulaire de reconstruction. Veuillez réessayer.',
+            pickerNavigationFailed:
+                'Impossible d’ouvrir la sélection des envois. Veuillez réessayer.',
+            title: 'Choisir un envoi',
+            unavailable: 'Cet envoi est indisponible ou vous n’y avez pas accès.',
+            loadFailed: 'Impossible de charger cet envoi. Veuillez réessayer.',
+            failedUpload: 'Cet envoi a échoué et ne peut pas être utilisé pour une reconstruction.',
+        },
         title: 'Reconstructions',
         new: 'Nouvelle reconstruction',
         named: 'Reconstruction {id}',
@@ -369,6 +380,7 @@ export default {
         pagination: 'Pagination des reconstructions',
         noReconstruction: 'Aucune reconstruction pour le moment',
         status: {
+            waiting_for_upload: 'En attente de l’envoi',
             preparing: 'Préparation',
             scheduled: 'Planifiée',
             running: 'Traitement en cours',

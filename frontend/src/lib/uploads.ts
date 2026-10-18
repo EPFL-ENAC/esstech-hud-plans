@@ -21,6 +21,10 @@ export interface ListUploadsOptions {
     status?: UploadStatus;
 }
 
+export function getUpload(uploadId: string): Promise<UserUpload> {
+    return requestJson(`/uploads/${encodeURIComponent(uploadId)}`);
+}
+
 export function listUploads({
     offset = 0,
     limit = 100,

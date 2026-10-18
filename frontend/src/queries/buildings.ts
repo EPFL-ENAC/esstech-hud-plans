@@ -148,7 +148,12 @@ export function useMyBuildingsQuery(
             enabled.value &&
             query.data.value?.slice(0, MY_BUILDINGS_PAGE_SIZE).some((building) => {
                 const status = building.latest_reconstruction?.status;
-                return status === 'preparing' || status === 'scheduled' || status === 'running';
+                return (
+                    status === 'waiting_for_upload' ||
+                    status === 'preparing' ||
+                    status === 'scheduled' ||
+                    status === 'running'
+                );
             }) === true,
     );
     let pollingTimer: ReturnType<typeof setInterval> | undefined;

@@ -67,6 +67,7 @@
                         </template>
                         <div class="q-pa-md">
                             <reconstruction-video
+                                v-if="reconstruction.status !== 'waiting_for_upload'"
                                 :building-id="buildingId"
                                 :reconstruction-id="reconstruction.id"
                                 :active="expandedId === reconstruction.id"
@@ -317,7 +318,9 @@ function hasSplat(reconstruction: Reconstruction): boolean {
     return reconstruction.status === 'completed' && reconstruction.splat_path !== null;
 }
 function isProcessing(reconstruction: Reconstruction): boolean {
-    return ['preparing', 'scheduled', 'running'].includes(reconstruction.status);
+    return ['waiting_for_upload', 'preparing', 'scheduled', 'running'].includes(
+        reconstruction.status,
+    );
 }
 function chipReconstruction(reconstruction: Reconstruction): Reconstruction {
     // The optimistic state only applies while the backend still reports

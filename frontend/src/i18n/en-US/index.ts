@@ -327,6 +327,15 @@ export default {
         },
     },
     reconstructions: {
+        fromUpload: {
+            openForm: 'Open reconstruction form',
+            navigationFailed: 'Could not open the reconstruction form. Please try again.',
+            pickerNavigationFailed: 'Could not open upload selection. Please try again.',
+            title: 'Choose an upload',
+            unavailable: 'This upload is unavailable or you do not have access to it.',
+            loadFailed: 'Could not load this upload. Please try again.',
+            failedUpload: 'This upload failed and cannot be used for reconstruction.',
+        },
         title: 'Reconstructions',
         new: 'New reconstruction',
         named: 'Reconstruction {id}',
@@ -350,6 +359,7 @@ export default {
         pagination: 'Reconstruction pagination',
         noReconstruction: 'No reconstruction yet',
         status: {
+            waiting_for_upload: 'Waiting for upload',
             preparing: 'Preparing',
             scheduled: 'Scheduled',
             running: 'Processing',

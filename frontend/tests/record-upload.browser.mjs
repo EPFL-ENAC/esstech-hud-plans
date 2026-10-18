@@ -266,6 +266,8 @@ try {
                                 .$router;
                         return router.push('/capture?buildingId=existing');
                     });
+                    await page.locator('.reconstruction-form .q-select').nth(1).click();
+                    await page.getByRole('option').getByText('outdoors', { exact: true }).click();
                     await page.getByRole('button', { name: 'Take a Video', exact: true }).click();
                     await page.waitForURL('**/#/capture/record');
                     await page.waitForFunction(
@@ -276,6 +278,10 @@ try {
                     await page.waitForURL('**/#/capture?buildingId=existing');
                     await page.locator('video.video-preview').waitFor();
                     await page.getByText('Existing building', { exact: true }).waitFor();
+                    assert.match(
+                        await page.locator('.reconstruction-form .q-select').nth(1).innerText(),
+                        /outdoors/,
+                    );
                     assert.equal(rows.length, 2);
 
                     // A previous account's completed transfer cannot notify a new account.

@@ -1,9 +1,21 @@
 import { useQuery } from '@pinia/colada';
 import { computed, type Ref } from 'vue';
 import { getAuthSubject } from 'src/lib/auth';
-import { listUploads } from 'src/lib/uploads';
+import { getUpload, listUploads } from 'src/lib/uploads';
 
 export const MY_UPLOADS_PAGE_SIZE = 20;
+
+export function useUploadQuery(uploadId: Ref<string>) {
+    const subject = getAuthSubject();
+
+    return useQuery({
+        key: () => ['uploads', subject, 'detail', uploadId.value],
+        enabled: () => subject !== null && uploadId.value !== '',
+        query: () => getUpload(uploadId.value),
+        staleTime: 30_000,
+        refetchOnWindowFocus: true,
+    });
+}
 
 export function useMyUploadsQuery(offset: Ref<number>) {
     const subject = getAuthSubject();

@@ -5,6 +5,7 @@ Backend :
 - _splat_generation_parameters should be a proper dataclas with .from_xxx() methods
 - views/reconstruction_submissions.py doesn't have any endpoint and thus shouldn't be in /views/
 - Revisit tus cleanup later : it needs to be database-aware to mark abandoned uploads as failed when their staging files are deleted while preserving completed uploads.
+- add upload progress to the db rows so that we can show progress everywhere
 
 Frontend :
 - shitty validation wrappers (isRecord, isValidBuildingCreate, etc...)
@@ -14,3 +15,4 @@ Frontend :
 - building error messages in a less obnoxious way (cf mutations/buildings.ts)
 - check if we can make an helper to wire directly a query -> q-pagination
 - resumableDownload.ts is super ugly, maybe refactor (low priority)
+- duplication between all the record pages

@@ -84,7 +84,9 @@ const reconstructions = computed(() => data.value?.slice(0, RECONSTRUCTIONS_PAGE
 // Server statuses only. 'cancelling' is a frontend-only optimistic state
 // (see confirmCancelProcessing) that the backend never returns.
 function isProcessing(reconstruction: ReconstructionSummary): boolean {
-    return ['preparing', 'scheduled', 'running'].includes(reconstruction.status);
+    return ['waiting_for_upload', 'preparing', 'scheduled', 'running'].includes(
+        reconstruction.status,
+    );
 }
 const reconstruction = computed(() => {
     const list = reconstructions.value;

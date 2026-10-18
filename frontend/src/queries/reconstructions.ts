@@ -86,7 +86,10 @@ export function useReconstructionsQuery(buildingId: Ref<string>, offset: Ref<num
                 ?.slice(0, RECONSTRUCTIONS_PAGE_SIZE)
                 .some(
                     ({ status }) =>
-                        status === 'preparing' || status === 'scheduled' || status === 'running',
+                        status === 'waiting_for_upload' ||
+                        status === 'preparing' ||
+                        status === 'scheduled' ||
+                        status === 'running',
                 ) === true,
     );
     let pollingTimer: ReturnType<typeof setInterval> | undefined;
