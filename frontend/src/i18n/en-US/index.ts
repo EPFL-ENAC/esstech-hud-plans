@@ -328,6 +328,7 @@ export default {
     },
     reconstructions: {
         fromUpload: {
+            starting: 'Upload is starting',
             openForm: 'Open reconstruction form',
             navigationFailed: 'Could not open the reconstruction form. Please try again.',
             pickerNavigationFailed: 'Could not open upload selection. Please try again.',

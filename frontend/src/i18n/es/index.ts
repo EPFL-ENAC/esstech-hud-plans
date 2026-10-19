@@ -339,6 +339,7 @@ export default {
     },
     reconstructions: {
         fromUpload: {
+            starting: 'La subida está comenzando',
             openForm: 'Abrir el formulario de reconstrucción',
             navigationFailed:
                 'No se pudo abrir el formulario de reconstrucción. Inténtalo de nuevo.',
