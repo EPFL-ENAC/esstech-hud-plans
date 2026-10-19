@@ -17,6 +17,7 @@
             />
         </template>
     </video-recorder>
+    <loading-overlay v-if="busy" :message="t('reconstructions.fromUpload.starting')" />
 </template>
 
 <script setup lang="ts">
@@ -24,6 +25,7 @@ import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import VideoRecorder from 'src/components/VideoRecorder.vue';
+import LoadingOverlay from 'src/components/LoadingOverlay.vue';
 import { useUploadForReconstruction } from 'src/composables/useUploadForReconstruction';
 import { type RecordedVideo, toCapturedVideo } from 'src/lib/captured-video';
 
