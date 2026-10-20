@@ -297,6 +297,11 @@ async def proxy_head(
 ) -> Response:
     if upload.status == UploadStatus.UPLOADED:
         stored = await require_stored_upload(upload, uploads)
+        try:
+            await reconstructions.schedule_waiting_for_upload(stored.id)
+        except (OSError, SQLAlchemyError) as exc:
+            logger.exception("Upload HEAD reconstruction dispatch failed")
+            raise HTTPException(503, "Upload persistence is unavailable") from exc
         return completed_upload_response(stored, 200)
 
     async def on_head(response: httpx.Response) -> None:
