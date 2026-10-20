@@ -1,4 +1,4 @@
-"""Blocking tusd hooks for upload registration and completion."""
+"""tusd hooks for upload registration, progress, and completion."""
 
 from __future__ import annotations
 
@@ -80,25 +80,36 @@ async def handle_pre_create(
     return {"ChangeFileInfo": {"ID": upload.id.hex}}
 
 
-async def validate_completion(event: TusUploadEvent, session: AsyncSession) -> None:
+async def validate_upload_metadata(
+    event: TusUploadEvent,
+    session: AsyncSession,
+) -> None:
     upload = await session.get(UserUploads, event.upload_id)
     if upload is None:
         raise UploadNotFoundError("Upload not found")
-    if (
-        event.filename != upload.filename
-        or event.size_bytes != upload.size_bytes
-        or event.offset != event.size_bytes
-    ):
-        raise UploadConflictError(
-            "Upload completion does not match registered metadata"
-        )
+    if event.filename != upload.filename or event.size_bytes != upload.size_bytes:
+        raise UploadConflictError("Upload event does not match registered metadata")
+
+
+async def handle_post_receive(
+    event: TusUploadEvent,
+    session: AsyncSession,
+) -> dict[str, Any]:
+    await validate_upload_metadata(event, session)
+    await UserUploadsService(session).update_progress(
+        event.upload_id,
+        uploaded_bytes=event.offset,
+    )
+    return {}
 
 
 async def handle_pre_finish(
     event: TusUploadEvent,
     session: AsyncSession,
 ) -> dict[str, Any]:
-    await validate_completion(event, session)
+    await validate_upload_metadata(event, session)
+    if event.offset != event.size_bytes:
+        raise UploadConflictError("Upload completion offset does not match file size")
     upload = await UserUploadsService(session).complete(event.upload_id)
     await ReconstructionService(session).schedule_waiting_for_upload(upload.id)
     return {}
@@ -118,12 +129,14 @@ async def receive_tusd_hook(
         raise HTTPException(400, "Invalid hook payload")
 
     hook_type = payload.get("Type")
-    if hook_type not in ("pre-create", "pre-finish"):
+    if hook_type not in ("pre-create", "post-receive", "pre-finish"):
         return {}
     try:
         event = TusUploadEvent.from_hooks_payload(payload)
         if hook_type == "pre-create":
             return await handle_pre_create(event, session)
+        if hook_type == "post-receive":
+            return await handle_post_receive(event, session)
         return await handle_pre_finish(event, session)
     except (OSError, SQLAlchemyError) as exc:
         logger.exception("Upload hook persistence failed")

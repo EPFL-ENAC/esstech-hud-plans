@@ -16,6 +16,7 @@ import time
 from collections.abc import AsyncIterator, Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,7 +28,7 @@ import pytest
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import delete
+from sqlalchemy import delete, event
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import col
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -75,6 +76,12 @@ def real_tus(
         f"sqlite+aiosqlite:///{tmp_path / 'uploads.sqlite'}",
     )
     engine = create_async_engine(database_url)
+    if database_url.startswith("sqlite"):
+
+        @event.listens_for(engine.sync_engine, "connect")
+        def enable_foreign_keys(connection: Any, _: Any) -> None:
+            connection.execute("PRAGMA foreign_keys=ON")
+
     hook_secret = secrets.token_hex(32)
     subject_prefix = f"tus-integration-{uuid4().hex}"
     subjects = [f"{subject_prefix}-owner", f"{subject_prefix}-other"]
@@ -166,7 +173,8 @@ def real_tus(
                 "-upload-dir=/data",
                 "-port=8080",
                 f"-hooks-http=http://host.docker.internal:{api_port}/tus/hooks",
-                "-hooks-enabled-events=pre-create,pre-finish",
+                "-hooks-enabled-events=pre-create,post-receive,pre-finish",
+                "-progress-hooks-interval=100ms",
                 "-hooks-http-timeout=1800s",
                 "-network-timeout=1860s",
                 f"-hooks-http-forward-headers={TUS_HOOK_SECRET_HEADER}",
@@ -259,6 +267,7 @@ def test_real_tus_registration_resume_completion_and_delete(
     assert record["size_bytes"] == 11
     assert "file_path" not in record
     assert record["status"] == "pending"
+    assert record["uploaded_bytes"] == 0
     assert record["uploaded_at"] is None
     assert client.post("/uploads", json={}).status_code == 405
 
@@ -294,6 +303,7 @@ def test_real_tus_registration_resume_completion_and_delete(
     assert completed.status_code == 204, completed.text
     uploaded = client.get(f"/uploads/{upload_id}").json()
     assert uploaded["status"] == "uploaded"
+    assert uploaded["uploaded_bytes"] == 11
     assert uploaded["uploaded_at"] is not None
     stored = upload_file_path(UUID(upload_id), "scan.mp4")
     assert stored.read_bytes() == b"video bytes"
@@ -331,6 +341,59 @@ def test_real_tus_registration_resume_completion_and_delete(
     assert stored.read_bytes() == b"video bytes"
     assert client.delete(f"/uploads/{upload_id}").status_code == 204
     assert stored.read_bytes() == b"video bytes"
+
+
+def test_real_tus_reports_progress_before_patch_finishes(
+    real_tus: TusIntegration,
+) -> None:
+    client = real_tus.client
+    location, upload_id = _start_upload(real_tus)
+    finish_transfer = threading.Event()
+
+    def body() -> Iterator[bytes]:
+        yield b"video"
+        if not finish_transfer.wait(timeout=10):
+            raise AssertionError("Progress was not observed during the PATCH")
+        yield b" bytes"
+
+    def transfer() -> httpx.Response:
+        return client.patch(
+            location,
+            headers={
+                "Content-Type": "application/offset+octet-stream",
+                "Upload-Offset": "0",
+            },
+            content=body(),
+        )
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        pending = executor.submit(transfer)
+        try:
+            deadline = time.monotonic() + 5
+            while True:
+                record = client.get(f"/uploads/{upload_id}").json()
+                if record["uploaded_bytes"] == 5:
+                    break
+                assert time.monotonic() < deadline, record
+                assert not pending.done()
+                time.sleep(0.05)
+            assert not pending.done()
+            assert record["status"] == "pending"
+            assert record["uploaded_at"] is None
+            listed = client.get("/uploads").json()
+            assert (
+                next(row for row in listed if row["id"] == record["id"])[
+                    "uploaded_bytes"
+                ]
+                == 5
+            )
+        finally:
+            finish_transfer.set()
+        response = pending.result(timeout=10)
+    assert response.status_code == 204, response.text
+    completed = client.get(f"/uploads/{upload_id}").json()
+    assert completed["uploaded_bytes"] == completed["size_bytes"] == 11
+    assert completed["status"] == "uploaded"
 
 
 def test_real_tus_upload_is_reusable_for_both_reconstruction_routes(
@@ -506,16 +569,18 @@ def test_concurrent_hook_delivery_preserves_one_row_and_timestamp(
     base_url = str(real_tus.client.base_url)
     headers = {TUS_HOOK_SECRET_HEADER: real_tus.hook_secret}
 
-    async def deliver() -> list[httpx.Response]:
+    async def deliver(events: list[dict[str, Any]]) -> list[httpx.Response]:
         async with httpx.AsyncClient(base_url=base_url, timeout=30) as client:
             return await asyncio.gather(
                 *[
-                    client.post("/tus/hooks", json=payload, headers=headers)
-                    for _ in range(5)
+                    client.post("/tus/hooks", json=event, headers=headers)
+                    for event in events
                 ]
             )
 
-    assert all(response.status_code == 200 for response in asyncio.run(deliver()))
+    assert all(
+        response.status_code == 200 for response in asyncio.run(deliver([payload] * 5))
+    )
     assert len(real_tus.client.get("/uploads").json()) == 1
     scheduled: list[dict[str, Any]] = []
 
@@ -537,6 +602,9 @@ def test_concurrent_hook_delivery_preserves_one_row_and_timestamp(
     payload["Type"] = "pre-finish"
     payload["Event"]["Upload"]["ID"] = upload_id
     payload["Event"]["Upload"]["Offset"] = 11
+    progress = deepcopy(payload)
+    progress["Type"] = "post-receive"
+    progress["Event"]["Upload"]["Offset"] = 5
     calls: list[datetime] = []
 
     def completion_time() -> datetime:
@@ -545,9 +613,13 @@ def test_concurrent_hook_delivery_preserves_one_row_and_timestamp(
         return timestamp
 
     monkeypatch.setattr(upload_service, "utc_now", completion_time)
-    assert all(response.status_code == 200 for response in asyncio.run(deliver()))
+    assert all(
+        response.status_code == 200
+        for response in asyncio.run(deliver([progress, payload] * 5))
+    )
     assert len(calls) == 1
     uploaded = real_tus.client.get(f"/uploads/{upload_id}").json()
+    assert uploaded["uploaded_bytes"] == uploaded["size_bytes"] == 11
     assert datetime.fromisoformat(uploaded["uploaded_at"]) == calls[0]
     assert len(scheduled) == 2
     assert {str(call["reconstruction_id"]) for call in scheduled} == {

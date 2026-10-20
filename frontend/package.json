@@ -20,7 +20,8 @@
         "postinstall": "quasar prepare"
     },
     "dependencies": {
-        "@pinia/colada": "^1.4.4",
+        "@pinia/colada": "^1.4.8",
+        "@pinia/colada-plugin-auto-refetch": "^0.2.7",
         "@quasar/extras": "^1.16.4",
         "@sentry/vue": "^10.66.0",
         "@sparkjsdev/spark": "^0.1.10",

@@ -65,6 +65,7 @@ const rows = Array.from({ length: 25 }, (_, index) => ({
     filename:
         index === 0 ? `${'very_long_video_filename_'.repeat(5)}.mp4` : `video-${index + 1}.mp4`,
     size_bytes: index === 2 ? 0 : 12_400_000,
+    uploaded_bytes: index % 3 === 1 ? 12_400_000 : 0,
     status: ['pending', 'uploaded', 'failed'][index % 3],
     created_at: '2026-10-14T10:00:00Z',
     uploaded_at: index % 3 === 1 ? '2026-10-14T10:05:00Z' : null,

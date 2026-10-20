@@ -2,11 +2,20 @@ import assert from 'node:assert/strict';
 import { setImmediate as nextTurn } from 'node:timers/promises';
 import { test } from 'node:test';
 import { createApp, effectScope, nextTick, ref } from 'vue';
+import * as vue from 'vue';
 import { createPinia, disposePinia, setActivePinia } from 'pinia';
 import { PiniaColada } from '@pinia/colada';
+import { PiniaColadaAutoRefetch } from '@pinia/colada-plugin-auto-refetch';
 import { deferred, importTypeScript } from './helpers/typescript.mjs';
 
 async function fixture(t, initialSubject = 'user-a') {
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.now() });
+    const previousDocument = globalThis.document;
+    const document = new EventTarget();
+    document.visibilityState = 'visible';
+    globalThis.document = document;
+    const activated = [];
+    const deactivated = [];
     const requests = [];
     let subject = initialSubject;
     const api = await importTypeScript(t, 'src/lib/api.ts', {
@@ -22,26 +31,55 @@ async function fixture(t, initialSubject = 'user-a') {
     const uploads = await importTypeScript(t, 'src/lib/uploads.ts', {
         'src/lib/api': api,
     });
-    const queries = await importTypeScript(t, 'src/queries/uploads.ts', {
+    const visibility = await importTypeScript(t, 'src/composables/useDocumentVisibility.ts', {
         vue: import.meta.resolve('vue'),
+    });
+    const queries = await importTypeScript(t, 'src/queries/uploads.ts', {
+        vue: {
+            computed: vue.computed,
+            ref: vue.ref,
+            onActivated: (callback) => activated.push(callback),
+            onDeactivated: (callback) => deactivated.push(callback),
+        },
         '@pinia/colada': import.meta.resolve('@pinia/colada'),
+        'src/composables/useDocumentVisibility': visibility,
+        'src/lib/api': api,
         'src/lib/auth': { getAuthSubject: () => subject },
         'src/lib/uploads': uploads,
     });
     const app = createApp({});
     const pinia = createPinia();
     app.use(pinia);
-    app.use(PiniaColada, { queryOptions: { gcTime: Infinity } });
+    app.use(PiniaColada, {
+        plugins: [PiniaColadaAutoRefetch()],
+        queryOptions: { gcTime: Infinity },
+    });
     const scope = effectScope();
     t.after(() => {
         scope.stop();
         disposePinia(pinia);
         setActivePinia(undefined);
+        if (previousDocument === undefined) delete globalThis.document;
+        else globalThis.document = previousDocument;
     });
     return {
         api,
         uploads,
         requests,
+        stop: () => scope.stop(),
+        async advance(milliseconds) {
+            t.mock.timers.tick(milliseconds);
+            await nextTurn();
+        },
+        async setVisible(visible) {
+            document.visibilityState = visible ? 'visible' : 'hidden';
+            document.dispatchEvent(new Event('visibilitychange'));
+            await nextTick();
+        },
+        async setActive(active) {
+            for (const callback of active ? activated : deactivated) callback();
+            await nextTick();
+        },
         setSubject(value) {
             subject = value;
         },
@@ -67,6 +105,8 @@ function rows(prefix, count = 1) {
     return Array.from({ length: count }, (_, index) => ({
         id: `${prefix}-${index}`,
         filename: `${prefix}-${index}.mp4`,
+        size_bytes: 100,
+        uploaded_bytes: 100,
         status: 'uploaded',
     }));
 }
@@ -311,4 +351,144 @@ test('refresh failures preserve cached rows and retry can recover', async (t) =>
     await retry;
     assert.equal(query.state.value.status, 'success');
     assert.deepEqual(query.data.value, recovered);
+});
+
+for (const terminalStatus of ['uploaded', 'failed']) {
+    test(`pending upload polls progress and stops at ${terminalStatus}`, async (t) => {
+        const f = await fixture(t);
+        const query = f.uploadQuery(ref('progress'));
+        const pending = { ...rows('progress')[0], status: 'pending', uploaded_bytes: 10 };
+        respond(f.requests[0], pending);
+        await nextTurn();
+        await f.advance(4_999);
+        assert.equal(f.requests.length, 1);
+        await f.advance(1);
+        assert.equal(f.requests.length, 2);
+        assert.equal(query.data.value.uploaded_bytes, 10);
+        await f.advance(20_000);
+        assert.equal(f.requests.length, 2, 'A slow request must not overlap another poll');
+        respond(f.requests[1], { ...pending, uploaded_bytes: 60 });
+        await nextTurn();
+        assert.equal(query.data.value.uploaded_bytes, 60);
+        await f.advance(5_000);
+        respond(f.requests[2], { ...pending, status: terminalStatus, uploaded_bytes: 100 });
+        await nextTurn();
+        await f.advance(20_000);
+        assert.equal(f.requests.length, 3);
+        assert.equal(query.data.value.status, terminalStatus);
+    });
+}
+
+for (const failure of ['network', 503]) {
+    test(`pending upload recovers automatically after ${failure}`, async (t) => {
+        const errors = [];
+        t.mock.method(console, 'error', (error) => errors.push(error));
+        const f = await fixture(t);
+        const query = f.uploadQuery(ref('recover'));
+        const pending = { ...rows('recover')[0], status: 'pending', uploaded_bytes: 25 };
+        respond(f.requests[0], pending);
+        await nextTurn();
+        await f.advance(5_000);
+        if (failure === 'network') f.requests[1].gate.reject(new TypeError('Network unavailable'));
+        else respond(f.requests[1], { detail: 'Unavailable' }, failure);
+        await nextTurn();
+        assert.equal(query.state.value.status, 'error');
+        assert.equal(errors.length, 1);
+        assert.equal(query.data.value.uploaded_bytes, 25);
+        await f.advance(5_000);
+        assert.equal(f.requests.length, 3);
+        respond(f.requests[2], { ...pending, uploaded_bytes: 75 });
+        await nextTurn();
+        assert.equal(query.state.value.status, 'success');
+        assert.equal(query.data.value.uploaded_bytes, 75);
+    });
+}
+
+for (const status of [401, 403, 404, 422]) {
+    test(`HTTP ${status} stops automatic polling and leaves manual retry available`, async (t) => {
+        const errors = [];
+        t.mock.method(console, 'error', (error) => errors.push(error));
+        const f = await fixture(t);
+        const query = f.uploadQuery(ref('unavailable'));
+        const pending = { ...rows('unavailable')[0], status: 'pending' };
+        respond(f.requests[0], pending);
+        await nextTurn();
+        await f.advance(5_000);
+        respond(f.requests[1], { detail: 'Unavailable' }, status);
+        await nextTurn();
+        await f.advance(20_000);
+        assert.equal(f.requests.length, 2);
+        assert.equal(errors.length, 1);
+        const retry = query.refetch();
+        respond(f.requests[2], { ...pending, status: 'uploaded' });
+        await retry;
+        assert.equal(query.data.value.status, 'uploaded');
+    });
+}
+
+test('initial failures and upload lists do not opt into polling', async (t) => {
+    const f = await fixture(t);
+    const query = f.uploadQuery(ref('initial-failure'));
+    respond(f.requests[0], { detail: 'Unavailable' }, 503);
+    await nextTurn();
+    f.query();
+    respond(f.requests[1], [{ ...rows('list')[0], status: 'pending' }]);
+    await nextTurn();
+    await f.advance(20_000);
+    assert.equal(f.requests.length, 2);
+    assert.equal(query.state.value.status, 'error');
+});
+
+for (const pause of ['visibility', 'activation']) {
+    test(`polling pauses and resumes with ${pause}`, async (t) => {
+        const f = await fixture(t);
+        const query = f.uploadQuery(ref('lifecycle'));
+        const pending = { ...rows('lifecycle')[0], status: 'pending' };
+        respond(f.requests[0], pending);
+        await nextTurn();
+        const setEnabled = pause === 'visibility' ? f.setVisible : f.setActive;
+        await setEnabled(false);
+        await f.advance(10_000);
+        assert.equal(f.requests.length, 1);
+        await setEnabled(true);
+        assert.equal(f.requests.length, 2);
+        respond(f.requests[1], { ...pending, uploaded_bytes: 50 });
+        await nextTurn();
+        await f.advance(5_000);
+        assert.equal(f.requests.length, 3);
+        respond(f.requests[2], { ...pending, status: 'uploaded' });
+        await nextTurn();
+        assert.equal(query.data.value.status, 'uploaded');
+    });
+}
+
+test('ID changes and scope disposal stop polling the previous upload', async (t) => {
+    const f = await fixture(t);
+    const id = ref('previous');
+    const query = f.uploadQuery(id);
+    respond(f.requests[0], { ...rows('previous')[0], status: 'pending' });
+    await nextTurn();
+    id.value = 'next';
+    await nextTick();
+    assert.equal(query.data.value, undefined);
+    respond(f.requests[1], { ...rows('next')[0], status: 'pending' });
+    await nextTurn();
+    await f.advance(5_000);
+    assert.equal(f.requests.length, 3);
+    assert.equal(f.requests[2].url, 'https://hud.test/api/uploads/next');
+    f.stop();
+    respond(f.requests[2], { ...rows('next')[0], status: 'pending' });
+    await nextTurn();
+    await f.advance(20_000);
+    assert.equal(f.requests.length, 3);
+});
+
+test('an account change stops the previous account from polling', async (t) => {
+    const f = await fixture(t);
+    f.uploadQuery(ref('private'));
+    respond(f.requests[0], { ...rows('private')[0], status: 'pending' });
+    await nextTurn();
+    f.setSubject('user-b');
+    await f.advance(10_000);
+    assert.equal(f.requests.length, 1);
 });

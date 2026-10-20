@@ -100,6 +100,7 @@ try {
                             description: '',
                             filename: metadata.filename,
                             size_bytes: Number(request.headers()['upload-length']),
+                            uploaded_bytes: 0,
                             status: 'pending',
                             created_at: new Date().toISOString(),
                             uploaded_at: null,
@@ -126,6 +127,7 @@ try {
                     assert.equal(request.method(), 'PATCH');
                     await new Promise((resolve) => patches.push({ row, release: resolve }));
                     row.status = 'uploaded';
+                    row.uploaded_bytes = row.size_bytes;
                     row.uploaded_at = new Date().toISOString();
                     return route.fulfill({
                         status: 204,

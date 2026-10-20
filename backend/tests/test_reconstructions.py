@@ -534,7 +534,7 @@ def test_pending_upload_submission_persists_without_scheduling(
     path.unlink()  # Pending submissions must not require completed bytes.
 
     async def unexpected_schedule(**kwargs: object) -> UUID:
-        pytest.fail("A pending upload must not start a workflow")
+        raise AssertionError("A pending upload must not start a workflow")
 
     monkeypatch.setattr(
         splat_workflow, "schedule_splat_generation_from_tus", unexpected_schedule
@@ -710,6 +710,54 @@ def test_completion_dispatch_database_error_keeps_hook_failure_response(
     assert client.get(url).json()["status"] == "waiting_for_upload"
     assert _finish_upload(client, upload_id).status_code == 200
     assert client.get(url).json()["status"] == "scheduled"
+
+
+def test_completion_artifact_database_error_marks_reconstruction_failed(
+    reconstruction_api: tuple[TestClient, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, building_id = reconstruction_api
+    upload_id, _ = _seed_stored_upload(client, status=UploadStatus.PENDING)
+    row = client.post(
+        _from_upload_url(building_id, False), json={"upload_id": str(upload_id)}
+    ).json()
+    original_commit = AsyncSession.commit
+    failed_artifact_save = False
+
+    async def fail_artifact_save_once(session: AsyncSession) -> None:
+        nonlocal failed_artifact_save
+        if not failed_artifact_save and any(
+            isinstance(item, Reconstruction) and item.workspace_directory is not None
+            for item in session.dirty
+        ):
+            failed_artifact_save = True
+            raise OperationalError(
+                "UPDATE reconstructions",
+                {},
+                RuntimeError("Artifact persistence unavailable"),
+            )
+        await original_commit(session)
+
+    async def unexpected_schedule(**kwargs: object) -> UUID:
+        raise AssertionError("Artifact persistence failure must not submit a workflow")
+
+    monkeypatch.setattr(AsyncSession, "commit", fail_artifact_save_once)
+    monkeypatch.setattr(
+        splat_workflow, "schedule_splat_generation_from_tus", unexpected_schedule
+    )
+
+    assert _finish_upload(client, upload_id).status_code == 200
+    assert failed_artifact_save
+    url = f"/buildings/{building_id}/reconstructions/{row['id']}"
+    saved = client.get(url).json()
+    assert saved["status"] == "failed"
+    assert saved["prefect_workflow_id"] is None
+    assert saved["workspace_directory"] is None
+    assert saved["input_video_path"] is None
+    assert "Artifact persistence unavailable" in saved["error_message"]
+
+    assert _finish_upload(client, upload_id).status_code == 200
+    assert client.get(url).json()["status"] == "failed"
 
 
 @pytest.mark.parametrize("new_building", [False, True])

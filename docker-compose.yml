@@ -56,7 +56,9 @@ services:
       - -hooks-http
       - ${TUSD_HOOKS_HTTP_URL:-http://host.docker.internal:8000/tus/hooks}
       - -hooks-enabled-events
-      - pre-create,pre-finish
+      - pre-create,post-receive,pre-finish
+      - -progress-hooks-interval
+      - 5s
       # Completion copies the full file into DATA_DIR before acknowledging it.
       - -hooks-http-timeout
       - 1800s

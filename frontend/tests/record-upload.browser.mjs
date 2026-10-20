@@ -112,6 +112,7 @@ try {
                             name: 'TODO',
                             description: '',
                             size_bytes: size,
+                            uploaded_bytes: 0,
                             status: 'pending',
                             created_at: new Date().toISOString(),
                             uploaded_at: null,
@@ -130,6 +131,7 @@ try {
                     await new Promise((resolve) => gates.push(resolve));
                     assert.equal(request.postDataBuffer().length, row.size_bytes);
                     row.status = 'uploaded';
+                    row.uploaded_bytes = row.size_bytes;
                     row.uploaded_at = new Date().toISOString();
                     return route.fulfill({
                         status: 204,

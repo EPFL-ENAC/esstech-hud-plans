@@ -39,6 +39,7 @@ try {
                 filename:
                     index === 0 ? `${'long-video-name-'.repeat(8)}.mp4` : `video-${index + 1}.mp4`,
                 size_bytes: 1234567,
+                uploaded_bytes: index === 0 || index === 2 ? 0 : 1234567,
                 status: index === 0 ? 'pending' : index === 2 ? 'failed' : 'uploaded',
                 created_at: '2026-10-18T10:00:00Z',
                 uploaded_at: index === 0 || index === 2 ? null : '2026-10-18T10:01:00Z',
@@ -47,6 +48,8 @@ try {
             const details = [];
             let listMode = 'data';
             let detailError = false;
+            let holdDetail = false;
+            let releaseDetail;
             let reconstruction;
             let destination;
             const building = (id, name = 'Existing building') => ({
@@ -101,6 +104,12 @@ try {
                     if (path.startsWith('/uploads/')) {
                         const id = decodeURIComponent(path.split('/').pop());
                         details.push(id);
+                        if (holdDetail) {
+                            holdDetail = false;
+                            await new Promise((resolve) => {
+                                releaseDetail = resolve;
+                            });
+                        }
                         if (detailError)
                             return route.fulfill({ status: 503, json: { detail: 'Unavailable' } });
                         const row = rows.find((row) => row.id === id);
@@ -161,6 +170,9 @@ try {
                     return route.fulfill({ json: [] });
                 });
                 const page = await context.newPage();
+                page.setDefaultTimeout(15_000);
+                page.setDefaultNavigationTimeout(20_000);
+                await page.clock.install();
                 const errors = [];
                 page.on('pageerror', (error) => errors.push(error.message));
                 const goto = async (path) => {
@@ -209,8 +221,7 @@ try {
                 const action = items
                     .first()
                     .getByRole('link', { name: text.reconstructions.new, exact: true });
-                await action.focus();
-                await page.keyboard.press('Enter');
+                await action.press('Enter');
                 await page.waitForURL(`**/reconstructions/from-upload/${rows[0].id}`);
                 await ready();
                 assert.equal(details.at(-1), rows[0].id);
@@ -220,6 +231,55 @@ try {
                 await page.reload();
                 await ready();
                 await name.fill('Preserved building');
+
+                const progress = page.locator('.upload-summary [role=progressbar]');
+                assert.equal(await progress.getAttribute('aria-valuenow'), '0');
+                rows[0].uploaded_bytes = Math.floor(rows[0].size_bytes / 2);
+                holdDetail = true;
+                const poll = page.waitForRequest((request) =>
+                    request.url().endsWith(`/uploads/${rows[0].id}`),
+                );
+                await page.clock.fastForward(5_000);
+                await poll;
+                await page.waitForFunction(
+                    () => document.querySelector('.query-state-switcher')?.ariaBusy === 'true',
+                );
+                assert.equal(await start().isDisabled(), false);
+                assert.equal(await name.inputValue(), 'Preserved building');
+                assert.equal(await progress.getAttribute('aria-valuenow'), '0');
+                releaseDetail();
+                await page.waitForFunction(
+                    () =>
+                        Number(
+                            document
+                                .querySelector('.upload-summary [role=progressbar]')
+                                ?.getAttribute('aria-valuenow'),
+                        ) > 0,
+                );
+                assert.equal(await name.inputValue(), 'Preserved building');
+                assert.equal(await start().isDisabled(), false);
+                assert.match(await page.locator('.upload-summary [role=status]').innerText(), /\//);
+
+                await page.evaluate(() => {
+                    Object.defineProperty(document, 'visibilityState', {
+                        configurable: true,
+                        value: 'hidden',
+                    });
+                    document.dispatchEvent(new Event('visibilitychange'));
+                });
+                const beforeHidden = details.length;
+                await page.clock.fastForward(10_000);
+                assert.equal(details.length, beforeHidden);
+                const visibleRefresh = page.waitForResponse((response) =>
+                    response.url().endsWith(`/uploads/${rows[0].id}`),
+                );
+                await page.evaluate(() => {
+                    delete document.visibilityState;
+                    document.dispatchEvent(new Event('visibilitychange'));
+                });
+                await visibleRefresh;
+                await ready();
+
                 detailError = true;
                 await page.getByRole('button', { name: text.uploads.refresh, exact: true }).click();
                 await page
@@ -261,6 +321,7 @@ try {
                     .first()
                     .waitFor();
                 reconstruction.status = 'scheduled';
+                await page.clock.fastForward(5_000);
                 await page
                     .getByText(text.reconstructions.status.scheduled, { exact: true })
                     .first()
@@ -307,9 +368,72 @@ try {
                 listMode = 'empty';
                 await page.getByRole('button', { name: text.common.retry, exact: true }).click();
                 await page.getByText(text.uploads.empty, { exact: true }).waitFor();
+
+                // Exercise the query in a real KeepAlive consumer as well as the page.
+                if (locale === 'en' && size === 'desktop') {
+                    const probeUpload = rows[3];
+                    probeUpload.status = 'pending';
+                    probeUpload.uploaded_bytes = 0;
+                    const probeResponse = () =>
+                        page.waitForResponse((response) =>
+                            response.url().endsWith(`/uploads/${probeUpload.id}`),
+                        );
+                    const firstProbe = probeResponse();
+                    await page.evaluate(async (uploadId) => {
+                        const source = await fetch('/src/queries/uploads.ts').then((response) =>
+                            response.text(),
+                        );
+                        const vueUrl = source.match(/from ["']([^"']*\/vue\.js[^"']*)["']/)[1];
+                        const { createApp, h, KeepAlive, nextTick, ref } = await import(vueUrl);
+                        const { useUploadQuery } = await import('/src/queries/uploads.ts');
+                        const active = ref(true);
+                        const Probe = {
+                            setup() {
+                                useUploadQuery(ref(uploadId));
+                                return () => h('div');
+                            },
+                        };
+                        const container = document.createElement('div');
+                        document.body.append(container);
+                        const app = createApp({
+                            setup: () => () =>
+                                h(KeepAlive, null, {
+                                    default: () => (active.value ? h(Probe) : null),
+                                }),
+                        });
+                        app._context.provides =
+                            document.querySelector('#q-app').__vue_app__._context.provides;
+                        app.mount(container);
+                        window.uploadQueryProbe = {
+                            async setActive(value) {
+                                active.value = value;
+                                await nextTick();
+                            },
+                            dispose() {
+                                app.unmount();
+                                container.remove();
+                            },
+                        };
+                    }, probeUpload.id);
+                    await firstProbe;
+                    await page.evaluate(() => window.uploadQueryProbe.setActive(false));
+                    const beforeDeactivation = details.length;
+                    await page.clock.fastForward(10_000);
+                    assert.equal(details.length, beforeDeactivation);
+                    const reactivated = probeResponse();
+                    await page.evaluate(() => window.uploadQueryProbe.setActive(true));
+                    await reactivated;
+                    const nextProbe = probeResponse();
+                    await page.clock.fastForward(5_000);
+                    await nextProbe;
+                    await page.evaluate(() => window.uploadQueryProbe.dispose());
+                    const beforeDisposal = details.length;
+                    await page.clock.fastForward(10_000);
+                    assert.equal(details.length, beforeDisposal);
+                }
                 assert.deepEqual(errors, []);
                 console.log(
-                    `${locale} ${size}: list slot, direct detail, refresh, new/existing submission, waiting poll, failed/unavailable uploads passed`,
+                    `${locale} ${size}: upload progress, background refresh, visibility, form preservation, submissions and terminal uploads passed`,
                 );
             } finally {
                 await context.close();

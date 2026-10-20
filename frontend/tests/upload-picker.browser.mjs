@@ -19,6 +19,7 @@ const rows = Array.from({ length: 25 }, (_, index) => ({
     name: index === 1 ? 'North facade' : 'TODO',
     description: '',
     size_bytes: 12_000_000,
+    uploaded_bytes: 12_000_000,
     status: 'uploaded',
     created_at: '2026-10-15T10:00:00Z',
     uploaded_at: '2026-10-15T10:05:00Z',

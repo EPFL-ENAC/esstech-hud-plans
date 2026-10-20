@@ -139,6 +139,7 @@ def _create_upload(
             )
             if uploaded:
                 upload.status = UploadStatus.UPLOADED
+                upload.uploaded_bytes = upload.size_bytes
                 upload.uploaded_at = utc_now()
                 session.add(upload)
                 await session.commit()
@@ -159,10 +160,13 @@ def test_upload_defaults_and_column_types() -> None:
     assert upload.name == "TODO"
     assert upload.description == ""
     assert upload.status == UploadStatus.PENDING
+    assert upload.uploaded_bytes == 0
     assert upload.created_at.tzinfo == UTC
     assert upload.uploaded_at is None
     table = SQLModel.metadata.tables["user_uploads"]
     assert isinstance(table.c.size_bytes.type, BigInteger)
+    assert isinstance(table.c.uploaded_bytes.type, BigInteger)
+    assert table.c.uploaded_bytes.nullable is False
     created_at_type = table.c.created_at.type
     uploaded_at_type = table.c.uploaded_at.type
     assert isinstance(created_at_type, DateTime)
@@ -369,6 +373,7 @@ def test_upload_routes_cover_crud(api_client: TestClient) -> None:
         "description": "",
         "filename": "video.mp4",
         "size_bytes": 11,
+        "uploaded_bytes": 11,
         "status": "uploaded",
         "created_at": created["created_at"],
         "uploaded_at": created["uploaded_at"],
@@ -755,6 +760,7 @@ def test_upload_registration_and_completion_are_idempotent(
             first = await uploads.create(**values)
             await uploads.update(first, UserUploadUpdate(name="Renamed"))
             completed = await uploads.complete(upload_id)
+            assert completed.uploaded_bytes == completed.size_bytes
             destination = upload_file_path(upload_id, "video.mp4")
             assert completed.file_path == str(destination)
             assert destination.read_bytes() == b"video bytes"
@@ -890,6 +896,7 @@ def test_failed_completion_rolls_back_and_reuses_copied_file(
                 size_bytes=11,
                 file_path=str(source),
             )
+            await uploads.update_progress(upload_id, uploaded_bytes=5)
             with monkeypatch.context() as patches:
                 patches.setattr(
                     session,
@@ -901,6 +908,7 @@ def test_failed_completion_rolls_back_and_reuses_copied_file(
             persisted = await uploads.get(upload_id, user_id=USER_ID)
             assert persisted is not None
             assert persisted.status == UploadStatus.PENDING
+            assert persisted.uploaded_bytes == 5
             assert persisted.uploaded_at is None
             assert persisted.file_path == str(source)
             assert source.read_bytes() == b"video bytes"
@@ -917,6 +925,7 @@ def test_failed_completion_rolls_back_and_reuses_copied_file(
                 completed = await uploads.complete(upload_id)
             assert completed.file_path == str(destination)
             assert completed.status == UploadStatus.UPLOADED
+            assert completed.uploaded_bytes == 11
             assert completed.uploaded_at is not None
             assert not source.exists()
             assert not info.exists()
@@ -1026,3 +1035,181 @@ def test_get_completed_checks_ownership_before_moving_file(
             assert Path(stored.file_path).read_bytes() == b"video bytes"
 
     asyncio.run(run())
+
+
+def test_progress_is_monotonic_and_exposed_in_upload_responses(
+    api_client: TestClient,
+    database: AsyncEngine,
+) -> None:
+    created = _create_upload(api_client)
+    upload_id = UUID(created["id"])
+    assert created["uploaded_bytes"] == 0
+
+    async def advance(offset: int) -> None:
+        async with uploads_service(database) as (uploads, session):
+            await uploads.update_progress(upload_id, uploaded_bytes=offset)
+
+    for offset, expected in [(0, 0), (5, 5), (5, 5), (3, 5), (11, 11)]:
+        asyncio.run(advance(offset))
+        detail = api_client.get(f"/uploads/{upload_id}").json()
+        assert detail["uploaded_bytes"] == expected
+        assert detail["status"] == "pending"
+        assert detail["uploaded_at"] is None
+        assert api_client.get("/uploads").json() == [detail]
+
+    response = api_client.patch(
+        f"/uploads/{upload_id}",
+        json={"uploaded_bytes": 0},
+    )
+    assert response.status_code == 422
+    assert api_client.get(f"/uploads/{upload_id}").json()["uploaded_bytes"] == 11
+
+
+@pytest.mark.parametrize("offset", [-1, 12])
+def test_progress_rejects_out_of_bounds_and_missing_uploads(
+    database: AsyncEngine,
+    offset: int,
+) -> None:
+    async def run() -> None:
+        async with uploads_service(database) as (uploads, session):
+            upload = await uploads.create(
+                user_id=USER_ID,
+                payload=UserUploadCreate(),
+                filename="video.mp4",
+                size_bytes=11,
+                file_path="TODO",
+            )
+            upload_id = upload.id
+            await uploads.update_progress(upload_id, uploaded_bytes=5)
+            with pytest.raises(UploadConflictError):
+                await uploads.update_progress(upload_id, uploaded_bytes=offset)
+            persisted = await uploads.get(upload_id, user_id=USER_ID)
+            assert persisted is not None
+            assert persisted.uploaded_bytes == 5
+            with pytest.raises(UploadNotFoundError):
+                await uploads.update_progress(uuid4(), uploaded_bytes=0)
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("status", [UploadStatus.UPLOADED, UploadStatus.FAILED])
+def test_progress_does_not_change_terminal_uploads(
+    database: AsyncEngine,
+    status: UploadStatus,
+) -> None:
+    async def run() -> None:
+        async with uploads_service(database) as (uploads, session):
+            upload = UserUploads(
+                user_id=USER_ID,
+                filename="video.mp4",
+                size_bytes=11,
+                uploaded_bytes=11 if status == UploadStatus.UPLOADED else 5,
+                file_path="TODO",
+                status=status,
+            )
+            session.add(upload)
+            await session.commit()
+            await session.refresh(upload)
+            before = UserUploadRead.model_validate(upload)
+            for offset in (0, 3, 7, 11):
+                await uploads.update_progress(upload.id, uploaded_bytes=offset)
+            await session.refresh(upload)
+            assert UserUploadRead.model_validate(upload) == before
+
+    asyncio.run(run())
+
+
+def test_progress_rolls_back_on_commit_failure(
+    database: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def run() -> None:
+        async with uploads_service(database) as (uploads, session):
+            upload = await uploads.create(
+                user_id=USER_ID,
+                payload=UserUploadCreate(),
+                filename="video.mp4",
+                size_bytes=2**33,
+                file_path="TODO",
+            )
+            upload_id = upload.id
+            await uploads.update_progress(upload_id, uploaded_bytes=2**32)
+            with monkeypatch.context() as patches:
+                patches.setattr(
+                    session,
+                    "commit",
+                    AsyncMock(side_effect=OperationalError("commit", {}, Exception())),
+                )
+                with pytest.raises(OperationalError):
+                    await uploads.update_progress(upload_id, uploaded_bytes=2**32 + 1)
+            persisted = await uploads.get(upload_id, user_id=USER_ID)
+            assert persisted is not None
+            assert persisted.uploaded_bytes == 2**32
+
+    asyncio.run(run())
+
+
+def test_progress_migration_backfills_completed_uploads_and_downgrades() -> None:
+    scripts = ScriptDirectory.from_config(Config("alembic.ini"))
+    migration = scripts.get_revision("94e0cf75a7a5")
+    assert migration is not None
+    engine = create_engine("sqlite://")
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "CREATE TABLE user_uploads ("
+                    "id INTEGER PRIMARY KEY, size_bytes BIGINT NOT NULL, "
+                    "status VARCHAR NOT NULL)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO user_uploads (id, size_bytes, status) "
+                    "VALUES (:id, :size, :status)"
+                ),
+                [
+                    {"id": 1, "size": 2**33, "status": "uploaded"},
+                    {"id": 2, "size": 2**33, "status": "pending"},
+                    {"id": 3, "size": 11, "status": "failed"},
+                ],
+            )
+            with Operations.context(MigrationContext.configure(connection)):
+                migration.module.upgrade()
+                column = next(
+                    column
+                    for column in inspect(connection).get_columns("user_uploads")
+                    if column["name"] == "uploaded_bytes"
+                )
+                assert isinstance(column["type"], BigInteger)
+                assert column["nullable"] is False
+                assert connection.execute(
+                    text("SELECT uploaded_bytes FROM user_uploads ORDER BY id")
+                ).scalars().all() == [2**33, 0, 0]
+                connection.execute(
+                    text(
+                        "INSERT INTO user_uploads (id, size_bytes, status) "
+                        "VALUES (4, 11, 'pending')"
+                    )
+                )
+                assert (
+                    connection.execute(
+                        text("SELECT uploaded_bytes FROM user_uploads WHERE id = 4")
+                    ).scalar_one()
+                    == 0
+                )
+                migration.module.downgrade()
+                assert "uploaded_bytes" not in {
+                    column["name"]
+                    for column in inspect(connection).get_columns("user_uploads")
+                }
+                assert connection.execute(
+                    text("SELECT id, size_bytes, status FROM user_uploads ORDER BY id")
+                ).all() == [
+                    (1, 2**33, "uploaded"),
+                    (2, 2**33, "pending"),
+                    (3, 11, "failed"),
+                    (4, 11, "pending"),
+                ]
+    finally:
+        engine.dispose()

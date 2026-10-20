@@ -27,6 +27,15 @@
                             {{ formatFileSize(upload.size_bytes, locale) }}
                             · {{ t(`uploads.status.${upload.status}`) }}
                         </div>
+                        <UploadTransferProgress
+                            v-if="upload.status === 'pending'"
+                            class="q-mt-md"
+                            :progress="{
+                                loaded: upload.uploaded_bytes,
+                                total: upload.size_bytes,
+                            }"
+                            :resumed="false"
+                        />
                     </q-card-section>
                 </q-card>
                 <p v-if="upload.status === 'failed'" class="text-negative" role="alert">
@@ -51,6 +60,7 @@ import { useI18n } from 'vue-i18n';
 import PageHeader from 'src/components/PageHeader.vue';
 import QueryStateSwitcher from 'src/components/QueryStateSwitcher.vue';
 import ReconstructionForm from 'src/components/ReconstructionForm.vue';
+import UploadTransferProgress from 'src/components/UploadTransferProgress.vue';
 import { ApiError } from 'src/lib/api';
 import type { BuildingSelection } from 'src/lib/buildings';
 import {
@@ -72,7 +82,6 @@ const loadError = computed(() => {
 const canSubmitUpload = computed(
     () =>
         state.value.status === 'success' &&
-        !isLoading.value &&
         (data.value?.status === 'pending' || data.value?.status === 'uploaded'),
 );
 const buildingSelection = ref<BuildingSelection>({

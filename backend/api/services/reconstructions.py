@@ -242,16 +242,16 @@ class ReconstructionService:
             video_format,
         )
 
-        reconstruction = await self.record_progress(
-            reconstruction.id,
-            progress=0.0,
-            artifact_changes=ReconstructionArtifactUpdate(
-                workspace_directory=str(artifact.root_directory.resolve()),
-                input_video_path=str(artifact.video_path.resolve()),
-            ),
-        )
-
         try:
+            reconstruction = await self.record_progress(
+                reconstruction.id,
+                progress=0.0,
+                artifact_changes=ReconstructionArtifactUpdate(
+                    workspace_directory=str(artifact.root_directory.resolve()),
+                    input_video_path=str(artifact.video_path.resolve()),
+                ),
+            )
+
             workflow_id = await schedule_splat_generation_from_tus(
                 artifact=artifact,
                 tus_upload_path=upload.file_path,
@@ -264,12 +264,12 @@ class ReconstructionService:
             )
         except Exception as exc:
             failed = await self._mark_failed_best_effort(
-                reconstruction.id,
+                reconstruction_id,
                 exc,
                 only_if_preparing=True,
             )
             raise ReconstructionSchedulingError(
-                "Failed to schedule reconstruction workflow",
+                "Failed to prepare or schedule reconstruction workflow",
                 failed,
             ) from exc
 

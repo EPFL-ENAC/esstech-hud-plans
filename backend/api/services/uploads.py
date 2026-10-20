@@ -152,6 +152,30 @@ class UserUploadsService:
         await self._commit_and_refresh(upload)
         return upload
 
+    async def update_progress(
+        self,
+        upload_id: UUID,
+        *,
+        uploaded_bytes: int,
+    ) -> None:
+        """Record increasing progress without racing upload completion."""
+
+        try:
+            upload = await self._get_for_update(upload_id)
+            if not 0 <= uploaded_bytes <= upload.size_bytes:
+                raise UploadConflictError("Upload progress is outside the file size")
+            if (
+                upload.status == UploadStatus.PENDING
+                and uploaded_bytes > upload.uploaded_bytes
+            ):
+                upload.uploaded_bytes = uploaded_bytes
+                self._session.add(upload)
+            # Also release the row lock when the event did not advance progress.
+            await self._session.commit()
+        except Exception:
+            await self._session.rollback()
+            raise
+
     async def complete(self, upload_id: UUID) -> UserUploads:
         """Persist completed bytes before publishing the uploaded status."""
 
@@ -169,6 +193,7 @@ class UserUploadsService:
             )
 
             upload.file_path = str(destination)
+            upload.uploaded_bytes = upload.size_bytes
             upload.status = UploadStatus.UPLOADED
             if upload.uploaded_at is None:
                 upload.uploaded_at = utc_now()
