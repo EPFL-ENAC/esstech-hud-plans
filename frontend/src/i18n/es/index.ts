@@ -62,6 +62,12 @@ export default {
         deleteAllDataFailed: 'No se pudieron eliminar tus datos. Inténtalo de nuevo.',
     },
     uploads: {
+        picker: {
+            action: 'Vídeo ya subido',
+            title: 'Elegir un vídeo subido',
+            empty: 'Aún no hay vídeos subidos por completo.',
+            useVideo: 'Usar vídeo',
+        },
         title: 'Archivos',
         refresh: 'Actualizar',
         loading: 'Cargando archivos…',
@@ -74,6 +80,11 @@ export default {
         pagination: 'Paginación de la lista de archivos',
         created: 'Creado el {date}',
         uploaded: 'Subido el {date}',
+        record: {
+            action: 'Grabar un vídeo',
+            failed: 'La subida de {filename} ha fallado.',
+            navigationFailed: 'No se pudo abrir la lista de archivos. Inténtalo de nuevo.',
+        },
         new: {
             title: 'Subir archivo',
             instructions:
@@ -327,6 +338,18 @@ export default {
         },
     },
     reconstructions: {
+        fromUpload: {
+            starting: 'La subida está comenzando',
+            openForm: 'Abrir el formulario de reconstrucción',
+            navigationFailed:
+                'No se pudo abrir el formulario de reconstrucción. Inténtalo de nuevo.',
+            pickerNavigationFailed:
+                'No se pudo abrir la selección de archivos. Inténtalo de nuevo.',
+            title: 'Elegir un archivo',
+            unavailable: 'Este archivo no está disponible o no tienes acceso a él.',
+            loadFailed: 'No se pudo cargar este archivo. Inténtalo de nuevo.',
+            failedUpload: 'La subida ha fallado y no se puede usar para una reconstrucción.',
+        },
         title: 'Reconstrucciones',
         new: 'Nueva reconstrucción',
         named: 'Reconstrucción {id}',
@@ -350,6 +373,7 @@ export default {
         pagination: 'Paginación de las reconstrucciones',
         noReconstruction: 'Aún no hay ninguna reconstrucción',
         status: {
+            waiting_for_upload: 'Esperando la subida',
             preparing: 'Preparando',
             scheduled: 'Programada',
             running: 'Procesando',

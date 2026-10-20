@@ -71,6 +71,7 @@ export interface BuildingLocation {
 }
 
 export type ReconstructionStatus =
+    | 'waiting_for_upload'
     | 'preparing'
     | 'scheduled'
     | 'running'
@@ -151,10 +152,11 @@ export interface Reconstruction {
     updated_at: string;
 }
 
-export interface ReconstructionSubmission {
-    video: File;
+export type ReconstructionSource = { video: File } | { uploadId: string };
+
+export type ReconstructionSubmission = ReconstructionSource & {
     settings: SplatGenerationSettings;
-}
+};
 
 export function getCurrentUser(): Promise<CurrentUser> {
     return requestJson('/user/me');
@@ -357,6 +359,30 @@ export function createBuildingFromReconstructionResumable(
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tus_upload_id: tusUploadId, building, settings }),
+    });
+}
+
+export function createReconstructionFromUpload(
+    buildingId: string,
+    uploadId: string,
+    settings: SplatGenerationSettings,
+): Promise<Reconstruction> {
+    return requestJson(`/buildings/${encodeURIComponent(buildingId)}/reconstructions/from-upload`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ upload_id: uploadId, settings }),
+    });
+}
+
+export function createBuildingFromReconstructionUpload(
+    building: BuildingCreate,
+    uploadId: string,
+    settings: SplatGenerationSettings,
+): Promise<BuildingFromReconstruction> {
+    return requestJson('/buildings/from-reconstruction/from-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ upload_id: uploadId, building, settings }),
     });
 }
 

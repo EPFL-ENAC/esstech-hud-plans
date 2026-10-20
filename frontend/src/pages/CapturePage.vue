@@ -21,7 +21,25 @@
                     accept="video/*"
                     :disable="sourceSelectionDisabled"
                 />
+                <span class="text-grey text-italic">{{ t('common.or') }}</span>
+                <q-btn
+                    :label="t('uploads.picker.action')"
+                    :disable="sourceSelectionDisabled"
+                    icon="video_library"
+                    color="primary"
+                    outline
+                    no-caps
+                    @click="pickerOpen = true"
+                />
             </div>
+            <uploaded-video-picker-dialog v-model="pickerOpen" @select="selectUpload" />
+            <uploaded-video-details
+                v-if="selectedUpload"
+                :upload="selectedUpload"
+                :disable="sourceSelectionDisabled"
+                class="q-mb-md"
+                @clear="selectedUpload = null"
+            />
             <video-preview
                 :file="videoFile"
                 :fallback-duration-seconds="fallbackDurationSeconds"
@@ -32,107 +50,42 @@
             />
         </section>
 
-        <section class="q-mb-xl">
-            <h2 class="text-h6 text-weight-bold">{{ t('capture.destinationBuilding') }}</h2>
-            <building-picker
-                v-model="buildingSelection"
-                :disable="submitting || destinationBuildingId !== null"
-                class="q-mb-md"
-                @valid="hasValidBuilding = $event"
-            />
-        </section>
-
-        <section class="q-mb-xl">
-            <h2 class="text-h6 text-weight-bold">{{ t('capture.reconstructionSettings') }}</h2>
-            <q-select
-                v-model="preset"
-                outlined
-                :options="presetOptions"
-                emit-value
-                map-options
-                :label="t('capture.preset')"
-                class="q-mb-xl"
-            />
-            <section
-                v-if="preset === 'advanced'"
-                class="q-mb-xl"
-                :aria-label="t('capture.advancedSettings')"
-            >
-                <reconstruction-settings v-model="advancedSettings" />
-                <p v-if="!hasValidSettings" class="text-negative q-mt-md" role="alert">
-                    {{ t('capture.invalidSettings') }}
-                </p>
-            </section>
-            <q-banner v-if="submissionError" class="bg-red-1 text-negative q-mb-md" role="alert">
-                {{ submissionError }}
-                <template v-if="destinationBuildingId" #action>
-                    <q-btn
-                        flat
-                        no-caps
-                        :label="t('buildings.view')"
-                        @click="openBuilding(destinationBuildingId)"
-                    />
-                </template>
-            </q-banner>
-        </section>
-
-        <video-upload-progress
-            v-if="submissionState.phase !== 'idle'"
-            :state="submissionState"
-            class="q-mb-md"
-        />
-
-        <q-btn
-            :label="t('capture.startProcessing')"
-            color="primary"
-            class="full-width"
-            unelevated
-            no-caps
-            :loading="submitting"
-            :disable="!canSubmit"
-            @click="startProcessing"
+        <q-banner v-if="navigationError" class="bg-red-1 text-negative q-mb-md" role="alert">
+            {{ navigationError }}
+        </q-banner>
+        <reconstruction-form
+            ref="form"
+            v-model:building-selection="buildingSelection"
+            v-model:preset="preset"
+            v-model:advanced-settings="advancedSettings"
+            :source="source"
+            :disabled="openingRecorder"
         />
     </q-page>
 </template>
 
 <script setup lang="ts">
 import PageHeader from 'src/components/PageHeader.vue';
-import { computed, ref, shallowRef, watch } from 'vue';
+import { computed, ref, shallowRef, useTemplateRef, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { useQuasar } from 'quasar';
-import { useSubmitReconstructionMutation } from 'src/mutations/reconstructions';
 import { makeEmptyCaptureDraft, useCaptureStore } from 'src/stores/capture';
-import { useUiStore } from 'src/stores/ui';
-import VideoUploadProgress from 'src/components/VideoUploadProgress.vue';
 import FilePickerButton from 'src/components/FilePickerButton.vue';
 import VideoPreview from 'src/components/VideoPreview.vue';
+import UploadedVideoDetails from 'src/components/UploadedVideoDetails.vue';
+import UploadedVideoPickerDialog from 'src/components/UploadedVideoPickerDialog.vue';
 import type { VideoMetadata } from 'src/components/VideoPreview.types';
-import BuildingPicker from 'src/components/BuildingPicker.vue';
-import type { BuildingSelection } from 'src/lib/buildings';
-import ReconstructionSettings from 'src/components/ReconstructionSettings.vue';
-import {
-    type ReconstructionPreset,
-    isValidReconstructionSettings,
-    makeDefaultReconstructionSettings,
-    toSplatGenerationSettings,
-} from 'src/lib/reconstruction-settings';
+import type { BuildingSelection, ReconstructionSource } from 'src/lib/buildings';
+import type { UserUpload } from 'src/lib/uploads';
+import type { ReconstructionPreset } from 'src/lib/reconstruction-settings';
+import ReconstructionForm from 'src/components/ReconstructionForm.vue';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
 
 const router = useRouter();
 const route = useRoute();
-const ui = useUiStore();
-const $q = useQuasar();
-const {
-    mutateAsync: submitReconstruction,
-    isLoading: submitting,
-    submissionState,
-    destinationBuildingId,
-    errorMessage: mutationError,
-} = useSubmitReconstructionMutation();
 const navigationError = ref('');
-const submissionError = computed(() => navigationError.value || mutationError.value);
+const form = useTemplateRef<InstanceType<typeof ReconstructionForm>>('form');
 
 const captureStore = useCaptureStore();
 const savedDraft = captureStore.takeDraft();
@@ -156,7 +109,6 @@ function defaultBuildingSelection(): BuildingSelection {
 const buildingSelection = ref<BuildingSelection>(
     hasMatchingDraft ? draft.buildingSelection : defaultBuildingSelection(),
 );
-const hasValidBuilding = ref(false);
 watch(
     () => route.query.buildingId,
     () => {
@@ -165,16 +117,10 @@ watch(
 );
 
 const preset = ref<ReconstructionPreset>(draft.preset);
-const presetOptions = computed(() => [
-    { value: 'indoors', label: t('capture.presets.indoors') },
-    { value: 'outdoors', label: t('capture.presets.outdoors') },
-    { value: 'advanced', label: t('capture.presets.advanced') },
-]);
 const advancedSettings = ref(draft.advancedSettings);
-const hasValidSettings = computed(
-    () => preset.value !== 'advanced' || isValidReconstructionSettings(advancedSettings.value),
-);
 const videoFile = ref<File | null>(draft.videoFile);
+const selectedUpload = ref<UserUpload | null>(draft.selectedUpload);
+const pickerOpen = ref(false);
 const fallbackDurationSeconds = computed(() =>
     capturedVideo.value && videoFile.value === capturedVideo.value.file
         ? capturedVideo.value.durationSeconds
@@ -184,22 +130,26 @@ watch(
     videoFile,
     (file) => {
         if (file !== capturedVideo.value?.file) capturedVideo.value = null;
+        if (file) selectedUpload.value = null;
     },
     { flush: 'sync' },
 );
 const videoMetadata = ref<VideoMetadata | null>(null);
 const openingRecorder = ref(false);
 const sourceSelectionDisabled = computed(
-    () => openingRecorder.value || submitting.value || destinationBuildingId.value !== null,
+    () => openingRecorder.value || form.value?.locked === true,
 );
-const canSubmit = computed(
-    () =>
-        !sourceSelectionDisabled.value &&
-        videoFile.value !== null &&
-        videoMetadata.value !== null &&
-        hasValidSettings.value &&
-        hasValidBuilding.value,
-);
+const source = computed<ReconstructionSource | null>(() => {
+    if (selectedUpload.value) return { uploadId: selectedUpload.value.id };
+    if (videoFile.value && videoMetadata.value) return { video: videoFile.value };
+    return null;
+});
+
+function selectUpload(upload: UserUpload): void {
+    if (sourceSelectionDisabled.value) return;
+    videoFile.value = null;
+    selectedUpload.value = upload;
+}
 
 async function openRecorder(): Promise<void> {
     if (sourceSelectionDisabled.value) return;
@@ -208,6 +158,7 @@ async function openRecorder(): Promise<void> {
     captureStore.saveDraft({
         returnTo: route.fullPath,
         videoFile: videoFile.value,
+        selectedUpload: selectedUpload.value,
         capturedVideo: capturedVideo.value,
         buildingSelection: buildingSelection.value,
         preset: preset.value,
@@ -226,44 +177,6 @@ async function openRecorder(): Promise<void> {
         openingRecorder.value = false;
     }
 }
-
-async function startProcessing(): Promise<void> {
-    if (!canSubmit.value || !videoFile.value) return;
-
-    const submission = {
-        video: videoFile.value,
-        settings: toSplatGenerationSettings(
-            preset.value === 'advanced'
-                ? advancedSettings.value
-                : makeDefaultReconstructionSettings(preset.value),
-        ),
-    };
-    navigationError.value = '';
-    // Colada exposes submission errors through mutationError, including retained IDs.
-    await submitReconstruction({ ...submission, ...buildingSelection.value }).catch(
-        () => undefined,
-    );
-
-    if (destinationBuildingId.value === null) return;
-    $q.notify({
-        type: mutationError.value ? 'negative' : 'positive',
-        message: mutationError.value || t('reconstructions.submitted'),
-        position: 'top',
-    });
-    await openBuilding(destinationBuildingId.value);
-}
-
-async function openBuilding(buildingId: string): Promise<void> {
-    ui.setBackground('library');
-    try {
-        const failure = await router.push(`/building/${encodeURIComponent(buildingId)}`);
-        if (failure) {
-            navigationError.value = t('buildings.savedNavigationFailed');
-        }
-    } catch {
-        navigationError.value = t('buildings.savedNavigationFailed');
-    }
-}
 </script>
 
 <style scoped>
@@ -274,8 +187,8 @@ async function openBuilding(buildingId: string): Promise<void> {
 }
 
 .video-source-actions {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) max-content minmax(0, 1fr);
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 12px;
     margin-bottom: 24px;
@@ -287,7 +200,23 @@ async function openBuilding(buildingId: string): Promise<void> {
     overflow-wrap: anywhere;
 }
 
+.video-source-actions > .q-btn,
+.video-source-actions > :deep(.file-picker-button) {
+    flex: 1 1 160px;
+}
+
 .capture-video-preview {
     margin-bottom: 24px;
+}
+
+@media (max-width: 599px) {
+    .video-source-actions > span {
+        display: none;
+    }
+
+    .video-source-actions > .q-btn,
+    .video-source-actions > :deep(.file-picker-button) {
+        flex-basis: 100%;
+    }
 }
 </style>

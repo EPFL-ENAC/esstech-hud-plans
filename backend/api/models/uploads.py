@@ -53,6 +53,7 @@ class UserUploadRead(BaseModel):
     description: str
     filename: str
     size_bytes: int
+    uploaded_bytes: int
     status: UploadStatus
     created_at: datetime
     uploaded_at: datetime | None
@@ -73,6 +74,10 @@ class UserUploads(SQLModel, table=True):  # type: ignore[call-arg]
     description: str = ""
     filename: str
     size_bytes: int = Field(sa_column=Column(BigInteger, nullable=False))
+    uploaded_bytes: int = Field(
+        default=0,
+        sa_column=Column(BigInteger, nullable=False, server_default="0"),
+    )
     file_path: str
     status: UploadStatus = Field(
         default=UploadStatus.PENDING,

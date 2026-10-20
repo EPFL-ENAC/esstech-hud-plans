@@ -7,7 +7,16 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict
 from pydantic import Field as PydanticField
-from sqlalchemy import JSON, CheckConstraint, Column, DateTime, Index, String
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Uuid,
+)
 from sqlalchemy.orm import relationship
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -19,6 +28,7 @@ if TYPE_CHECKING:
 
 
 class ReconstructionStatus(StrEnum):
+    WAITING_FOR_UPLOAD = "waiting_for_upload"
     PREPARING = "preparing"
     SCHEDULED = "scheduled"
     RUNNING = "running"
@@ -65,6 +75,7 @@ class ReconstructionRead(BaseModel):
 
     id: UUID
     building_id: UUID
+    upload_id: UUID | None
     prefect_workflow_id: UUID | None
     status: ReconstructionStatus
     progress: float
@@ -94,7 +105,7 @@ class Reconstruction(SQLModel, table=True):  # type: ignore[call-arg]
         ),
         CheckConstraint(
             "status IN ("
-            "'preparing', 'scheduled', 'running', 'completed', "
+            "'waiting_for_upload', 'preparing', 'scheduled', 'running', 'completed', "
             "'failed', 'cancelled', 'crashed'"
             ")",
             name="ck_reconstructions_status",
@@ -106,6 +117,19 @@ class Reconstruction(SQLModel, table=True):  # type: ignore[call-arg]
         foreign_key="buildings.id",
         ondelete="CASCADE",
         index=True,
+    )
+    upload_id: UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid,
+            ForeignKey(
+                "user_uploads.id",
+                name="fk_reconstructions_upload_id",
+                ondelete="SET NULL",
+            ),
+            nullable=True,
+            index=True,
+        ),
     )
     prefect_workflow_id: UUID | None = Field(default=None, index=True, unique=True)
     status: ReconstructionStatus = Field(
@@ -199,13 +223,19 @@ class Reconstruction(SQLModel, table=True):  # type: ignore[call-arg]
     def mark_completed_in_memory(
         self,
         artifacts: ReconstructionArtifactUpdate,
-    ) -> None:
+    ) -> bool:
         """Apply successful completion and its final artifacts."""
 
+        if self.status in {
+            ReconstructionStatus.CANCELLED,
+            ReconstructionStatus.COMPLETED,
+        }:
+            return False
         self.apply_artifact_update_in_memory(artifacts)
         self.status = ReconstructionStatus.COMPLETED
         self.progress = 1.0
         self.error_message = None
+        return True
 
     def mark_terminal_in_memory(
         self,
@@ -220,7 +250,10 @@ class Reconstruction(SQLModel, table=True):  # type: ignore[call-arg]
             ReconstructionStatus.CRASHED,
         }:
             raise ValueError("status must be failed, cancelled, or crashed")
-        if self.status == ReconstructionStatus.COMPLETED:
+        if self.status in {
+            ReconstructionStatus.COMPLETED,
+            ReconstructionStatus.CANCELLED,
+        }:
             return False
 
         self.status = status

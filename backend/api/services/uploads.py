@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import logging
 from pathlib import Path
 from typing import Literal
@@ -14,7 +15,9 @@ from api.lib.upload_storage import (
     copy_completed_file,
     remove_tus_files,
     upload_file_path,
+    validate_completed_file,
 )
+from api.models.reconstruction import Reconstruction, ReconstructionStatus
 from api.models.uploads import (
     UploadStatus,
     UserUploadCreate,
@@ -22,6 +25,7 @@ from api.models.uploads import (
     UserUploadUpdate,
 )
 from api.models.user import utc_now
+from api.services.reconstructions import ReconstructionService
 
 SortOrder = Literal["asc", "desc"]
 logger = logging.getLogger(__name__)
@@ -111,7 +115,8 @@ class UserUploadsService:
         offset: int = 0,
         limit: int = 100,
         sort_order: SortOrder = "desc",
-    ) -> list[UserUploads]:
+        status: UploadStatus | None = None,
+    ) -> builtins.list[UserUploads]:
         if offset < 0:
             raise ValueError("offset must be non-negative")
         if not 1 <= limit <= 100:
@@ -124,12 +129,11 @@ class UserUploadsService:
             if sort_order == "asc"
             else (col(UserUploads.created_at).desc(), col(UserUploads.id).desc())
         )
+        query = select(UserUploads).where(UserUploads.user_id == user_id)
+        if status is not None:
+            query = query.where(UserUploads.status == status)
         result = await self._session.exec(
-            select(UserUploads)
-            .where(UserUploads.user_id == user_id)
-            .order_by(*ordering)
-            .offset(offset)
-            .limit(limit)
+            query.order_by(*ordering).offset(offset).limit(limit)
         )
         return list(result.all())
 
@@ -152,8 +156,32 @@ class UserUploadsService:
         await self._commit_and_refresh(upload)
         return upload
 
+    async def update_progress(
+        self,
+        upload_id: UUID,
+        *,
+        uploaded_bytes: int,
+    ) -> None:
+        """Record increasing progress without racing upload completion."""
+
+        try:
+            upload = await self._get_for_update(upload_id)
+            if not 0 <= uploaded_bytes <= upload.size_bytes:
+                raise UploadConflictError("Upload progress is outside the file size")
+            if (
+                upload.status == UploadStatus.PENDING
+                and uploaded_bytes > upload.uploaded_bytes
+            ):
+                upload.uploaded_bytes = uploaded_bytes
+                self._session.add(upload)
+            # Also release the row lock when the event did not advance progress.
+            await self._session.commit()
+        except BaseException:
+            await self._session.rollback()
+            raise
+
     async def complete(self, upload_id: UUID) -> UserUploads:
-        """Persist completed bytes before publishing the uploaded status."""
+        """Persist completed bytes, then dispatch reconstructions awaiting them."""
 
         try:
             upload = await self._get_for_update(upload_id)
@@ -169,20 +197,27 @@ class UserUploadsService:
             )
 
             upload.file_path = str(destination)
+            upload.uploaded_bytes = upload.size_bytes
             upload.status = UploadStatus.UPLOADED
             if upload.uploaded_at is None:
                 upload.uploaded_at = utc_now()
             self._session.add(upload)
-            await self._commit_and_refresh(upload)
-        except Exception:
+            await self._session.flush()
+            await self._session.refresh(upload)
+            await self._session.commit()
+        except BaseException:
             await self._session.rollback()
             raise
 
         # Never remove the recoverable staging copy before the DB commit.
         try:
-            await run_in_threadpool(remove_tus_files, upload_id)
+            remove_tus_files(upload_id)
         except OSError:
             logger.exception("Could not remove staging files for upload %s", upload_id)
+
+        await ReconstructionService(self._session).schedule_waiting_for_upload(
+            upload_id
+        )
         return upload
 
     async def get_completed(
@@ -195,19 +230,30 @@ class UserUploadsService:
         if upload is None:
             raise UploadNotFoundError("Upload not found")
         self.require_uploaded(upload)
-        # Older completed rows may still point at the tus staging directory.
-        return await self.complete(upload.id)
+        validate_completed_file(Path(upload.file_path), upload.size_bytes)
+        return upload
 
     def require_uploaded(self, upload: UserUploads) -> None:
         if upload.status != UploadStatus.UPLOADED:
             raise UploadConflictError("Upload has not finished uploading")
 
-    async def delete(self, upload: UserUploads) -> None:
-        self.require_uploaded(upload)
+    async def delete(self, upload_id: UUID) -> None:
         try:
+            upload = await self._get_for_update(upload_id)
+            self.require_uploaded(upload)
+            waiting_id = await self._session.scalar(
+                select(Reconstruction.id)
+                .where(
+                    Reconstruction.upload_id == upload.id,
+                    Reconstruction.status == ReconstructionStatus.WAITING_FOR_UPLOAD,
+                )
+                .limit(1)
+            )
+            if waiting_id is not None:
+                raise UploadConflictError("Reconstructions are waiting for this upload")
             await self._session.delete(upload)
             await self._session.commit()
-        except Exception:
+        except BaseException:
             await self._session.rollback()
             raise
 
@@ -226,7 +272,7 @@ class UserUploadsService:
     async def _commit_and_refresh(self, upload: UserUploads) -> None:
         try:
             await self._session.commit()
-        except Exception:
+        except BaseException:
             await self._session.rollback()
             raise
         await self._session.refresh(upload)

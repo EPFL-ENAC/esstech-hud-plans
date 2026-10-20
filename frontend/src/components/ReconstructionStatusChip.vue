@@ -22,6 +22,10 @@ const failure = { color: 'negative', background: 'bg-red-1' };
 const statuses = computed(
     () =>
         ({
+            waiting_for_upload: {
+                label: t('reconstructions.status.waiting_for_upload'),
+                ...active,
+            },
             preparing: { label: t('reconstructions.status.preparing'), ...active },
             scheduled: { label: t('reconstructions.status.scheduled'), ...active },
             running: { label: t('reconstructions.status.running'), ...active },
@@ -41,7 +45,7 @@ const statuses = computed(
 );
 
 const isProcessing = computed(() =>
-    ['preparing', 'scheduled', 'running', 'cancelling'].includes(
+    ['waiting_for_upload', 'preparing', 'scheduled', 'running', 'cancelling'].includes(
         props.reconstruction?.status ?? '',
     ),
 );

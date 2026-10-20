@@ -6,7 +6,7 @@
                 no-caps
                 color="primary"
                 :label="t('capture.newCapture')"
-                @click="$router.push('/capture')"
+                @click="$router.push({ name: 'reconstruction-upload-picker' })"
             />
         </page-header>
 

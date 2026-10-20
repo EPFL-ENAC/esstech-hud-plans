@@ -23,6 +23,7 @@ SortOrder = Literal["asc", "desc"]
 ReconstructionStatusFilter = Literal["processing", "idle"]
 
 ACTIVE_RECONSTRUCTION_STATUSES = (
+    ReconstructionStatus.WAITING_FOR_UPLOAD,
     ReconstructionStatus.PREPARING,
     ReconstructionStatus.SCHEDULED,
     ReconstructionStatus.RUNNING,
@@ -81,7 +82,9 @@ class BuildingService:
         )
         statement = (
             select(Building, Reconstruction)
-            .outerjoin(Reconstruction, Reconstruction.id == latest_reconstruction_id)
+            .outerjoin(
+                Reconstruction, col(Reconstruction.id) == latest_reconstruction_id
+            )
             .where(Building.user_id == user_id)
         )
         if reconstruction_status is not None:
@@ -166,24 +169,36 @@ class BuildingService:
     async def delete(self, building: Building) -> None:
         # Reconstruct rows cascade-delete with the building, but their workflow
         # runs and artifact files must be cleaned up first to avoid leaks.
-        result = await self._session.exec(
-            select(Reconstruction).where(Reconstruction.building_id == building.id)
-        )
-        reconstruction_service = ReconstructionService(self._session)
-        for reconstruction in result.all():
-            await reconstruction_service.delete(reconstruction)
-
         try:
-            await self._session.delete(building)
+            current = await self._session.scalar(
+                select(Building)
+                .where(Building.id == building.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            if current is None:
+                await self._session.commit()
+                return
+            result = await self._session.exec(
+                select(Reconstruction)
+                .where(Reconstruction.building_id == current.id)
+                .order_by(col(Reconstruction.id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            reconstruction_service = ReconstructionService(self._session)
+            for reconstruction in result.all():
+                await reconstruction_service._delete_locked(reconstruction)
+            await self._session.delete(current)
             await self._session.commit()
-        except Exception:
+        except BaseException:
             await self._session.rollback()
             raise
 
     async def _commit_and_refresh(self, building: Building) -> None:
         try:
             await self._session.commit()
-        except Exception:
+        except BaseException:
             await self._session.rollback()
             raise
         await self._session.refresh(building)

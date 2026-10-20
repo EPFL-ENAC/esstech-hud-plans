@@ -57,7 +57,7 @@ const captions = {
     },
 };
 const token = `test.${Buffer.from(JSON.stringify({ sub: 'uploads-browser-user', exp: 4_000_000_000 })).toString('base64url')}.test`;
-const rows = Array.from({ length: 25 }, (_, index) => ({
+const initialRows = Array.from({ length: 25 }, (_, index) => ({
     id: `00000000-0000-0000-0000-${String(index + 1).padStart(12, '0')}`,
     user_id: 'browser-user-private-id',
     name: index === 1 ? 'North facade' : 'TODO',
@@ -65,6 +65,7 @@ const rows = Array.from({ length: 25 }, (_, index) => ({
     filename:
         index === 0 ? `${'very_long_video_filename_'.repeat(5)}.mp4` : `video-${index + 1}.mp4`,
     size_bytes: index === 2 ? 0 : 12_400_000,
+    uploaded_bytes: index % 3 === 1 ? 12_400_000 : 0,
     status: ['pending', 'uploaded', 'failed'][index % 3],
     created_at: '2026-10-14T10:00:00Z',
     uploaded_at: index % 3 === 1 ? '2026-10-14T10:05:00Z' : null,
@@ -86,6 +87,12 @@ try {
             desktop: { width: 1440, height: 1000 },
         })) {
             const context = await browser.newContext({ viewport, serviceWorkers: 'block' });
+            const rows = initialRows.map((row) => ({ ...row }));
+            const percent = (ratio) =>
+                new Intl.NumberFormat(locale, {
+                    style: 'percent',
+                    maximumFractionDigits: 0,
+                }).format(ratio);
             try {
                 await context.addInitScript(
                     ({ token, locale }) => {
@@ -125,6 +132,7 @@ try {
                                 email: 'tester@example.test',
                                 created_at: '2026-10-14T10:00:00Z',
                                 updated_at: '2026-10-14T10:00:00Z',
+                                terms_accepted: true,
                             },
                         });
                     }
@@ -146,6 +154,9 @@ try {
                     return route.fulfill({ json: body });
                 });
                 const page = await context.newPage();
+                page.setDefaultTimeout(15_000);
+                page.setDefaultNavigationTimeout(20_000);
+                await page.clock.install();
                 const items = page.locator('.uploads-list').getByRole('listitem');
                 async function capture(state) {
                     if (locale === 'en')
@@ -171,7 +182,8 @@ try {
                 release = undefined;
                 await items.first().waitFor();
                 assert.equal(await items.count(), 20);
-                for (const status of text.statuses)
+                assert.equal(await items.first().locator('.q-chip').innerText(), percent(0));
+                for (const status of text.statuses.slice(1))
                     await page
                         .locator('.q-chip')
                         .getByText(status, { exact: true })
@@ -215,10 +227,95 @@ try {
                 await page.locator('a[href="#/uploads"]').click();
                 await page.getByText(rows[0].filename, { exact: true }).waitFor();
                 assert.equal(await items.count(), 20);
-                assert.deepEqual(requests, [0, 20]);
+                await waitFor(() => requests.length === 3);
+                assert.deepEqual(requests, [0, 20, 0]);
+                await page.waitForFunction(
+                    () => document.querySelector('.uploads-query')?.ariaBusy === 'false',
+                );
+
+                // Polls keep their controls usable and do not show a refreshing banner.
+                rows[0].uploaded_bytes = rows[0].size_bytes / 2;
+                hold = true;
+                const beforePoll = requests.length;
+                await page.clock.fastForward(5_000);
+                await waitFor(() => release !== undefined);
+                assert.equal(requests.length, beforePoll + 1);
+                assert.equal(requests.at(-1), 0);
+                assert.equal(await items.first().locator('.q-chip').innerText(), percent(0));
+                assert.equal(await page.locator('.uploads-query .q-spinner').count(), 0);
+                assert.equal(
+                    await page
+                        .getByRole('button', { name: text.refresh, exact: true })
+                        .isDisabled(),
+                    false,
+                );
+                assert.equal(
+                    await pagination.getByRole('button', { name: '2', exact: true }).isDisabled(),
+                    false,
+                );
+                const releasePoll = release;
+                hold = false;
+                release = undefined;
+                await pagination.getByRole('button', { name: '2', exact: true }).click();
+                await page.getByText('video-21.mp4', { exact: true }).waitFor();
+                const pollResponse = page.waitForResponse((response) => {
+                    const url = new URL(response.url());
+                    return (
+                        url.pathname.endsWith('/uploads') && url.searchParams.get('offset') === '0'
+                    );
+                });
+                releasePoll();
+                await pollResponse;
+                assert.equal(await items.count(), 5);
+                await pagination.getByRole('button', { name: '1', exact: true }).click();
+                await items
+                    .first()
+                    .locator('.q-chip')
+                    .getByText(percent(0.5), { exact: true })
+                    .waitFor();
+
+                // Full transferred bytes remain a percentage until finalization completes.
+                rows[0].uploaded_bytes = rows[0].size_bytes;
+                await page.clock.fastForward(5_000);
+                await items
+                    .first()
+                    .locator('.q-chip')
+                    .getByText(percent(1), { exact: true })
+                    .waitFor();
+                for (const row of rows.slice(0, 20)) {
+                    if (row.status === 'pending') {
+                        row.status = 'uploaded';
+                        row.uploaded_bytes = row.size_bytes;
+                        row.uploaded_at = '2026-10-14T10:05:00Z';
+                    }
+                }
+                await page.clock.fastForward(5_000);
+                await items
+                    .first()
+                    .locator('.q-chip')
+                    .getByText(text.statuses[1], { exact: true })
+                    .waitFor();
+                const afterCompletion = requests.length;
+                await page.clock.fastForward(10_000);
+                assert.equal(requests.length, afterCompletion);
 
                 mode = 'error';
+                hold = true;
                 await page.getByRole('button', { name: text.refresh, exact: true }).click();
+                await waitFor(() => release !== undefined);
+                assert.equal(
+                    await page
+                        .getByRole('button', { name: text.refresh, exact: true })
+                        .isDisabled(),
+                    true,
+                );
+                assert.equal(
+                    await pagination.getByRole('button', { name: '2', exact: true }).isDisabled(),
+                    true,
+                );
+                hold = false;
+                release();
+                release = undefined;
                 await page.getByText(text.refreshFailed, { exact: true }).waitFor();
                 assert.equal(await items.count(), 20);
                 mode = 'empty';
@@ -258,7 +355,7 @@ try {
                 assert.equal(await items.count(), 20);
                 assert.deepEqual(errors, []);
                 console.log(
-                    `${locale} ${viewportName}: navigation, loading, pagination, refresh/retry, and empty states passed`,
+                    `${locale} ${viewportName}: percentages, quiet polling, pagination, completion, manual refresh/retry, and empty states passed`,
                 );
             } finally {
                 await context.close();

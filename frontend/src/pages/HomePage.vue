@@ -10,7 +10,7 @@
                         bordered
                         clickable
                         class="link-card"
-                        @click="$router.push('/capture')"
+                        @click="$router.push({ name: 'reconstruction-upload-picker' })"
                     >
                         <q-card-section class="column">
                             <q-avatar

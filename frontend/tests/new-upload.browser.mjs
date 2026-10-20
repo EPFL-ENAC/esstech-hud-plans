@@ -90,6 +90,7 @@ try {
                                 name: 'Tester',
                                 username: 'tester',
                                 email: 'test@example.test',
+                                terms_accepted: true,
                             },
                         });
                     if (path === '/uploads') {
@@ -146,6 +147,7 @@ try {
                             description: '',
                             filename,
                             size_bytes: Number(request.headers()['upload-length']),
+                            uploaded_bytes: 0,
                             status: 'pending',
                             created_at: new Date().toISOString(),
                             uploaded_at: null,
@@ -197,6 +199,7 @@ try {
                     assert.ok(row);
                     assert.equal(request.headers()['upload-offset'], String(row.offset));
                     row.offset += request.postDataBuffer().length;
+                    row.uploaded_bytes = row.offset;
                     row.status = 'uploaded';
                     row.uploaded_at = new Date().toISOString();
                     return route.fulfill({

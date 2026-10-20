@@ -7,6 +7,7 @@ import { uploadVideoResumable, type ResumableUploadResult } from 'src/lib/utils/
 
 export interface UploadVideoVariables {
     file: File;
+    onUploadAvailable?: (uploadId: string) => void;
 }
 
 export type UploadTransferState =
@@ -22,13 +23,13 @@ export function useUploadVideoMutation() {
         if (subject === null) return;
         void queryCache
             .invalidateQueries({
-                key: ['uploads', subject, 'list'],
+                key: ['uploads', subject],
             })
             .catch((error: unknown) => console.warn('Could not refresh upload data', error));
     }
 
     const mutation = useMutation<ResumableUploadResult, UploadVideoVariables, unknown>({
-        mutation: async ({ file }) => {
+        mutation: async ({ file, onUploadAvailable }) => {
             if (subject === null || getAuthSubject() !== subject) {
                 throw new ApiError('Upload account has changed', 401, null);
             }
@@ -45,7 +46,10 @@ export function useUploadVideoMutation() {
                         if (transferState.value.phase !== 'uploading') return;
                         transferState.value = { ...transferState.value, resumed: true };
                     },
-                    onUploadAvailable: invalidateUploads,
+                    onUploadAvailable(uploadId) {
+                        invalidateUploads();
+                        onUploadAvailable?.(uploadId);
+                    },
                 });
             } finally {
                 transferState.value = { phase: 'idle' };

@@ -10,13 +10,19 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from api.db import get_session
 from api.models.uploads import (
+    UploadStatus,
     UserUploadRead,
     UserUploads,
     UserUploadUpdate,
 )
 from api.models.user import User
 from api.services.auth import require_user
-from api.services.uploads import SortOrder, UploadConflictError, UserUploadsService
+from api.services.uploads import (
+    SortOrder,
+    UploadConflictError,
+    UploadNotFoundError,
+    UserUploadsService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +72,7 @@ async def list_uploads(
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 100,
     sort_order: SortOrder = "desc",
+    upload_status: Annotated[UploadStatus | None, Query(alias="status")] = None,
 ) -> list[UserUploads]:
     try:
         return await uploads.list(
@@ -73,6 +80,7 @@ async def list_uploads(
             offset=offset,
             limit=limit,
             sort_order=sort_order,
+            status=upload_status,
         )
     except (OSError, SQLAlchemyError) as exc:
         raise _database_unavailable(exc) from exc
@@ -105,7 +113,9 @@ async def delete_upload(
     """Delete the metadata row without touching files."""
 
     try:
-        await uploads.delete(upload)
+        await uploads.delete(upload.id)
+    except UploadNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
     except UploadConflictError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

@@ -1,4 +1,4 @@
-"""Shared dependencies and validation for resumable video reconstruction submissions."""
+"""Shared dependencies and validation for video reconstruction submissions."""
 
 import logging
 from typing import Annotated
@@ -12,7 +12,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from api.db import get_session
 from api.lib.tus import parse_upload_id
 from api.models.building import BuildingCreate
-from api.models.uploads import UserUploads
+from api.models.uploads import UploadStatus, UserUploads
 from api.models.workflows import SplatGenerationWorkflowSettings
 from api.services.reconstructions import ReconstructionService
 from api.services.uploads import (
@@ -51,17 +51,34 @@ class ResumableBuildingFromReconstructionSubmission(BaseModel):
     )
 
 
-async def validate_tus_upload(
-    upload_id: str,
+class UploadReconstructionSubmission(BaseModel):
+    """Submit a pending or completed user upload."""
+
+    upload_id: UUID
+    settings: SplatGenerationWorkflowSettings = Field(
+        default_factory=SplatGenerationWorkflowSettings
+    )
+
+
+class BuildingFromUploadReconstructionSubmission(UploadReconstructionSubmission):
+    building: BuildingCreate = Field(default_factory=BuildingCreate)
+
+
+async def validate_user_upload(
+    upload_id: UUID,
     *,
     user_id: UUID,
     uploads: UserUploadsService,
 ) -> UserUploads:
-    """Resolve a completed video belonging to the submitting user."""
+    """Resolve an owned pending or completed upload before creating rows."""
 
-    parsed_id = parse_upload_id(upload_id)
     try:
-        return await uploads.get_completed(parsed_id, user_id=user_id)
+        upload = await uploads.get(upload_id, user_id=user_id)
+        if upload is None:
+            raise UploadNotFoundError("Upload not found")
+        if upload.status == UploadStatus.PENDING:
+            return upload
+        return await uploads.get_completed(upload_id, user_id=user_id)
     except UploadNotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     except UploadConflictError as exc:
@@ -72,3 +89,15 @@ async def validate_tus_upload(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "Upload persistence is unavailable",
         ) from exc
+
+
+async def validate_tus_upload(
+    upload_id: str,
+    *,
+    user_id: UUID,
+    uploads: UserUploadsService,
+) -> UserUploads:
+    """Resolve a pending or completed tus upload belonging to the user."""
+
+    parsed_id = parse_upload_id(upload_id)
+    return await validate_user_upload(parsed_id, user_id=user_id, uploads=uploads)

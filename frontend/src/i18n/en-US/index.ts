@@ -60,6 +60,12 @@ export default {
         deleteAllDataFailed: 'Could not delete your data. Please try again.',
     },
     uploads: {
+        picker: {
+            action: 'Uploaded video',
+            title: 'Choose an uploaded video',
+            empty: 'No completed video uploads yet.',
+            useVideo: 'Use video',
+        },
         title: 'Uploads',
         refresh: 'Refresh',
         loading: 'Loading uploads…',
@@ -71,6 +77,11 @@ export default {
         pagination: 'Upload list pagination',
         created: 'Created {date}',
         uploaded: 'Uploaded {date}',
+        record: {
+            action: 'Take a video',
+            failed: 'The upload of {filename} failed.',
+            navigationFailed: 'Could not open the uploads list. Please try again.',
+        },
         new: {
             title: 'New upload',
             instructions:
@@ -316,6 +327,16 @@ export default {
         },
     },
     reconstructions: {
+        fromUpload: {
+            starting: 'Upload is starting',
+            openForm: 'Open reconstruction form',
+            navigationFailed: 'Could not open the reconstruction form. Please try again.',
+            pickerNavigationFailed: 'Could not open upload selection. Please try again.',
+            title: 'Choose an upload',
+            unavailable: 'This upload is unavailable or you do not have access to it.',
+            loadFailed: 'Could not load this upload. Please try again.',
+            failedUpload: 'This upload failed and cannot be used for reconstruction.',
+        },
         title: 'Reconstructions',
         new: 'New reconstruction',
         named: 'Reconstruction {id}',
@@ -339,6 +360,7 @@ export default {
         pagination: 'Reconstruction pagination',
         noReconstruction: 'No reconstruction yet',
         status: {
+            waiting_for_upload: 'Waiting for upload',
             preparing: 'Preparing',
             scheduled: 'Scheduled',
             running: 'Processing',

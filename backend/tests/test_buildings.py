@@ -548,6 +548,7 @@ def test_latest_attempt_ignores_status_and_older_updates(
             assert item.latest_reconstruction is not None
             assert item.latest_reconstruction.model_dump() == expected
             still_active = status in {
+                ReconstructionStatus.WAITING_FOR_UPLOAD,
                 ReconstructionStatus.PREPARING,
                 ReconstructionStatus.SCHEDULED,
                 ReconstructionStatus.RUNNING,
@@ -932,6 +933,7 @@ def test_building_routes_return_reconstruction_summary(
     ]
     assert api_client.get(f"/buildings/{created['id']}").json() == created
     active = status in {
+        ReconstructionStatus.WAITING_FOR_UPLOAD,
         ReconstructionStatus.PREPARING,
         ReconstructionStatus.SCHEDULED,
         ReconstructionStatus.RUNNING,

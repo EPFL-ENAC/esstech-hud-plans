@@ -20,7 +20,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.background import BackgroundTask
-from starlette.concurrency import run_in_threadpool
 
 from api.config import config
 from api.lib.tus import (
@@ -284,11 +283,19 @@ async def proxy_create(request: Request) -> Response:
 @router.head("/files/{upload_id}")
 async def proxy_head(
     request: Request,
-    upload: CurrentTusUpload,
-    uploads: UploadsService,
+    upload: Annotated[UserUploads, Depends(get_owned_tus_upload)],
+    uploads: Annotated[UserUploadsService, Depends(get_uploads_service)],
 ) -> Response:
     if upload.status == UploadStatus.UPLOADED:
-        stored = await require_stored_upload(upload, uploads)
+        try:
+            stored = await uploads.complete(upload.id)
+        except UploadNotFoundError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except UploadConflictError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except (OSError, SQLAlchemyError) as exc:
+            logger.exception("Upload HEAD persistence or dispatch failed")
+            raise HTTPException(503, "Upload persistence is unavailable") from exc
         return completed_upload_response(stored, 200)
 
     async def on_head(response: httpx.Response) -> None:
@@ -331,7 +338,7 @@ async def proxy_delete(
         raise HTTPException(409, str(exc)) from exc
     await require_stored_upload(upload, uploads)
     try:
-        await run_in_threadpool(remove_tus_files, upload.id)
+        remove_tus_files(upload.id)
     except OSError as exc:
         raise HTTPException(503, "Upload staging cleanup is unavailable") from exc
     return Response(status_code=204, headers={"Tus-Resumable": "1.0.0"})

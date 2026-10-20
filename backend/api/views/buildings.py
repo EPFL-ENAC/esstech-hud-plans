@@ -28,14 +28,18 @@ from api.services.buildings import (
     SortOrder,
 )
 from api.services.reconstructions import (
+    ReconstructionConflictError,
     ReconstructionCreationError,
+    ReconstructionInputNotFoundError,
     ReconstructionService,
 )
 from api.services.uploads import UserUploadsService
 from api.views.reconstruction_submission import (
+    BuildingFromUploadReconstructionSubmission,
     ResumableBuildingFromReconstructionSubmission,
     get_reconstruction_service,
     validate_tus_upload,
+    validate_user_upload,
 )
 from api.views.uploads import get_uploads_service
 
@@ -106,7 +110,7 @@ async def create_building(
         404: {
             "description": "The upload is not owned by the submitting user or is unknown."
         },
-        409: {"description": "The upload has not completed."},
+        409: {"description": "The upload has failed."},
         422: {"description": "Missing fields or invalid building/workflow settings."},
         503: {
             "model": BuildingFromReconstructionError,
@@ -127,8 +131,7 @@ async def create_building_from_reconstruction_resumable(
     ],
     uploads: Annotated[UserUploadsService, Depends(get_uploads_service)],
 ) -> BuildingFromReconstructionRead:
-    """Create an owned building, then submit its first reconstruction from a
-    completed tus upload."""
+    """Create a building and reconstruction from a pending or completed tus upload."""
     upload = await validate_tus_upload(
         payload.tus_upload_id,
         user_id=current_user.id,
@@ -145,12 +148,90 @@ async def create_building_from_reconstruction_resumable(
     # Keep response data available even if reconstruction rollback expires ORM rows.
     building_read = BuildingRead.model_validate(created_building)
     try:
-        reconstruction = await reconstructions.create_from_tus(
-            building=created_building,
-            tus_upload_path=upload.file_path,
-            tus_video_filename=upload.filename,
+        reconstruction = await reconstructions.create_from_upload(
+            user_id=current_user.id,
+            building_id=building_read.id,
+            upload_id=upload.id,
             settings=payload.settings,
         )
+    except ReconstructionInputNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ReconstructionConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ReconstructionCreationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "message": str(exc),
+                "building_id": str(building_read.id),
+                "reconstruction_id": str(exc.reconstruction.id),
+            },
+        ) from exc
+    except (OSError, SQLAlchemyError) as exc:
+        logger.exception("Reconstruction database operation failed", exc_info=exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "message": "Reconstruction database is unavailable",
+                "building_id": str(building_read.id),
+            },
+        ) from exc
+
+    return BuildingFromReconstructionRead(
+        building=building_read,
+        reconstruction=ReconstructionRead.model_validate(reconstruction),
+    )
+
+
+@router.post(
+    "/from-reconstruction/from-upload",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=BuildingFromReconstructionRead,
+    responses={
+        401: {"description": "Authentication is required."},
+        404: {"description": "The upload is unknown or belongs to another user."},
+        409: {"description": "The upload has failed."},
+        422: {"description": "Invalid upload ID, building, or workflow settings."},
+        503: {"model": BuildingFromReconstructionError},
+    },
+)
+async def create_building_from_reconstruction_upload(
+    payload: BuildingFromUploadReconstructionSubmission,
+    current_user: Annotated[User, Depends(require_user)],
+    buildings: Annotated[BuildingService, Depends(get_building_service)],
+    reconstructions: Annotated[
+        ReconstructionService,
+        Depends(get_reconstruction_service),
+    ],
+    uploads: Annotated[UserUploadsService, Depends(get_uploads_service)],
+) -> BuildingFromReconstructionRead:
+    """Create a building and reconstruction from a pending or completed upload."""
+
+    upload = await validate_user_upload(
+        payload.upload_id,
+        user_id=current_user.id,
+        uploads=uploads,
+    )
+    try:
+        created_building = await buildings.create(
+            user_id=current_user.id,
+            payload=payload.building,
+        )
+    except (OSError, SQLAlchemyError) as exc:
+        raise _database_unavailable(exc) from exc
+
+    building_read = BuildingRead.model_validate(created_building)
+    try:
+        reconstruction = await reconstructions.create_from_upload(
+            user_id=current_user.id,
+            building_id=building_read.id,
+            upload_id=upload.id,
+            settings=payload.settings,
+        )
+    except ReconstructionInputNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ReconstructionConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
     except ReconstructionCreationError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

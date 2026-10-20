@@ -49,6 +49,17 @@ const routes: RouteRecordRaw[] = [
                 component: () => import('pages/NewUploadPage.vue'),
             },
             {
+                path: 'reconstructions/from-upload',
+                name: 'reconstruction-upload-picker',
+                component: () => import('pages/ReconstructionUploadPickerPage.vue'),
+            },
+            {
+                path: 'reconstructions/from-upload/:uploadId',
+                name: 'reconstruction-from-upload',
+                props: true,
+                component: () => import('pages/ReconstructionFromUploadPage.vue'),
+            },
+            {
                 path: 'more/settings',
                 name: 'settings',
                 meta: { drawer: true },
@@ -181,8 +192,18 @@ const routes: RouteRecordRaw[] = [
     // Full-screen camera capture page. The page component owns its layout so
     // the main navigation drawer and footer do not affect it.
     {
+        path: '/reconstructions/from-upload/record',
+        name: 'record-reconstruction-upload',
+        component: () => import('pages/RecordReconstructionUploadPage.vue'),
+    },
+    {
         path: '/capture/record',
         component: () => import('pages/CaptureRecordPage.vue'),
+    },
+    {
+        path: '/uploads/record',
+        name: 'record-upload',
+        component: () => import('pages/RecordUploadPage.vue'),
     },
 
     // Auth routes, outside the main layout (no header/drawer)

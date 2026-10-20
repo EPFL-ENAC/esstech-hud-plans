@@ -47,6 +47,7 @@ def _hook_payload(
     filename: str = "scan.mp4",
     size: object = 11,
     size_is_deferred: bool = False,
+    offset: int | None = None,
 ) -> dict[str, Any]:
     request_headers: dict[str, object] = (
         {"Authorization": ["Bearer forwarded-token"]}
@@ -58,10 +59,16 @@ def _hook_payload(
         "Type": hook_type,
         "Event": {
             "Upload": {
-                "ID": UPLOAD_ID.hex if hook_type == "pre-finish" else None,
+                "ID": UPLOAD_ID.hex if hook_type != "pre-create" else None,
                 "Size": size,
                 "SizeIsDeferred": size_is_deferred,
-                "Offset": size if hook_type == "pre-finish" else 0,
+                "Offset": (
+                    offset
+                    if offset is not None
+                    else size
+                    if hook_type == "pre-finish"
+                    else 0
+                ),
                 "MetaData": {"filename": filename},
                 "IsPartial": False,
                 "IsFinal": False,
@@ -183,6 +190,7 @@ def test_hook_accepts_valid_pre_create(
         Path(config.TUSD_UPLOAD_DIR).resolve() / UPLOAD_ID.hex
     )
     assert upload.status == UploadStatus.PENDING
+    assert upload.uploaded_bytes == 0
     assert upload.uploaded_at is None
     assert len(received) == 1
     assert received[0].scheme == "Bearer"
@@ -433,6 +441,14 @@ def test_resumable_reconstruction_submission_passes_tus_parameters(
     upload_id = uuid4().hex
     _make_tus_upload(tus_dir, upload_id, filename="recording.mov")
     _register_tus_upload(client, upload_id, filename="recording.mov")
+
+    async def complete() -> None:
+        async with AsyncSession(
+            client.app.state.upload_database, expire_on_commit=False
+        ) as session:
+            await UserUploadsService(session).complete(UUID(upload_id))
+
+    asyncio.run(complete())
     captured: dict[str, object] = {}
 
     async def fake_schedule(**kwargs: object) -> UUID:
@@ -473,6 +489,14 @@ def test_permanent_upload_can_be_submitted_twice(
     upload_id = uuid4().hex
     _make_tus_upload(tus_dir, upload_id)
     _register_tus_upload(client, upload_id)
+
+    async def complete() -> None:
+        async with AsyncSession(
+            client.app.state.upload_database, expire_on_commit=False
+        ) as session:
+            await UserUploadsService(session).complete(UUID(upload_id))
+
+    asyncio.run(complete())
     url = f"/buildings/{building_id}/reconstructions/resumable"
     first = client.post(url, json={"tus_upload_id": upload_id})
     assert first.status_code == 202
@@ -484,7 +508,7 @@ def test_permanent_upload_can_be_submitted_twice(
 
 
 @pytest.mark.parametrize("new_building", [False, True])
-@pytest.mark.parametrize("case", ["unknown", "unowned", "pending", "failed", "missing"])
+@pytest.mark.parametrize("case", ["unknown", "unowned", "failed", "missing"])
 def test_reconstruction_rejects_unavailable_upload_before_creating_records(
     tus_api: tuple[TestClient, UUID, Path],
     new_building: bool,
@@ -561,7 +585,7 @@ def test_resumable_building_from_reconstruction_creates_linked_records(
     assert body["reconstruction"]["status"] == "scheduled"
 
 
-def test_resumable_submission_rejects_incomplete_upload(
+def test_resumable_submission_waits_for_incomplete_upload(
     tus_api: tuple[TestClient, UUID, Path],
 ) -> None:
     client, building_id, tus_dir = tus_api
@@ -574,8 +598,12 @@ def test_resumable_submission_rejects_incomplete_upload(
         json={"tus_upload_id": upload_id, "settings": {}},
     )
 
-    assert response.status_code == 409
-    assert client.get(f"/buildings/{building_id}/reconstructions").json() == []
+    assert response.status_code == 202
+    assert response.json()["status"] == "waiting_for_upload"
+    assert response.json()["prefect_workflow_id"] is None
+    assert client.get(f"/buildings/{building_id}/reconstructions").json() == [
+        response.json()
+    ]
 
 
 def test_resumable_submission_maps_scheduling_failure_to_503(
@@ -749,6 +777,7 @@ def test_pre_finish_marks_uploaded_before_acknowledging(
     uploaded = _read_hook_upload(tus_hook_api)
     assert uploaded is not None
     assert uploaded.status == UploadStatus.UPLOADED
+    assert uploaded.uploaded_bytes == uploaded.size_bytes
     assert uploaded.uploaded_at is not None
     assert uploaded.file_path == str(upload_file_path(UPLOAD_ID, "scan.mp4"))
     assert Path(uploaded.file_path).read_bytes() == b"video bytes"
@@ -792,13 +821,15 @@ def test_pre_finish_rejects_unregistered_upload(tus_hook_api: TestClient) -> Non
 
 
 @pytest.mark.parametrize("secret", ["", "incorrect"])
+@pytest.mark.parametrize("hook_type", ["pre-create", "post-receive"])
 def test_hook_rejects_invalid_internal_credential(
     tus_hook_api: TestClient,
     secret: str,
+    hook_type: str,
 ) -> None:
     response = tus_hook_api.post(
         "/tus/hooks",
-        json=_hook_payload(),
+        json=_hook_payload(hook_type=hook_type),
         headers={TUS_HOOK_SECRET_HEADER: secret},
     )
     assert response.status_code == 403
@@ -864,19 +895,24 @@ def test_creation_rejects_conflicting_registration(
     assert upload.size_bytes == 11
 
 
-@pytest.mark.parametrize("operation", ["create", "complete"])
+@pytest.mark.parametrize("operation", ["create", "update_progress", "complete"])
 def test_hook_database_failures_are_retryable(
     monkeypatch: pytest.MonkeyPatch,
     tus_hook_api: TestClient,
     operation: str,
 ) -> None:
     monkeypatch.setattr(tus_views, "authenticate_user", _accept_any_token([]))
-    if operation == "complete":
+    if operation != "create":
         assert tus_hook_api.post("/tus/hooks", json=_hook_payload()).status_code == 200
     if operation == "complete":
         _make_tus_upload(Path(config.TUSD_UPLOAD_DIR), UPLOAD_ID.hex)
     payload = _hook_payload(
-        hook_type="pre-finish" if operation == "complete" else "pre-create",
+        hook_type={
+            "create": "pre-create",
+            "update_progress": "post-receive",
+            "complete": "pre-finish",
+        }[operation],
+        offset=5 if operation == "update_progress" else None,
     )
     with monkeypatch.context() as patches:
         patches.setattr(
@@ -889,6 +925,77 @@ def test_hook_database_failures_are_retryable(
     upload = _read_hook_upload(tus_hook_api)
     assert upload is None or upload.status == UploadStatus.PENDING
     assert tus_hook_api.post("/tus/hooks", json=payload).status_code == 200
+
+
+def test_post_receive_records_progress_without_completing(
+    monkeypatch: pytest.MonkeyPatch,
+    tus_hook_api: TestClient,
+) -> None:
+    monkeypatch.setattr(tus_views, "authenticate_user", _accept_any_token([]))
+    assert tus_hook_api.post("/tus/hooks", json=_hook_payload()).status_code == 200
+    for offset, expected in [(5, 5), (5, 5), (3, 5), (11, 11)]:
+        response = tus_hook_api.post(
+            "/tus/hooks",
+            json=_hook_payload(hook_type="post-receive", offset=offset, headers={}),
+        )
+        assert response.status_code == 200
+        assert response.json() == {}
+        upload = _read_hook_upload(tus_hook_api)
+        assert upload is not None
+        assert upload.uploaded_bytes == expected
+        assert upload.status == UploadStatus.PENDING
+        assert upload.uploaded_at is None
+
+    _make_tus_upload(Path(config.TUSD_UPLOAD_DIR), UPLOAD_ID.hex)
+    assert (
+        tus_hook_api.post(
+            "/tus/hooks", json=_hook_payload(hook_type="pre-finish", headers={})
+        ).status_code
+        == 200
+    )
+    completed = _read_hook_upload(tus_hook_api)
+    assert (
+        tus_hook_api.post(
+            "/tus/hooks",
+            json=_hook_payload(hook_type="post-receive", offset=5, headers={}),
+        ).status_code
+        == 200
+    )
+    assert _read_hook_upload(tus_hook_api) == completed
+
+
+@pytest.mark.parametrize(
+    ("changes", "expected_status"),
+    [
+        ({"Offset": -1}, 400),
+        ({"Offset": 12}, 400),
+        ({"Offset": True}, 400),
+        ({"Size": 12}, 409),
+        ({"MetaData": {"filename": "other.mp4"}}, 409),
+    ],
+)
+def test_post_receive_rejects_invalid_or_mismatched_progress(
+    monkeypatch: pytest.MonkeyPatch,
+    tus_hook_api: TestClient,
+    changes: dict[str, object],
+    expected_status: int,
+) -> None:
+    monkeypatch.setattr(tus_views, "authenticate_user", _accept_any_token([]))
+    assert tus_hook_api.post("/tus/hooks", json=_hook_payload()).status_code == 200
+    before = _read_hook_upload(tus_hook_api)
+    payload = _hook_payload(hook_type="post-receive", offset=5)
+    payload["Event"]["Upload"].update(changes)
+    response = tus_hook_api.post("/tus/hooks", json=payload)
+    assert response.status_code == expected_status
+    assert _read_hook_upload(tus_hook_api) == before
+
+
+def test_post_receive_rejects_unregistered_upload(tus_hook_api: TestClient) -> None:
+    response = tus_hook_api.post(
+        "/tus/hooks", json=_hook_payload(hook_type="post-receive", offset=5)
+    )
+    assert response.status_code == 404
+    assert _read_hook_upload(tus_hook_api) is None
 
 
 def test_remove_staging_upload_deletes_pair_inside_staging_dir(

@@ -62,6 +62,12 @@ export default {
         deleteAllDataFailed: 'Impossible de supprimer vos données. Veuillez réessayer.',
     },
     uploads: {
+        picker: {
+            action: 'Vidéo déjà envoyée',
+            title: 'Choisir une vidéo envoyée',
+            empty: 'Aucun envoi de vidéo terminé pour le moment.',
+            useVideo: 'Utiliser la vidéo',
+        },
         title: 'Envois',
         refresh: 'Actualiser',
         loading: 'Chargement des envois…',
@@ -74,6 +80,11 @@ export default {
         pagination: 'Pagination de la liste des envois',
         created: 'Créé le {date}',
         uploaded: 'Envoyé le {date}',
+        record: {
+            action: 'Filmer une vidéo',
+            failed: 'L’envoi de {filename} a échoué.',
+            navigationFailed: 'Impossible d’ouvrir la liste des envois. Veuillez réessayer.',
+        },
         new: {
             title: 'Nouvel envoi',
             instructions:
@@ -335,6 +346,18 @@ export default {
         },
     },
     reconstructions: {
+        fromUpload: {
+            starting: 'L’envoi démarre',
+            openForm: 'Ouvrir le formulaire de reconstruction',
+            navigationFailed:
+                'Impossible d’ouvrir le formulaire de reconstruction. Veuillez réessayer.',
+            pickerNavigationFailed:
+                'Impossible d’ouvrir la sélection des envois. Veuillez réessayer.',
+            title: 'Choisir un envoi',
+            unavailable: 'Cet envoi est indisponible ou vous n’y avez pas accès.',
+            loadFailed: 'Impossible de charger cet envoi. Veuillez réessayer.',
+            failedUpload: 'Cet envoi a échoué et ne peut pas être utilisé pour une reconstruction.',
+        },
         title: 'Reconstructions',
         new: 'Nouvelle reconstruction',
         named: 'Reconstruction {id}',
@@ -358,6 +381,7 @@ export default {
         pagination: 'Pagination des reconstructions',
         noReconstruction: 'Aucune reconstruction pour le moment',
         status: {
+            waiting_for_upload: 'En attente de l’envoi',
             preparing: 'Préparation',
             scheduled: 'Planifiée',
             running: 'Traitement en cours',

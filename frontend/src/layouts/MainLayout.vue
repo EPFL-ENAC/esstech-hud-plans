@@ -21,7 +21,11 @@
                 class="text-grey-7"
             >
                 <q-route-tab to="/home" icon="home" :label="t('navigation.home')" />
-                <q-route-tab to="/capture" icon="photo_camera" :label="t('navigation.capture')" />
+                <q-route-tab
+                    :to="{ name: 'reconstruction-upload-picker' }"
+                    icon="photo_camera"
+                    :label="t('navigation.capture')"
+                />
                 <q-route-tab to="/library" icon="list" :label="t('navigation.library')" />
                 <q-route-tab to="/more" icon="more_horiz" :label="t('navigation.more')" />
             </q-tabs>
@@ -41,7 +45,7 @@
                     </q-item-section>
                     <q-item-section>{{ t('navigation.home') }}</q-item-section>
                 </q-item>
-                <q-item clickable v-ripple :to="'/capture'">
+                <q-item clickable v-ripple :to="{ name: 'reconstruction-upload-picker' }">
                     <q-item-section avatar>
                         <q-icon name="photo_camera" />
                     </q-item-section>
