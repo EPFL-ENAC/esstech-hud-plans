@@ -38,6 +38,7 @@ async function fixture(t, initialSubject = 'user-a') {
         vue: {
             computed: vue.computed,
             ref: vue.ref,
+            watch: vue.watch,
             onActivated: (callback) => activated.push(callback),
             onDeactivated: (callback) => deactivated.push(callback),
         },
@@ -426,13 +427,13 @@ for (const status of [401, 403, 404, 422]) {
     });
 }
 
-test('initial failures and upload lists do not opt into polling', async (t) => {
+test('initial failures and completed upload lists do not opt into polling', async (t) => {
     const f = await fixture(t);
     const query = f.uploadQuery(ref('initial-failure'));
     respond(f.requests[0], { detail: 'Unavailable' }, 503);
     await nextTurn();
     f.query();
-    respond(f.requests[1], [{ ...rows('list')[0], status: 'pending' }]);
+    respond(f.requests[1], rows('list'));
     await nextTurn();
     await f.advance(20_000);
     assert.equal(f.requests.length, 2);
@@ -491,4 +492,138 @@ test('an account change stops the previous account from polling', async (t) => {
     f.setSubject('user-b');
     await f.advance(10_000);
     assert.equal(f.requests.length, 1);
+});
+
+test('upload lists poll once per page and stop when visible pending uploads finish', async (t) => {
+    const f = await fixture(t);
+    const query = f.query();
+    const page = rows('page', 21);
+    page[0] = { ...page[0], status: 'pending', uploaded_bytes: 10 };
+    page[20] = { ...page[20], status: 'pending', uploaded_bytes: 0 };
+    respond(f.requests[0], page);
+    await nextTurn();
+    await f.advance(4_999);
+    assert.equal(f.requests.length, 1);
+    await f.advance(1);
+    assert.equal(f.requests.length, 2);
+    assert.equal(
+        f.requests[1].url,
+        'https://hud.test/api/uploads?offset=0&limit=21&sort_order=desc',
+    );
+    await f.advance(10_000);
+    assert.equal(f.requests.length, 2, 'Slow polls must not overlap');
+    page[0] = { ...page[0], uploaded_bytes: 60 };
+    respond(f.requests[1], page);
+    await nextTurn();
+    assert.equal(query.data.value[0].uploaded_bytes, 60);
+    await f.advance(5_000);
+    page[0] = { ...page[0], status: 'uploaded', uploaded_bytes: 100 };
+    respond(f.requests[2], page);
+    await nextTurn();
+    await f.advance(20_000);
+    assert.equal(f.requests.length, 3, 'The extra pagination row must not keep polling alive');
+});
+
+test('upload list polling follows pagination and scope disposal', async (t) => {
+    const f = await fixture(t);
+    const offset = ref(0);
+    const query = f.query(offset);
+    respond(f.requests[0], [{ ...rows('first')[0], status: 'pending' }]);
+    await nextTurn();
+    await f.advance(5_000);
+    offset.value = 20;
+    await nextTick();
+    assert.equal(f.requests.length, 3);
+    assert.equal(new URL(f.requests[2].url).searchParams.get('offset'), '20');
+    respond(f.requests[2], [{ ...rows('second')[0], status: 'pending' }]);
+    respond(f.requests[1], rows('first'));
+    await nextTurn();
+    assert.equal(query.data.value[0].id, 'second-0');
+    await f.advance(5_000);
+    assert.equal(f.requests.length, 4);
+    assert.equal(new URL(f.requests[3].url).searchParams.get('offset'), '20');
+    f.stop();
+    respond(f.requests[3], [{ ...rows('second')[0], status: 'pending' }]);
+    await nextTurn();
+    await f.advance(10_000);
+    assert.equal(f.requests.length, 4);
+});
+
+for (const pause of ['visibility', 'activation']) {
+    test(`upload list polling pauses and resumes with ${pause}`, async (t) => {
+        const f = await fixture(t);
+        f.query();
+        const pending = [{ ...rows('list')[0], status: 'pending' }];
+        respond(f.requests[0], pending);
+        await nextTurn();
+        const setEnabled = pause === 'visibility' ? f.setVisible : f.setActive;
+        await setEnabled(false);
+        await f.advance(10_000);
+        assert.equal(f.requests.length, 1);
+        await setEnabled(true);
+        assert.equal(f.requests.length, 2);
+        respond(f.requests[1], pending);
+        await nextTurn();
+        await f.advance(5_000);
+        assert.equal(f.requests.length, 3);
+        respond(f.requests[2], rows('list'));
+    });
+}
+
+for (const status of [401, 403, 404, 422, 503]) {
+    test(`upload list polling handles HTTP ${status}`, async (t) => {
+        t.mock.method(console, 'error', () => {});
+        const f = await fixture(t);
+        const query = f.query();
+        const pending = [{ ...rows('list')[0], status: 'pending', uploaded_bytes: 25 }];
+        respond(f.requests[0], pending);
+        await nextTurn();
+        await f.advance(5_000);
+        respond(f.requests[1], { detail: 'Unavailable' }, status);
+        await nextTurn();
+        assert.equal(query.data.value[0].uploaded_bytes, 25);
+        await f.advance(5_000);
+        if (status === 503) {
+            assert.equal(f.requests.length, 3);
+            respond(f.requests[2], rows('list'));
+            await nextTurn();
+            assert.equal(query.state.value.status, 'success');
+        } else {
+            assert.equal(f.requests.length, 2);
+        }
+    });
+}
+
+test('an account change stops upload list polling', async (t) => {
+    const f = await fixture(t);
+    f.query();
+    respond(f.requests[0], [{ ...rows('private')[0], status: 'pending' }]);
+    await nextTurn();
+    f.setSubject('user-b');
+    await f.advance(10_000);
+    assert.equal(f.requests.length, 1);
+});
+
+test('returning to a pending cached page restarts polling after an off-page response', async (t) => {
+    const f = await fixture(t);
+    const offset = ref(0);
+    const query = f.query(offset);
+    const pending = [{ ...rows('first')[0], status: 'pending', uploaded_bytes: 25 }];
+    respond(f.requests[0], pending);
+    await nextTurn();
+    await f.advance(5_000);
+    offset.value = 20;
+    await nextTick();
+    respond(f.requests[2], rows('second'));
+    respond(f.requests[1], pending);
+    await nextTurn();
+    offset.value = 0;
+    await nextTick();
+    assert.equal(query.data.value[0].uploaded_bytes, 25);
+    assert.equal(f.requests.length, 4);
+    respond(f.requests[3], pending);
+    await nextTurn();
+    await f.advance(5_000);
+    assert.equal(f.requests.length, 5);
+    respond(f.requests[4], rows('first'));
 });

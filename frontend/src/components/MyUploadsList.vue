@@ -3,7 +3,7 @@
         <QueryStateSwitcher
             class="uploads-query"
             :state="state"
-            :async-status="asyncStatus"
+            :async-status="isLoading ? 'loading' : 'idle'"
             :retry="refetch"
             :loading-message="t('uploads.loading')"
             :error-message="data ? t('uploads.refreshFailed') : t('uploads.loadFailed')"
@@ -69,7 +69,7 @@
                                 :color="statusColors[upload.status]"
                                 class="q-ma-none"
                             >
-                                {{ t(`uploads.status.${upload.status}`) }}
+                                {{ uploadStatusLabel(upload) }}
                             </q-chip>
                             <div v-if="$slots.action" class="q-mt-sm">
                                 <slot name="action" :upload="upload" />
@@ -116,7 +116,11 @@ defineSlots<{
 
 const { t, locale } = useI18n();
 const offset = ref(0);
-const { data, state, asyncStatus, isLoading, refetch } = useMyUploadsQuery(offset);
+const { data, state, isLoading: queryIsLoading, refetch: refetchQuery } = useMyUploadsQuery(offset);
+const manualRefreshing = ref(false);
+const isLoading = computed(
+    () => queryIsLoading.value && (data.value === undefined || manualRefreshing.value),
+);
 const uploads = computed(() => data.value?.slice(0, MY_UPLOADS_PAGE_SIZE) ?? []);
 const hasNext = computed(() => (data.value?.length ?? 0) > MY_UPLOADS_PAGE_SIZE);
 const page = computed({
@@ -130,6 +134,13 @@ const statusColors: Record<UploadStatus, string> = {
     uploaded: 'positive',
     failed: 'negative',
 };
+const percentFormatter = computed(
+    () =>
+        new Intl.NumberFormat(locale.value, {
+            style: 'percent',
+            maximumFractionDigits: 0,
+        }),
+);
 const dateFormatter = computed(
     () =>
         new Intl.DateTimeFormat(locale.value, {
@@ -144,6 +155,28 @@ const dateFormatter = computed(
 function formatDate(value: string): string {
     return dateFormatter.value.format(new Date(value));
 }
+
+function uploadStatusLabel(upload: UserUpload): string {
+    if (upload.status !== 'pending') {
+        return t(`uploads.status.${upload.status}`);
+    }
+
+    const ratio =
+        upload.size_bytes > 0
+            ? Math.min(1, Math.max(0, upload.uploaded_bytes / upload.size_bytes))
+            : 0;
+    return percentFormatter.value.format(ratio);
+}
+
+async function refetch() {
+    manualRefreshing.value = true;
+    try {
+        return await refetchQuery();
+    } finally {
+        manualRefreshing.value = false;
+    }
+}
+
 defineExpose({ refetch, isLoading });
 </script>
 

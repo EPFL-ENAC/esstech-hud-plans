@@ -5,7 +5,7 @@ Backend :
 - _splat_generation_parameters should be a proper dataclas with .from_xxx() methods
 - views/reconstruction_submissions.py doesn't have any endpoint and thus shouldn't be in /views/
 - Revisit tus cleanup later : it needs to be database-aware to mark abandoned uploads as failed when their staging files are deleted while preserving completed uploads.
-- add upload progress to the db rows so that we can show progress everywhere
+- paginated queries should return the total number of items or pages (whatever is easier), so that the frontend doesn't need to fetch extra items to guess if there is a next page
 
 Frontend :
 - shitty validation wrappers (isRecord, isValidBuildingCreate, etc...)
@@ -16,3 +16,4 @@ Frontend :
 - check if we can make an helper to wire directly a query -> q-pagination
 - resumableDownload.ts is super ugly, maybe refactor (low priority)
 - duplication between all the record pages
+- auto-polling queries, like useMyUploadsQuery() work by re-fetching the whole list over and over until no item is pending. That means a lot of wasted traffic for page_size >>> pending_items_count. We should probably poll only on the affected IDs, meaning probably having backend endpoints that accept a list of IDs, to refetch only those. Or, having a only_pending flags on the list endpoint (probably easier ?).
