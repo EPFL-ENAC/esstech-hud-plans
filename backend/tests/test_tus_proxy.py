@@ -356,7 +356,7 @@ def test_head_completion_dispatches_waiting_reconstruction(
     with monkeypatch.context() as patches:
         patches.setattr(
             ReconstructionService,
-            "_transition_waiting",
+            "_get_for_update",
             AsyncMock(
                 side_effect=OperationalError(
                     "UPDATE reconstructions",

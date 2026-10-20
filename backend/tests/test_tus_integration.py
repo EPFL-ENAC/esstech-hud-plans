@@ -45,7 +45,6 @@ from api.models.reconstruction import Reconstruction, ReconstructionStatus
 from api.models.user import User
 from api.services import auth as auth_service
 from api.services import uploads as upload_service
-from api.services.reconstructions import ReconstructionService
 from api.services.uploads import UserUploadsService
 from api.views import tus as tus_views
 from api.views.tus_proxy import close_tus_proxy
@@ -461,30 +460,32 @@ def test_submission_racing_completion_never_misses_or_duplicates_scheduling(
     location, upload_id = _start_upload(real_tus)
     paused = threading.Event()
     resume = threading.Event()
-    original_commit = ReconstructionService._commit_and_refresh
+    original_commit = AsyncSession.commit
     scheduled: list[dict[str, Any]] = []
 
-    async def commit_with_pause(
-        service: ReconstructionService,
-        reconstruction: Reconstruction,
-    ) -> None:
-        if reconstruction.status != ReconstructionStatus.WAITING_FOR_UPLOAD:
-            await original_commit(service, reconstruction)
+    async def commit_with_pause(session: AsyncSession) -> None:
+        creating = any(
+            isinstance(row, Reconstruction)
+            and row.status == ReconstructionStatus.WAITING_FOR_UPLOAD
+            for row in session.new
+        )
+        if not creating:
+            await original_commit(session)
             return
         if pause_after_commit:
-            await original_commit(service, reconstruction)
+            await original_commit(session)
         paused.set()
         assert await asyncio.to_thread(resume.wait, 15), "Creation was not resumed"
         if not pause_after_commit:
-            await original_commit(service, reconstruction)
+            await original_commit(session)
 
     async def schedule(**kwargs: Any) -> UUID:
         scheduled.append(kwargs)
         return uuid4()
 
-    monkeypatch.setattr(ReconstructionService, "_commit_and_refresh", commit_with_pause)
+    monkeypatch.setattr(AsyncSession, "commit", commit_with_pause)
     monkeypatch.setattr(splat_workflow, "schedule_splat_generation_from_tus", schedule)
-    with ThreadPoolExecutor(max_workers=1) as executor:
+    with ThreadPoolExecutor(max_workers=2) as executor:
         creation = executor.submit(
             client.post,
             "/buildings/from-reconstruction/from-upload",
@@ -492,7 +493,8 @@ def test_submission_racing_completion_never_misses_or_duplicates_scheduling(
         )
         try:
             assert paused.wait(10), "Creation did not reach the commit boundary"
-            completed = client.patch(
+            completion = executor.submit(
+                client.patch,
                 location,
                 headers={
                     "Content-Type": "application/offset+octet-stream",
@@ -500,14 +502,21 @@ def test_submission_racing_completion_never_misses_or_duplicates_scheduling(
                 },
                 content=b"video bytes",
             )
-            assert completed.status_code == 204, completed.text
-            assert len(scheduled) == (1 if pause_after_commit else 0)
+            if pause_after_commit:
+                completed = completion.result(timeout=15)
+                assert completed.status_code == 204, completed.text
+                assert len(scheduled) == 1
         finally:
             resume.set()
         result = creation.result(timeout=15)
+        completed = completion.result(timeout=15)
+        assert completed.status_code == 204, completed.text
     assert result.status_code == 202, result.text
     row = result.json()["reconstruction"]
-    assert row["status"] == "scheduled"
+    saved = client.get(
+        f"/buildings/{row['building_id']}/reconstructions/{row['id']}"
+    ).json()
+    assert saved["status"] == "scheduled"
     assert len(scheduled) == 1
     assert str(scheduled[0]["reconstruction_id"]) == row["id"]
     assert scheduled[0]["settings"].ffmpeg.fps == 4

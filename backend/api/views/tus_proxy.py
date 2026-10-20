@@ -20,7 +20,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.background import BackgroundTask
-from starlette.concurrency import run_in_threadpool
 
 from api.config import config
 from api.lib.tus import (
@@ -33,13 +32,11 @@ from api.lib.upload_storage import remove_tus_files
 from api.models.uploads import UploadStatus, UserUploads
 from api.models.user import User
 from api.services.auth import require_user
-from api.services.reconstructions import ReconstructionService
 from api.services.uploads import (
     UploadConflictError,
     UploadNotFoundError,
     UserUploadsService,
 )
-from api.views.reconstruction_submission import get_reconstruction_service
 from api.views.uploads import get_uploads_service
 
 logger = logging.getLogger(__name__)
@@ -215,7 +212,6 @@ async def reconcile_head(
     response: httpx.Response,
     upload: UserUploads,
     uploads: UserUploadsService,
-    reconstructions: ReconstructionService,
 ) -> None:
     if upload.status != UploadStatus.PENDING:
         return
@@ -226,8 +222,7 @@ async def reconcile_head(
         and response.headers.get("Upload-Offset") == str(upload.size_bytes)
     ):
         try:
-            stored = await uploads.complete(upload.id)
-            await reconstructions.schedule_waiting_for_upload(stored.id)
+            await uploads.complete(upload.id)
         except (OSError, SQLAlchemyError) as exc:
             logger.exception("Upload HEAD persistence failed")
             raise HTTPException(503, "Upload persistence is unavailable") from exc
@@ -290,22 +285,21 @@ async def proxy_head(
     request: Request,
     upload: Annotated[UserUploads, Depends(get_owned_tus_upload)],
     uploads: Annotated[UserUploadsService, Depends(get_uploads_service)],
-    reconstructions: Annotated[
-        ReconstructionService,
-        Depends(get_reconstruction_service),
-    ],
 ) -> Response:
     if upload.status == UploadStatus.UPLOADED:
-        stored = await require_stored_upload(upload, uploads)
         try:
-            await reconstructions.schedule_waiting_for_upload(stored.id)
+            stored = await uploads.complete(upload.id)
+        except UploadNotFoundError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except UploadConflictError as exc:
+            raise HTTPException(409, str(exc)) from exc
         except (OSError, SQLAlchemyError) as exc:
-            logger.exception("Upload HEAD reconstruction dispatch failed")
+            logger.exception("Upload HEAD persistence or dispatch failed")
             raise HTTPException(503, "Upload persistence is unavailable") from exc
         return completed_upload_response(stored, 200)
 
     async def on_head(response: httpx.Response) -> None:
-        await reconcile_head(response, upload, uploads, reconstructions)
+        await reconcile_head(response, upload, uploads)
 
     return await _forward(request, f"/files/{upload.id.hex}", on_head=on_head)
 
@@ -344,7 +338,7 @@ async def proxy_delete(
         raise HTTPException(409, str(exc)) from exc
     await require_stored_upload(upload, uploads)
     try:
-        await run_in_threadpool(remove_tus_files, upload.id)
+        remove_tus_files(upload.id)
     except OSError as exc:
         raise HTTPException(503, "Upload staging cleanup is unavailable") from exc
     return Response(status_code=204, headers={"Tus-Resumable": "1.0.0"})

@@ -24,6 +24,7 @@ class Config(BaseSettings):
     PREFECT_HOST: str = "localhost"
     PREFECT_PORT: int = 4200
     PREFECT_SPLAT_GENERATION_CONCURRENCY: int = 8
+    PREFECT_SUBMISSION_TIMEOUT_SECONDS: float = 15.0
     PREFECT_TUS_CLEANUP_CONCURRENCY: int = 1
 
     KEYCLOAK_ENDPOINT: str = "https://enac-it-sso2.epfl.ch"

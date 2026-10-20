@@ -223,13 +223,19 @@ class Reconstruction(SQLModel, table=True):  # type: ignore[call-arg]
     def mark_completed_in_memory(
         self,
         artifacts: ReconstructionArtifactUpdate,
-    ) -> None:
+    ) -> bool:
         """Apply successful completion and its final artifacts."""
 
+        if self.status in {
+            ReconstructionStatus.CANCELLED,
+            ReconstructionStatus.COMPLETED,
+        }:
+            return False
         self.apply_artifact_update_in_memory(artifacts)
         self.status = ReconstructionStatus.COMPLETED
         self.progress = 1.0
         self.error_message = None
+        return True
 
     def mark_terminal_in_memory(
         self,
@@ -244,7 +250,10 @@ class Reconstruction(SQLModel, table=True):  # type: ignore[call-arg]
             ReconstructionStatus.CRASHED,
         }:
             raise ValueError("status must be failed, cancelled, or crashed")
-        if self.status == ReconstructionStatus.COMPLETED:
+        if self.status in {
+            ReconstructionStatus.COMPLETED,
+            ReconstructionStatus.CANCELLED,
+        }:
             return False
 
         self.status = status

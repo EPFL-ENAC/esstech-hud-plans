@@ -22,7 +22,6 @@ from api.lib.tus import (
 )
 from api.models.uploads import UserUploadCreate, UserUploads
 from api.services.auth import authenticate_user
-from api.services.reconstructions import ReconstructionService
 from api.services.uploads import (
     UploadConflictError,
     UploadNotFoundError,
@@ -110,8 +109,7 @@ async def handle_pre_finish(
     await validate_upload_metadata(event, session)
     if event.offset != event.size_bytes:
         raise UploadConflictError("Upload completion offset does not match file size")
-    upload = await UserUploadsService(session).complete(event.upload_id)
-    await ReconstructionService(session).schedule_waiting_for_upload(upload.id)
+    await UserUploadsService(session).complete(event.upload_id)
     return {}
 
 

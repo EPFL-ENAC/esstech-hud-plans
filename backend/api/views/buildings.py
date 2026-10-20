@@ -28,7 +28,9 @@ from api.services.buildings import (
     SortOrder,
 )
 from api.services.reconstructions import (
+    ReconstructionConflictError,
     ReconstructionCreationError,
+    ReconstructionInputNotFoundError,
     ReconstructionService,
 )
 from api.services.uploads import UserUploadsService
@@ -147,10 +149,15 @@ async def create_building_from_reconstruction_resumable(
     building_read = BuildingRead.model_validate(created_building)
     try:
         reconstruction = await reconstructions.create_from_upload(
-            building=created_building,
-            upload=upload,
+            user_id=current_user.id,
+            building_id=building_read.id,
+            upload_id=upload.id,
             settings=payload.settings,
         )
+    except ReconstructionInputNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ReconstructionConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
     except ReconstructionCreationError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -216,10 +223,15 @@ async def create_building_from_reconstruction_upload(
     building_read = BuildingRead.model_validate(created_building)
     try:
         reconstruction = await reconstructions.create_from_upload(
-            building=created_building,
-            upload=upload,
+            user_id=current_user.id,
+            building_id=building_read.id,
+            upload_id=upload.id,
             settings=payload.settings,
         )
+    except ReconstructionInputNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ReconstructionConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
     except ReconstructionCreationError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

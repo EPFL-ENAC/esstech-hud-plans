@@ -11,15 +11,11 @@ from fastapi import Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.routing import APIRouter
 from sqlalchemy.exc import SQLAlchemyError
-from starlette.concurrency import run_in_threadpool
 
-from api.config import config
-from api.lib.compute import scitas as scitas_compute
 from api.lib.compute.colmap_geometric_data import colmap_compute_geometric_data
 from api.lib.workflows import common as workflow_common
 from api.lib.workflows.common import (
     WorkflowNotFoundError,
-    cancel_workflow,
     current_workflow_step,
     get_owned_workflow_run,
     stream_workflow_logs,
@@ -31,7 +27,9 @@ from api.models.reconstruction import (
     ReconstructionStatus,
 )
 from api.services.reconstructions import (
+    ReconstructionConflictError,
     ReconstructionCreationError,
+    ReconstructionInputNotFoundError,
     ReconstructionNotFoundError,
     ReconstructionService,
     SortOrder,
@@ -44,7 +42,6 @@ from api.views.reconstruction_submission import (
     UploadReconstructionSubmission,
     get_reconstruction_service,
     validate_tus_upload,
-    validate_user_upload,
 )
 from api.views.uploads import get_uploads_service
 
@@ -193,10 +190,15 @@ async def create_reconstruction_from_tus(
 
     try:
         return await reconstructions.create_from_upload(
-            building=building,
-            upload=upload,
+            user_id=building.user_id,
+            building_id=building.id,
+            upload_id=upload.id,
             settings=payload.settings,
         )
+    except ReconstructionInputNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ReconstructionConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
     except ReconstructionCreationError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -221,21 +223,20 @@ async def create_reconstruction_from_upload(
         ReconstructionService,
         Depends(get_reconstruction_service),
     ],
-    uploads: Annotated[UserUploadsService, Depends(get_uploads_service)],
 ) -> Reconstruction:
     """Create a reconstruction from a pending or completed user upload."""
 
-    upload = await validate_user_upload(
-        payload.upload_id,
-        user_id=building.user_id,
-        uploads=uploads,
-    )
     try:
         return await reconstructions.create_from_upload(
-            building=building,
-            upload=upload,
+            user_id=building.user_id,
+            building_id=building.id,
+            upload_id=payload.upload_id,
             settings=payload.settings,
         )
+    except ReconstructionInputNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ReconstructionConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
     except ReconstructionCreationError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -295,7 +296,9 @@ async def delete_reconstruction(
     ],
 ) -> None:
     try:
-        await reconstructions.delete(reconstruction)
+        await reconstructions.delete(reconstruction.id)
+    except ReconstructionNotFoundError as exc:
+        raise HTTPException(404, "Reconstruction not found") from exc
     except (OSError, SQLAlchemyError) as exc:
         raise _database_unavailable(exc) from exc
 
@@ -307,72 +310,17 @@ async def delete_reconstruction(
 )
 async def cancel_reconstruction(
     reconstruction: Annotated[Reconstruction, Depends(get_current_reconstruction)],
-    building: Annotated[Building, Depends(get_current_building)],
     reconstructions: Annotated[
         ReconstructionService,
         Depends(get_reconstruction_service),
     ],
 ) -> Reconstruction:
-    if reconstruction.status == ReconstructionStatus.WAITING_FOR_UPLOAD:
-        try:
-            reconstruction = await reconstructions.cancel_waiting(reconstruction.id)
-        except ReconstructionNotFoundError as exc:
-            raise HTTPException(404, "Reconstruction not found") from exc
-        except (OSError, SQLAlchemyError) as exc:
-            raise _database_unavailable(exc) from exc
-        if reconstruction.status == ReconstructionStatus.CANCELLED:
-            return reconstruction
-
-    if reconstruction.status not in (
-        ReconstructionStatus.PREPARING,
-        ReconstructionStatus.SCHEDULED,
-        ReconstructionStatus.RUNNING,
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Reconstruction is not processing (current status: {reconstruction.status})",
-        )
-
-    workflow_id = reconstruction.prefect_workflow_id
-    if workflow_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Reconstruction has no Prefect workflow",
-        )
-
     try:
-        await cancel_workflow(workflow_id)
-    except WorkflowNotFoundError:
-        # The workflow run no longer exists.
-        pass
-
-    # Cancel the related Slurm jobs now. The worker process does not notice
-    # cancellation of tasks that are blocked on I/O, so it keeps their
-    # Slurm jobs running.
-    # Run the cancellation in a threadpool. The call does blocking I/O (SSH
-    # and Prefect API calls), so it must not block the event loop.
-    if config.USE_SCITAS:
-        try:
-            await run_in_threadpool(
-                scitas_compute.cancel_registered_jobs, reconstruction.id.hex
-            )
-        except Exception:
-            logger.exception(
-                "Failed to cancel Slurm jobs for reconstruction %s", reconstruction.id
-            )
-
-    # The on_cancellation hook only runs in a worker or engine process that
-    # observes the run, so mark the reconstruction as cancelled here.
-    try:
-        return await reconstructions.mark_cancelled(
-            reconstruction.id,
-            error_message="Cancellation requested",
-        )
+        return await reconstructions.cancel(reconstruction.id)
     except ReconstructionNotFoundError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Reconstruction not found",
-        ) from exc
+        raise HTTPException(404, "Reconstruction not found") from exc
+    except ReconstructionConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
     except (OSError, SQLAlchemyError) as exc:
         raise _database_unavailable(exc) from exc
 

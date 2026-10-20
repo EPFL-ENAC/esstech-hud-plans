@@ -441,6 +441,14 @@ def test_resumable_reconstruction_submission_passes_tus_parameters(
     upload_id = uuid4().hex
     _make_tus_upload(tus_dir, upload_id, filename="recording.mov")
     _register_tus_upload(client, upload_id, filename="recording.mov")
+
+    async def complete() -> None:
+        async with AsyncSession(
+            client.app.state.upload_database, expire_on_commit=False
+        ) as session:
+            await UserUploadsService(session).complete(UUID(upload_id))
+
+    asyncio.run(complete())
     captured: dict[str, object] = {}
 
     async def fake_schedule(**kwargs: object) -> UUID:
@@ -481,6 +489,14 @@ def test_permanent_upload_can_be_submitted_twice(
     upload_id = uuid4().hex
     _make_tus_upload(tus_dir, upload_id)
     _register_tus_upload(client, upload_id)
+
+    async def complete() -> None:
+        async with AsyncSession(
+            client.app.state.upload_database, expire_on_commit=False
+        ) as session:
+            await UserUploadsService(session).complete(UUID(upload_id))
+
+    asyncio.run(complete())
     url = f"/buildings/{building_id}/reconstructions/resumable"
     first = client.post(url, json={"tus_upload_id": upload_id})
     assert first.status_code == 202

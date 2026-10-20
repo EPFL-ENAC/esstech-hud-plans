@@ -222,7 +222,7 @@ def test_upload_service_crud_preserves_file(
             updated.status = UploadStatus.UPLOADED
             session.add(updated)
             await session.commit()
-            await uploads.delete(updated)
+            await uploads.delete(updated.id)
             assert await uploads.get(upload_id, user_id=USER_ID) is None
 
     asyncio.run(run())
@@ -353,7 +353,7 @@ def test_failed_mutation_rolls_back(
                     if operation == "update":
                         await uploads.update(created, UserUploadUpdate(name="Changed"))
                     else:
-                        await uploads.delete(created)
+                        await uploads.delete(created.id)
             persisted = await uploads.get(upload_id, user_id=USER_ID)
             assert persisted is not None
             assert persisted.name == "TODO"
@@ -994,7 +994,7 @@ def test_completion_retries_cleanup_without_losing_stored_file(
             assert stored.status == UploadStatus.UPLOADED
             assert Path(stored.file_path).read_bytes() == b"video bytes"
             assert source.exists()
-            retried = await uploads.get_completed(upload_id, user_id=USER_ID)
+            retried = await uploads.complete(upload_id)
             assert retried.uploaded_at == timestamp
             assert not source.exists()
             assert Path(retried.file_path).read_bytes() == b"video bytes"
@@ -1002,7 +1002,7 @@ def test_completion_retries_cleanup_without_losing_stored_file(
     asyncio.run(run())
 
 
-def test_get_completed_checks_ownership_before_moving_file(
+def test_get_completed_checks_ownership_without_moving_file(
     database: AsyncEngine,
 ) -> None:
     upload_id = uuid4()
@@ -1031,7 +1031,8 @@ def test_get_completed_checks_ownership_before_moving_file(
             stored = await uploads.get_completed(upload_id, user_id=USER_ID)
             assert stored.uploaded_at is not None
             assert stored.uploaded_at.date() == datetime(2026, 10, 14).date()
-            assert not source.exists()
+            assert source.exists()
+            assert stored.file_path == str(source)
             assert Path(stored.file_path).read_bytes() == b"video bytes"
 
     asyncio.run(run())

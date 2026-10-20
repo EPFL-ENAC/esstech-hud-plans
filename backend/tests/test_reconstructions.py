@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -277,6 +278,76 @@ def test_reconstruction_lifecycle_preserves_progress_and_partial_artifacts() -> 
             assert completed.splat_path == "/data/splat.ply"
 
     asyncio.run(run())
+
+
+def test_accepted_cancellation_ignores_late_lifecycle_updates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def run() -> None:
+        async with reconstruction_service() as (service, session, _, building, _):
+            row = Reconstruction(
+                building_id=building.id,
+                settings={},
+                status=ReconstructionStatus.RUNNING,
+                prefect_workflow_id=WORKFLOW_ID,
+                progress=0.4,
+                frames_directory="/existing/frames",
+            )
+            session.add(row)
+            await session.commit()
+            cancel = AsyncMock()
+            monkeypatch.setattr(workflow_common, "cancel_workflow", cancel)
+            monkeypatch.setattr(config, "USE_SCITAS", False)
+            cancelled = await service.cancel(row.id)
+            expected = ReconstructionRead.model_validate(cancelled).model_dump()
+            await service.cancel(row.id)
+            await service.mark_running(row.id, prefect_workflow_id=WORKFLOW_ID)
+            await service.record_progress(
+                row.id,
+                progress=0.9,
+                artifact_changes=ReconstructionArtifactUpdate(
+                    frames_directory="/late/frames"
+                ),
+            )
+            await service.mark_completed(
+                row.id,
+                artifacts=ReconstructionArtifactUpdate(splat_path="/late/splat.ply"),
+            )
+            await service.mark_failed(row.id, error_message="Late failure")
+            await service.mark_crashed(row.id, error_message="Late crash")
+            await service.mark_cancelled(row.id, error_message="Late hook")
+            await session.refresh(row)
+            assert ReconstructionRead.model_validate(row).model_dump() == expected
+            cancel.assert_awaited_once_with(WORKFLOW_ID)
+
+    asyncio.run(run())
+
+
+def test_registration_timeout_records_failure(
+    reconstruction_api: tuple[TestClient, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, building_id = reconstruction_api
+    upload_id, _ = _seed_stored_upload(client)
+
+    async def never_finishes(**kwargs):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(config, "PREFECT_SUBMISSION_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(
+        splat_workflow, "schedule_splat_generation_from_tus", never_finishes
+    )
+    response = client.post(
+        _from_upload_url(building_id, False), json={"upload_id": str(upload_id)}
+    )
+    assert response.status_code == 503
+    reconstruction_id = response.json()["detail"]["reconstruction_id"]
+    row = client.get(
+        f"/buildings/{building_id}/reconstructions/{reconstruction_id}"
+    ).json()
+    assert row["status"] == "failed"
+    assert row["prefect_workflow_id"] is None
+    assert row["error_message"].startswith("TimeoutError:")
 
 
 def test_reconstruction_list_validates_pagination() -> None:
@@ -666,21 +737,20 @@ def test_cancel_refreshes_when_completion_claimed_the_waiting_row(
     row = client.post(
         _from_upload_url(building_id, False), json={"upload_id": str(upload_id)}
     ).json()
-    original_cancel = ReconstructionService.cancel_waiting
+    original_cancel = ReconstructionService.cancel
     cancelled_workflows = []
 
     async def complete_before_cancel(service, reconstruction_id):
         from api.services.uploads import UserUploadsService
 
         await UserUploadsService(service._session).complete(upload_id)
-        await service.schedule_waiting_for_upload(upload_id)
         return await original_cancel(service, reconstruction_id)
 
     async def cancel_workflow(workflow_id):
         cancelled_workflows.append(workflow_id)
 
-    monkeypatch.setattr(ReconstructionService, "cancel_waiting", complete_before_cancel)
-    monkeypatch.setattr(reconstruction_views, "cancel_workflow", cancel_workflow)
+    monkeypatch.setattr(ReconstructionService, "cancel", complete_before_cancel)
+    monkeypatch.setattr(workflow_common, "cancel_workflow", cancel_workflow)
     response = client.post(
         f"/buildings/{building_id}/reconstructions/{row['id']}/cancel"
     )
@@ -703,7 +773,7 @@ def test_completion_dispatch_database_error_keeps_hook_failure_response(
         raise OperationalError("UPDATE", {}, RuntimeError("Database unavailable"))
 
     with monkeypatch.context() as patches:
-        patches.setattr(ReconstructionService, "_transition_waiting", fail_claim)
+        patches.setattr(ReconstructionService, "_get_for_update", fail_claim)
         response = _finish_upload(client, upload_id)
     assert response.status_code == 500
     url = f"/buildings/{building_id}/reconstructions/{row['id']}"
@@ -712,7 +782,7 @@ def test_completion_dispatch_database_error_keeps_hook_failure_response(
     assert client.get(url).json()["status"] == "scheduled"
 
 
-def test_completion_artifact_database_error_marks_reconstruction_failed(
+def test_completion_commit_failure_rolls_back_and_can_be_retried(
     reconstruction_api: tuple[TestClient, UUID],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -722,42 +792,32 @@ def test_completion_artifact_database_error_marks_reconstruction_failed(
         _from_upload_url(building_id, False), json={"upload_id": str(upload_id)}
     ).json()
     original_commit = AsyncSession.commit
-    failed_artifact_save = False
+    failed_commit = False
 
-    async def fail_artifact_save_once(session: AsyncSession) -> None:
-        nonlocal failed_artifact_save
-        if not failed_artifact_save and any(
-            isinstance(item, Reconstruction) and item.workspace_directory is not None
-            for item in session.dirty
+    async def fail_scheduled_commit_once(session: AsyncSession) -> None:
+        nonlocal failed_commit
+        if not failed_commit and any(
+            isinstance(item, Reconstruction)
+            and item.status == ReconstructionStatus.SCHEDULED
+            for item in session.identity_map.values()
         ):
-            failed_artifact_save = True
+            failed_commit = True
             raise OperationalError(
-                "UPDATE reconstructions",
-                {},
-                RuntimeError("Artifact persistence unavailable"),
+                "COMMIT", {}, RuntimeError("Scheduling persistence unavailable")
             )
         await original_commit(session)
 
-    async def unexpected_schedule(**kwargs: object) -> UUID:
-        raise AssertionError("Artifact persistence failure must not submit a workflow")
-
-    monkeypatch.setattr(AsyncSession, "commit", fail_artifact_save_once)
-    monkeypatch.setattr(
-        splat_workflow, "schedule_splat_generation_from_tus", unexpected_schedule
-    )
-
-    assert _finish_upload(client, upload_id).status_code == 200
-    assert failed_artifact_save
+    with monkeypatch.context() as patches:
+        patches.setattr(AsyncSession, "commit", fail_scheduled_commit_once)
+        assert _finish_upload(client, upload_id).status_code == 500
+    assert failed_commit
     url = f"/buildings/{building_id}/reconstructions/{row['id']}"
     saved = client.get(url).json()
-    assert saved["status"] == "failed"
+    assert saved["status"] == "waiting_for_upload"
     assert saved["prefect_workflow_id"] is None
     assert saved["workspace_directory"] is None
-    assert saved["input_video_path"] is None
-    assert "Artifact persistence unavailable" in saved["error_message"]
-
     assert _finish_upload(client, upload_id).status_code == 200
-    assert client.get(url).json()["status"] == "failed"
+    assert client.get(url).json()["status"] == "scheduled"
 
 
 @pytest.mark.parametrize("new_building", [False, True])
@@ -1344,7 +1404,7 @@ def test_nested_reconstruction_cancel_requests_slurm_job_cancellation(
     async def fake_cancel_workflow(workflow_id: UUID) -> None:
         assert workflow_id == WORKFLOW_ID
 
-    monkeypatch.setattr(reconstruction_views, "cancel_workflow", fake_cancel_workflow)
+    monkeypatch.setattr(workflow_common, "cancel_workflow", fake_cancel_workflow)
     monkeypatch.setattr(config, "USE_SCITAS", use_scitas)
     cancelled_workspaces: list[str] = []
     monkeypatch.setattr(
@@ -1634,7 +1694,7 @@ def test_delete_removes_files_and_row_for_completed_reconstruction(
             service._session.add(reconstruction)
             await service._session.commit()
 
-            await service.delete(reconstruction)
+            await service.delete(reconstruction.id)
 
             assert not root.exists()
             assert await service.get(reconstruction.id, building_id=building.id) is None
@@ -1676,7 +1736,7 @@ def test_delete_cancels_scitas_jobs_for_processing_reconstruction(
             service._session.add(reconstruction)
             await service._session.commit()
 
-            await service.delete(reconstruction)
+            await service.delete(reconstruction.id)
 
             assert not root.exists()
             assert await service.get(reconstruction.id, building_id=building.id) is None
@@ -1711,7 +1771,7 @@ def test_delete_cancels_running_workflow_then_removes_files_and_row(
             service._session.add(reconstruction)
             await service._session.commit()
 
-            await service.delete(reconstruction)
+            await service.delete(reconstruction.id)
 
             assert cancel_calls == [WORKFLOW_ID]
             assert not root.exists()
@@ -1743,7 +1803,7 @@ def test_delete_removes_files_and_row_for_failed_reconstruction(
             service._session.add(reconstruction)
             await service._session.commit()
 
-            await service.delete(reconstruction)
+            await service.delete(reconstruction.id)
 
             assert cancel_calls == []
             assert not root.exists()
@@ -1776,7 +1836,7 @@ def test_delete_tolerates_missing_workflow_run(
             service._session.add(reconstruction)
             await service._session.commit()
 
-            await service.delete(reconstruction)
+            await service.delete(reconstruction.id)
 
             assert cancel_calls == [WORKFLOW_ID]
             assert not root.exists()

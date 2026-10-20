@@ -1,18 +1,19 @@
 from __future__ import annotations
 
+import asyncio
 import builtins
 import logging
 from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
-from sqlalchemy import update
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
 from api.config import config
 from api.lib.compute import scitas as scitas_compute
+from api.lib.upload_storage import validate_completed_file
 from api.lib.workflows import common as workflow_common
 from api.lib.workflows import tus_cleanup
 from api.models.building import Building
@@ -50,6 +51,14 @@ async def _remove_tus_staging_upload(workflow_id: UUID) -> None:
 
 
 class ReconstructionNotFoundError(Exception):
+    pass
+
+
+class ReconstructionInputNotFoundError(Exception):
+    pass
+
+
+class ReconstructionConflictError(Exception):
     pass
 
 
@@ -118,20 +127,47 @@ class ReconstructionService:
     async def create_from_upload(
         self,
         *,
-        building: Building,
-        upload: UserUploads,
+        user_id: UUID,
+        building_id: UUID,
+        upload_id: UUID,
         settings: SplatGenerationWorkflowSettings,
     ) -> Reconstruction:
         """Persist a reconstruction, then schedule it if its upload is ready."""
 
-        reconstruction = Reconstruction(
-            building_id=building.id,
-            upload_id=upload.id,
-            status=ReconstructionStatus.WAITING_FOR_UPLOAD,
-            settings=settings.model_dump(mode="json"),
-        )
-        self._session.add(reconstruction)
-        await self._commit_and_refresh(reconstruction)
+        try:
+            building = await self._session.scalar(
+                select(Building)
+                .where(Building.id == building_id, Building.user_id == user_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            if building is None:
+                raise ReconstructionInputNotFoundError("Building not found")
+
+            upload = await self._session.scalar(
+                select(UserUploads)
+                .where(UserUploads.id == upload_id, UserUploads.user_id == user_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            if upload is None:
+                raise ReconstructionInputNotFoundError("Upload not found")
+            if upload.status not in {UploadStatus.PENDING, UploadStatus.UPLOADED}:
+                raise ReconstructionConflictError("Upload has failed")
+            if upload.status == UploadStatus.UPLOADED:
+                validate_completed_file(Path(upload.file_path), upload.size_bytes)
+
+            reconstruction = Reconstruction(
+                building_id=building.id,
+                upload_id=upload.id,
+                status=ReconstructionStatus.WAITING_FOR_UPLOAD,  # _schedule_if_ready will update this if the upload is already complete
+                settings=settings.model_dump(mode="json"),
+            )
+            self._session.add(reconstruction)
+            await self._session.commit()
+        except BaseException:
+            await self._session.rollback()
+            raise
 
         # Publish the waiting row before rereading readiness. If completion's
         # scan missed this row, this read will observe the completed upload.
@@ -163,73 +199,64 @@ class ReconstructionService:
                     upload_id,
                 )
 
-    async def cancel_waiting(self, reconstruction_id: UUID) -> Reconstruction:
-        """Cancel only while waiting; otherwise return the freshly read row."""
-
-        await self._transition_waiting(
-            reconstruction_id,
-            ReconstructionStatus.CANCELLED,
-            error_message="Cancellation requested",
-        )
-        return await self._get_or_raise(reconstruction_id)
-
-    async def _transition_waiting(
-        self,
-        reconstruction_id: UUID,
-        status: ReconstructionStatus,
-        *,
-        error_message: str | None = None,
-    ) -> bool:
-        """Commit an atomic claim shared by scheduling and cancellation."""
-
-        try:
-            result = await self._session.exec(
-                update(Reconstruction)
-                .where(
-                    col(Reconstruction.id) == reconstruction_id,
-                    col(Reconstruction.status)
-                    == ReconstructionStatus.WAITING_FOR_UPLOAD,
-                )
-                .values(
-                    status=status,
-                    error_message=error_message,
-                    updated_at=utc_now(),
-                )
-                .returning(col(Reconstruction.id))
-                .execution_options(synchronize_session=False)
-            )
-            changed = result.scalar_one_or_none() is not None
-            await self._session.commit()
-            return changed
-        except Exception:
-            await self._session.rollback()
-            raise
-
     async def _schedule_if_ready(
         self,
         reconstruction_id: UUID,
     ) -> Reconstruction:
-        reconstruction = await self._get_or_raise(reconstruction_id)
-        if reconstruction.status != ReconstructionStatus.WAITING_FOR_UPLOAD:
-            return reconstruction
+        scheduling_error: Exception | None = None
+        try:
+            reconstruction = await self._get_for_update(reconstruction_id)
+            if reconstruction.status != ReconstructionStatus.WAITING_FOR_UPLOAD:
+                await self._session.commit()
+                return reconstruction
 
-        result = await self._session.exec(
-            select(UserUploads)
-            .where(UserUploads.id == reconstruction.upload_id)
-            .execution_options(populate_existing=True)
-        )
-        upload = result.first()
-        if upload is None or upload.status != UploadStatus.UPLOADED:
-            return reconstruction
+            upload = await self._session.scalar(
+                select(UserUploads)
+                .where(UserUploads.id == reconstruction.upload_id)
+                .execution_options(populate_existing=True)
+            )
+            if upload is None or upload.status == UploadStatus.FAILED:
+                reconstruction.status = ReconstructionStatus.FAILED
+                reconstruction.error_message = "Source upload is unavailable"
+            elif upload.status == UploadStatus.UPLOADED:
+                reconstruction.status = ReconstructionStatus.PREPARING
+                try:
+                    workflow_id = await self._register_workflow(reconstruction, upload)
+                except Exception as exc:
+                    scheduling_error = exc
+                    reconstruction.status = ReconstructionStatus.FAILED
+                    reconstruction.error_message = f"{type(exc).__name__}: {exc}"
+                else:
+                    reconstruction.prefect_workflow_id = workflow_id
+                    reconstruction.status = ReconstructionStatus.SCHEDULED
+                    reconstruction.error_message = None
+            else:
+                await self._session.commit()
+                return reconstruction
 
-        if not await self._transition_waiting(
-            reconstruction.id,
-            ReconstructionStatus.PREPARING,
-        ):
-            return await self._get_or_raise(reconstruction.id)
+            reconstruction.updated_at = utc_now()
+            self._session.add(reconstruction)
+            await self._session.flush()
+            await self._session.refresh(reconstruction)
+            await self._session.commit()
+        except BaseException:
+            await self._session.rollback()
+            raise
 
-        # Imports stay local so the Prefect flow can call this service to publish
-        # lifecycle updates without creating a module import cycle.
+        if scheduling_error is not None:
+            raise ReconstructionSchedulingError(
+                "Failed to prepare or schedule reconstruction workflow",
+                reconstruction,
+            ) from scheduling_error
+        return reconstruction
+
+    async def _register_workflow(
+        self,
+        reconstruction: Reconstruction,
+        upload: UserUploads,
+    ) -> UUID:
+        """Prepare and register a run without releasing the caller's row lock."""
+
         from api.lib.workflows.splat_generation import (
             SplatGenerationArtifact,
             schedule_splat_generation_from_tus,
@@ -241,18 +268,10 @@ class ReconstructionService:
             workflow_common.WORKFLOW_DATA_DIRECTORY,
             video_format,
         )
-
-        try:
-            reconstruction = await self.record_progress(
-                reconstruction.id,
-                progress=0.0,
-                artifact_changes=ReconstructionArtifactUpdate(
-                    workspace_directory=str(artifact.root_directory.resolve()),
-                    input_video_path=str(artifact.video_path.resolve()),
-                ),
-            )
-
-            workflow_id = await schedule_splat_generation_from_tus(
+        reconstruction.workspace_directory = str(artifact.root_directory.resolve())
+        reconstruction.input_video_path = str(artifact.video_path.resolve())
+        async with asyncio.timeout(config.PREFECT_SUBMISSION_TIMEOUT_SECONDS):
+            return await schedule_splat_generation_from_tus(
                 artifact=artifact,
                 tus_upload_path=upload.file_path,
                 tus_video_filename=upload.filename,
@@ -262,33 +281,51 @@ class ReconstructionService:
                 owner_id=upload.user_id,
                 reconstruction_id=reconstruction.id,
             )
-        except Exception as exc:
-            failed = await self._mark_failed_best_effort(
-                reconstruction_id,
-                exc,
-                only_if_preparing=True,
-            )
-            raise ReconstructionSchedulingError(
-                "Failed to prepare or schedule reconstruction workflow",
-                failed,
-            ) from exc
 
-        return await self._record_scheduled_workflow(reconstruction, workflow_id)
+    async def cancel(self, reconstruction_id: UUID) -> Reconstruction:
+        """Serialize cancellation with registration and worker lifecycle updates."""
 
-    async def delete(self, reconstruction: Reconstruction) -> None:
-        """Cancel a pending workflow, remove stored artifacts, and drop the row."""
-
-        # Imports stay local so the Prefect flow can call this service to publish
-        # lifecycle updates without creating a module import cycle.
-        from api.lib.workflows.splat_generation import SplatGenerationArtifact
-
-        if (
-            reconstruction.status
-            in (
+        try:
+            reconstruction = await self._get_for_update(reconstruction_id)
+            if reconstruction.status == ReconstructionStatus.CANCELLED:
+                await self._session.commit()
+                return reconstruction
+            if reconstruction.status not in {
+                ReconstructionStatus.WAITING_FOR_UPLOAD,
                 ReconstructionStatus.PREPARING,
                 ReconstructionStatus.SCHEDULED,
                 ReconstructionStatus.RUNNING,
+            }:
+                raise ReconstructionConflictError(
+                    "Reconstruction is not processing "
+                    f"(current status: {reconstruction.status})"
+                )
+
+            await self._cancel_external_work(reconstruction)
+            reconstruction.mark_terminal_in_memory(
+                ReconstructionStatus.CANCELLED,
+                "Cancellation requested",
             )
+            reconstruction.updated_at = utc_now()
+            self._session.add(reconstruction)
+            await self._session.flush()
+            await self._session.refresh(reconstruction)
+            await self._session.commit()
+            return reconstruction
+        except BaseException:
+            await self._session.rollback()
+            raise
+
+    async def _cancel_external_work(self, reconstruction: Reconstruction) -> None:
+        """Request external cancellation without changing the database transaction."""
+
+        if (
+            reconstruction.status
+            in {
+                ReconstructionStatus.PREPARING,
+                ReconstructionStatus.SCHEDULED,
+                ReconstructionStatus.RUNNING,
+            }
             and reconstruction.prefect_workflow_id is not None
         ):
             try:
@@ -296,14 +333,10 @@ class ReconstructionService:
                     reconstruction.prefect_workflow_id
                 )
             except workflow_common.WorkflowNotFoundError:
-                # The workflow run no longer exists.
                 pass
 
         if config.USE_SCITAS:
             try:
-                # Run the cancellation in a threadpool. The call does blocking
-                # I/O (SSH and Prefect API calls), so it must not block the
-                # event loop of the async request handler.
                 await run_in_threadpool(
                     scitas_compute.cancel_registered_jobs, reconstruction.id.hex
                 )
@@ -313,20 +346,30 @@ class ReconstructionService:
                     reconstruction.id,
                 )
 
+    async def delete(self, reconstruction_id: UUID) -> None:
+        """Cancel external work and delete under the same registration lock."""
+
+        try:
+            reconstruction = await self._get_for_update(reconstruction_id)
+            await self._delete_locked(reconstruction)
+            await self._session.commit()
+        except BaseException:
+            await self._session.rollback()
+            raise
+
+    async def _delete_locked(self, reconstruction: Reconstruction) -> None:
+        """Delete an already locked row; the caller owns the commit."""
+
+        from api.lib.workflows.splat_generation import SplatGenerationArtifact
+
+        await self._cancel_external_work(reconstruction)
         SplatGenerationArtifact.load(
             reconstruction.id,
             workflow_common.WORKFLOW_DATA_DIRECTORY,
         ).remove()
-
         if reconstruction.prefect_workflow_id is not None:
             await _remove_tus_staging_upload(reconstruction.prefect_workflow_id)
-
-        try:
-            await self._session.delete(reconstruction)
-            await self._session.commit()
-        except Exception:
-            await self._session.rollback()
-            raise
+        await self._session.delete(reconstruction)
 
     async def mark_running(
         self,
@@ -334,10 +377,17 @@ class ReconstructionService:
         *,
         prefect_workflow_id: UUID,
     ) -> Reconstruction:
-        reconstruction = await self._get_or_raise(reconstruction_id)
-        if not reconstruction.mark_running_in_memory(prefect_workflow_id):
+        try:
+            reconstruction = await self._get_for_update(reconstruction_id)
+            changed = reconstruction.mark_running_in_memory(prefect_workflow_id)
+            if changed:
+                reconstruction.updated_at = utc_now()
+                self._session.add(reconstruction)
+            await self._session.commit()
             return reconstruction
-        return await self._save(reconstruction)
+        except BaseException:
+            await self._session.rollback()
+            raise
 
     async def record_progress(
         self,
@@ -346,13 +396,20 @@ class ReconstructionService:
         progress: float,
         artifact_changes: ReconstructionArtifactUpdate | None = None,
     ) -> Reconstruction:
-        reconstruction = await self._get_or_raise(reconstruction_id)
-        changed = reconstruction.record_progress_in_memory(
-            progress,
-            artifact_update=artifact_changes,
-        )
-
-        return await self._save(reconstruction) if changed else reconstruction
+        try:
+            reconstruction = await self._get_for_update(reconstruction_id)
+            changed = reconstruction.record_progress_in_memory(
+                progress,
+                artifact_update=artifact_changes,
+            )
+            if changed:
+                reconstruction.updated_at = utc_now()
+                self._session.add(reconstruction)
+            await self._session.commit()
+            return reconstruction
+        except BaseException:
+            await self._session.rollback()
+            raise
 
     async def mark_completed(
         self,
@@ -360,9 +417,17 @@ class ReconstructionService:
         *,
         artifacts: ReconstructionArtifactUpdate,
     ) -> Reconstruction:
-        reconstruction = await self._get_or_raise(reconstruction_id)
-        reconstruction.mark_completed_in_memory(artifacts)
-        return await self._save(reconstruction)
+        try:
+            reconstruction = await self._get_for_update(reconstruction_id)
+            changed = reconstruction.mark_completed_in_memory(artifacts)
+            if changed:
+                reconstruction.updated_at = utc_now()
+                self._session.add(reconstruction)
+            await self._session.commit()
+            return reconstruction
+        except BaseException:
+            await self._session.rollback()
+            raise
 
     async def mark_failed(
         self,
@@ -370,13 +435,20 @@ class ReconstructionService:
         *,
         error_message: str,
     ) -> Reconstruction:
-        reconstruction = await self._get_or_raise(reconstruction_id)
-        if not reconstruction.mark_terminal_in_memory(
-            ReconstructionStatus.FAILED,
-            error_message,
-        ):
+        try:
+            reconstruction = await self._get_for_update(reconstruction_id)
+            changed = reconstruction.mark_terminal_in_memory(
+                ReconstructionStatus.FAILED,
+                error_message,
+            )
+            if changed:
+                reconstruction.updated_at = utc_now()
+                self._session.add(reconstruction)
+            await self._session.commit()
             return reconstruction
-        return await self._save(reconstruction)
+        except BaseException:
+            await self._session.rollback()
+            raise
 
     async def mark_cancelled(
         self,
@@ -384,13 +456,20 @@ class ReconstructionService:
         *,
         error_message: str | None = None,
     ) -> Reconstruction:
-        reconstruction = await self._get_or_raise(reconstruction_id)
-        if not reconstruction.mark_terminal_in_memory(
-            ReconstructionStatus.CANCELLED,
-            error_message,
-        ):
+        try:
+            reconstruction = await self._get_for_update(reconstruction_id)
+            changed = reconstruction.mark_terminal_in_memory(
+                ReconstructionStatus.CANCELLED,
+                error_message,
+            )
+            if changed:
+                reconstruction.updated_at = utc_now()
+                self._session.add(reconstruction)
+            await self._session.commit()
             return reconstruction
-        return await self._save(reconstruction)
+        except BaseException:
+            await self._session.rollback()
+            raise
 
     async def mark_crashed(
         self,
@@ -398,75 +477,29 @@ class ReconstructionService:
         *,
         error_message: str | None = None,
     ) -> Reconstruction:
-        reconstruction = await self._get_or_raise(reconstruction_id)
-        if not reconstruction.mark_terminal_in_memory(
-            ReconstructionStatus.CRASHED,
-            error_message,
-        ):
-            return reconstruction
-        return await self._save(reconstruction)
-
-    async def _record_scheduled_workflow(
-        self,
-        reconstruction: Reconstruction,
-        workflow_id: UUID,
-    ) -> Reconstruction:
-        # A worker can start before arun_deployment returns. Refresh first and
-        # never move a row that is already running or terminal back to scheduled.
-        await self._session.refresh(reconstruction)
-        reconstruction.mark_scheduled_in_memory(workflow_id)
-        return await self._save(reconstruction)
-
-    async def _mark_failed_best_effort(
-        self,
-        reconstruction_id: UUID,
-        exc: Exception,
-        *,
-        only_if_preparing: bool = False,
-    ) -> Reconstruction:
-        message = f"{type(exc).__name__}: {exc}"
         try:
-            reconstruction = await self._get_or_raise(reconstruction_id)
-            if (
-                only_if_preparing
-                and reconstruction.status != ReconstructionStatus.PREPARING
-            ):
-                return reconstruction
-            return await self.mark_failed(
-                reconstruction_id,
-                error_message=message,
+            reconstruction = await self._get_for_update(reconstruction_id)
+            changed = reconstruction.mark_terminal_in_memory(
+                ReconstructionStatus.CRASHED,
+                error_message,
             )
-        except Exception:
-            logger.exception(
-                "Failed to mark reconstruction %s as failed",
-                reconstruction_id,
-            )
-            fallback = await self._session.get(Reconstruction, reconstruction_id)
-            if fallback is None:
-                raise ReconstructionNotFoundError from exc
-            return fallback
+            if changed:
+                reconstruction.updated_at = utc_now()
+                self._session.add(reconstruction)
+            await self._session.commit()
+            return reconstruction
+        except BaseException:
+            await self._session.rollback()
+            raise
 
-    async def _get_or_raise(self, reconstruction_id: UUID) -> Reconstruction:
+    async def _get_for_update(self, reconstruction_id: UUID) -> Reconstruction:
         result = await self._session.exec(
             select(Reconstruction)
             .where(Reconstruction.id == reconstruction_id)
+            .with_for_update()
             .execution_options(populate_existing=True)
         )
         reconstruction = result.first()
         if reconstruction is None:
             raise ReconstructionNotFoundError
         return reconstruction
-
-    async def _save(self, reconstruction: Reconstruction) -> Reconstruction:
-        reconstruction.updated_at = utc_now()
-        self._session.add(reconstruction)
-        await self._commit_and_refresh(reconstruction)
-        return reconstruction
-
-    async def _commit_and_refresh(self, reconstruction: Reconstruction) -> None:
-        try:
-            await self._session.commit()
-        except Exception:
-            await self._session.rollback()
-            raise
-        await self._session.refresh(reconstruction)

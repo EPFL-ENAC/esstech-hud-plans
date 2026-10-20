@@ -17,7 +17,12 @@ from api.models.uploads import (
 )
 from api.models.user import User
 from api.services.auth import require_user
-from api.services.uploads import SortOrder, UploadConflictError, UserUploadsService
+from api.services.uploads import (
+    SortOrder,
+    UploadConflictError,
+    UploadNotFoundError,
+    UserUploadsService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +113,9 @@ async def delete_upload(
     """Delete the metadata row without touching files."""
 
     try:
-        await uploads.delete(upload)
+        await uploads.delete(upload.id)
+    except UploadNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
     except UploadConflictError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
