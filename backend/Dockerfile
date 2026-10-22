@@ -1,4 +1,4 @@
-FROM python:3.13.6-bookworm
+FROM python:3.12-bookworm
 ENV UV_VERSION=0.9.13
 
 # System dependencies
@@ -19,7 +19,8 @@ COPY start.sh /app/
 COPY api /app/api
 COPY migrations /app/migrations
 
-RUN uv pip install --system --no-cache-dir -e /app
+RUN uv sync --frozen --no-dev --no-cache
+ENV PATH="/app/.venv/bin:$PATH"
 RUN mkdir -p /app/external/bin && ln -s $(which ffmpeg) /app/external/bin/ffmpeg
 
 ENTRYPOINT ["sh", "start.sh"]
