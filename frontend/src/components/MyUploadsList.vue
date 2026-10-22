@@ -29,7 +29,13 @@
             </template>
             <template #success>
                 <q-list v-if="uploads.length" separator class="uploads-list" role="list">
-                    <q-item v-for="upload in uploads" :key="upload.id" role="listitem">
+                    <q-item
+                        v-for="upload in uploads"
+                        :key="upload.id"
+                        role="listitem"
+                        :clickable="canActivate(upload)"
+                        @click="activateUpload(upload)"
+                    >
                         <q-item-section avatar top>
                             <q-icon name="movie" color="primary" size="32px" aria-hidden="true" />
                         </q-item-section>
@@ -114,6 +120,9 @@ defineSlots<{
     action?(props: { upload: UserUpload }): unknown;
 }>();
 
+const props = defineProps<{
+    activate?: (upload: UserUpload) => void;
+}>();
 const { t, locale } = useI18n();
 const offset = ref(0);
 const { data, state, isLoading: queryIsLoading, refetch: refetchQuery } = useMyUploadsQuery(offset);
@@ -154,6 +163,14 @@ const dateFormatter = computed(
 
 function formatDate(value: string): string {
     return dateFormatter.value.format(new Date(value));
+}
+
+function canActivate(upload: UserUpload): boolean {
+    return props.activate !== undefined && upload.status !== 'failed';
+}
+
+function activateUpload(upload: UserUpload): void {
+    if (canActivate(upload)) props.activate?.(upload);
 }
 
 function uploadStatusLabel(upload: UserUpload): string {

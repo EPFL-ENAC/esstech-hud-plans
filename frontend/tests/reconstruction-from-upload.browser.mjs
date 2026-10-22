@@ -207,9 +207,9 @@ try {
                 await items.first().waitFor();
                 assert.equal(await items.count(), 20);
                 await page.locator('.uploads-list a').first().waitFor();
-                assert.equal(await page.locator('.uploads-list a').count(), 20);
-                assert.equal(await page.locator('.uploads-list .q-item--clickable').count(), 0);
-                await page.getByText(rows[0].filename, { exact: true }).click();
+                assert.equal(await page.locator('.uploads-list a').count(), 19);
+                assert.equal(await page.locator('.uploads-list .q-item--clickable').count(), 19);
+                await page.getByText(rows[2].filename, { exact: true }).click();
                 assert.ok(page.url().endsWith('/reconstructions/from-upload'));
                 await fits();
                 await page.screenshot({ path: join(screenshots, `${locale}-${size}-list.png`) });
