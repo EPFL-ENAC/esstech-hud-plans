@@ -61,10 +61,13 @@
             :state="pointCloudQuery.state"
             :async-status="pointCloudQuery.asyncStatus"
             :retry="pointCloudQuery.refetch"
-            :loading-message="t('plans.splat.loading')"
+            :loading-message="t('plans.points.preparing')"
             :error-message="t('plans.splat.unavailable')"
         >
             <template #pending>
+                <div class="text-caption text-grey-7 q-mb-xs">
+                    {{ t('plans.points.preparing') }}
+                </div>
                 <splat-download-progress role="presentation" />
             </template>
             <template #refreshing>

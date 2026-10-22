@@ -16,6 +16,7 @@ from api.lib.compute.colmap_geometric_data import colmap_compute_geometric_data
 from api.lib.compute.point_cloud import (
     POINT_CLOUD_BINARY_FILENAME,
     POINT_CLOUD_META_FILENAME,
+    generate_plan_point_cloud_if_missing,
 )
 from api.lib.workflows import common as workflow_common
 from api.lib.workflows.common import (
@@ -184,11 +185,21 @@ def get_reconstruction_point_cloud(
             detail="Reconstruction point cloud not found",
         )
 
+    splat_path = Path(reconstruction.splat_path)
+    root_directory = (
+        workflow_common.WORKFLOW_DATA_DIRECTORY.resolve() / reconstruction.id.hex
+    )
+    try:
+        generate_plan_point_cloud_if_missing(splat_path, root_directory / "colmap")
+    except Exception:
+        logger.exception(
+            "On-demand plan point cloud generation failed for reconstruction %s",
+            reconstruction.id,
+        )
+
     return inline_file_response(
-        Path(reconstruction.splat_path).with_name(POINT_CLOUD_BINARY_FILENAME),
-        root_directory=(
-            workflow_common.WORKFLOW_DATA_DIRECTORY.resolve() / reconstruction.id.hex
-        ),
+        splat_path.with_name(POINT_CLOUD_BINARY_FILENAME),
+        root_directory=root_directory,
         media_type="application/octet-stream",
     )
 
@@ -206,11 +217,21 @@ def get_reconstruction_point_cloud_meta(
             detail="Reconstruction point cloud meta not found",
         )
 
+    splat_path = Path(reconstruction.splat_path)
+    root_directory = (
+        workflow_common.WORKFLOW_DATA_DIRECTORY.resolve() / reconstruction.id.hex
+    )
+    try:
+        generate_plan_point_cloud_if_missing(splat_path, root_directory / "colmap")
+    except Exception:
+        logger.exception(
+            "On-demand plan point cloud generation failed for reconstruction %s",
+            reconstruction.id,
+        )
+
     return inline_file_response(
-        Path(reconstruction.splat_path).with_name(POINT_CLOUD_META_FILENAME),
-        root_directory=(
-            workflow_common.WORKFLOW_DATA_DIRECTORY.resolve() / reconstruction.id.hex
-        ),
+        splat_path.with_name(POINT_CLOUD_META_FILENAME),
+        root_directory=root_directory,
         media_type="application/json",
     )
 

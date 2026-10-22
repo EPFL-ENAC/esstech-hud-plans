@@ -1,4 +1,5 @@
 import json
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -6,12 +7,14 @@ import pytest
 from plyfile import PlyData, PlyElement
 
 from api.config import config
+from api.lib.compute import point_cloud as point_cloud_compute
 from api.lib.compute.colmap_geometric_data import ColmapGeometricData
 from api.lib.compute.point_cloud import (
     POINT_CLOUD_BINARY_FILENAME,
     POINT_CLOUD_META_FILENAME,
     compute_plan_point_cloud,
     generate_plan_point_cloud,
+    generate_plan_point_cloud_if_missing,
 )
 
 
@@ -197,3 +200,158 @@ def test_generate_plan_point_cloud_writes_artifacts_next_to_splat(
     assert meta["count"] == 2
     assert meta["bounds"] == [[-4.0, 0.5, 2.0], [1.0, 2.0, 2.0]]
     assert meta["cm_per_unit"] == pytest.approx(170.0 * 0.9 / 3.0)
+
+
+def _setup_generation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    name: str = "splat.ply",
+) -> tuple[Path, Path]:
+    monkeypatch.setattr(config, "PLAN_DENSITY_THRESHOLD", 1.0)
+    monkeypatch.setattr(
+        "api.lib.compute.colmap_geometric_data.colmap_compute_geometric_data",
+        lambda sparse_dir: _fake_geometric_data(),
+    )
+    splat_path = tmp_path / name
+    means, scales, opacities = _make_splat_arrays()
+    _write_splat_ply(splat_path, means, scales, opacities)
+    return splat_path, tmp_path / "colmap"
+
+
+def test_generate_plan_point_cloud_if_missing_generates_when_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    splat_path, colmap_directory = _setup_generation(tmp_path, monkeypatch)
+
+    generate_plan_point_cloud_if_missing(splat_path, colmap_directory)
+
+    assert splat_path.with_name(POINT_CLOUD_BINARY_FILENAME).is_file()
+    assert splat_path.with_name(POINT_CLOUD_META_FILENAME).is_file()
+
+
+def test_generate_plan_point_cloud_if_missing_skips_existing_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    splat_path = tmp_path / "splat.ply"
+    splat_path.with_name(POINT_CLOUD_BINARY_FILENAME).write_bytes(b"bin")
+    splat_path.with_name(POINT_CLOUD_META_FILENAME).write_bytes(b"{}")
+
+    def fail(splat_path: Path, colmap_directory: Path) -> None:
+        raise AssertionError("must not regenerate existing artifacts")
+
+    monkeypatch.setattr(point_cloud_compute, "generate_plan_point_cloud", fail)
+
+    generate_plan_point_cloud_if_missing(splat_path, tmp_path / "colmap")
+
+
+def test_generate_plan_point_cloud_if_missing_propagates_generation_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    splat_path = tmp_path / "splat.ply"
+    splat_path.write_bytes(b"not a ply")
+
+    def fail(splat_path: Path, colmap_directory: Path) -> None:
+        raise RuntimeError("conversion failed")
+
+    monkeypatch.setattr(point_cloud_compute, "generate_plan_point_cloud", fail)
+
+    with pytest.raises(RuntimeError, match="conversion failed"):
+        generate_plan_point_cloud_if_missing(splat_path, tmp_path / "colmap")
+
+
+def test_generate_plan_point_cloud_if_missing_single_flights_concurrent_calls(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    splat_path, colmap_directory = _setup_generation(tmp_path, monkeypatch)
+    started = threading.Event()
+    release = threading.Event()
+    calls: list[Path] = []
+    original = point_cloud_compute.generate_plan_point_cloud
+
+    def blocking_generate(splat_path: Path, colmap_directory: Path) -> None:
+        calls.append(splat_path)
+        started.set()
+        assert release.wait(timeout=30), "generation was never released"
+        original(splat_path, colmap_directory)
+
+    monkeypatch.setattr(
+        point_cloud_compute, "generate_plan_point_cloud", blocking_generate
+    )
+    results: list[Exception | None] = []
+
+    def call() -> None:
+        try:
+            generate_plan_point_cloud_if_missing(splat_path, colmap_directory)
+            results.append(None)
+        except Exception as exc:  # pragma: no cover - failure reporting
+            results.append(exc)
+
+    threads = [threading.Thread(target=call) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    try:
+        assert started.wait(timeout=30), "generation never started"
+        assert len(calls) == 1
+        release.set()
+    finally:
+        for thread in threads:
+            thread.join(timeout=30)
+
+    assert results == [None, None]
+    assert calls == [splat_path]
+    assert splat_path.with_name(POINT_CLOUD_BINARY_FILENAME).is_file()
+
+
+def test_generate_plan_point_cloud_if_missing_does_not_block_other_splats(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first, first_colmap = _setup_generation(tmp_path, monkeypatch, name="a.ply")
+    second, second_colmap = _setup_generation(tmp_path, monkeypatch, name="b.ply")
+    first_started = threading.Event()
+    second_started = threading.Event()
+    release_first = threading.Event()
+
+    def generate_a(splat_path: Path, colmap_directory: Path) -> None:
+        first_started.set()
+        assert release_first.wait(timeout=30), "first generation was never released"
+        splat_path.with_name(POINT_CLOUD_BINARY_FILENAME).write_bytes(b"bin")
+        splat_path.with_name(POINT_CLOUD_META_FILENAME).write_bytes(b"{}")
+
+    def generate_b(splat_path: Path, colmap_directory: Path) -> None:
+        second_started.set()
+        splat_path.with_name(POINT_CLOUD_BINARY_FILENAME).write_bytes(b"bin")
+        splat_path.with_name(POINT_CLOUD_META_FILENAME).write_bytes(b"{}")
+
+    def patch(name: str, replacement: object) -> None:
+        monkeypatch.setattr(point_cloud_compute, name, replacement)
+
+    patch("generate_plan_point_cloud", generate_a)
+    first_thread = threading.Thread(
+        target=generate_plan_point_cloud_if_missing, args=(first, first_colmap)
+    )
+    first_thread.start()
+    try:
+        assert first_started.wait(timeout=30), "first generation never started"
+        patch("generate_plan_point_cloud", generate_b)
+        second_thread = threading.Thread(
+            target=generate_plan_point_cloud_if_missing, args=(second, second_colmap)
+        )
+        second_thread.start()
+        assert second_started.wait(timeout=30), (
+            "second splat was blocked by the first generation"
+        )
+        release_first.set()
+        second_thread.join(timeout=30)
+    finally:
+        release_first.set()
+        first_thread.join(timeout=30)
+
+    assert not first_thread.is_alive()
+    assert not second_thread.is_alive()
+    assert first.with_name(POINT_CLOUD_BINARY_FILENAME).is_file()
+    assert second.with_name(POINT_CLOUD_BINARY_FILENAME).is_file()

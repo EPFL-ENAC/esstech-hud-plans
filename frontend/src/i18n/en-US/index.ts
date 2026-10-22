@@ -442,6 +442,7 @@ export default {
         points: {
             pointSize: 'Point size',
             pointOpacity: 'Point opacity',
+            preparing: 'Preparing point cloud…',
         },
     },
     settings: {

@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -13,6 +14,10 @@ FLOOR_HISTOGRAM_BINS = 300
 
 POINT_CLOUD_BINARY_FILENAME = "point-cloud.bin"
 POINT_CLOUD_META_FILENAME = "point-cloud.meta.json"
+
+# One lock per splat path ever generated on demand; the count stays small per process.
+_POINT_CLOUD_LOCKS: dict[str, threading.Lock] = {}
+_POINT_CLOUD_LOCKS_GUARD = threading.Lock()
 
 
 def compute_plan_point_cloud(
@@ -144,6 +149,34 @@ def generate_plan_point_cloud(splat_path: Path, colmap_directory: Path) -> None:
         splat_path.with_name(POINT_CLOUD_META_FILENAME),
         json.dumps(meta).encode("utf-8"),
     )
+
+
+def plan_point_cloud_artifacts_exist(splat_path: Path) -> bool:
+    """Both artifacts are written together, so their joint presence means done."""
+    return (
+        splat_path.with_name(POINT_CLOUD_BINARY_FILENAME).is_file()
+        and splat_path.with_name(POINT_CLOUD_META_FILENAME).is_file()
+    )
+
+
+def generate_plan_point_cloud_if_missing(
+    splat_path: Path,
+    colmap_directory: Path,
+) -> None:
+    """Generate the artifacts once when missing, single-flight per splat path.
+
+    ``_atomic_write`` uses a fixed temp path, so concurrent generations for the
+    same splat would corrupt the artifacts; they serialize on a per-splat lock
+    instead, so different splats never block each other.
+    """
+    if plan_point_cloud_artifacts_exist(splat_path):
+        return
+    with _POINT_CLOUD_LOCKS_GUARD:
+        lock = _POINT_CLOUD_LOCKS.setdefault(str(splat_path), threading.Lock())
+    with lock:
+        if plan_point_cloud_artifacts_exist(splat_path):
+            return
+        generate_plan_point_cloud(splat_path, colmap_directory)
 
 
 def _atomic_write(path: Path, data: bytes) -> None:

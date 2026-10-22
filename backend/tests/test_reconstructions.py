@@ -1,6 +1,9 @@
 import asyncio
 import json
+import struct
+import threading
 from collections.abc import AsyncIterator, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -20,7 +23,13 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from api.config import config
 from api.db import get_session
+from api.lib.compute import point_cloud as point_cloud_compute
 from api.lib.compute import scitas as scitas_compute
+from api.lib.compute.colmap_geometric_data import ColmapGeometricData
+from api.lib.compute.point_cloud import (
+    POINT_CLOUD_BINARY_FILENAME,
+    POINT_CLOUD_META_FILENAME,
+)
 from api.lib.tus import TUS_HOOK_SECRET_HEADER
 from api.lib.upload_storage import upload_file_path
 from api.lib.workflows import common as workflow_common
@@ -1060,7 +1069,22 @@ def _set_artifact_path(
     client.portal.call(update)
 
 
-@pytest.fixture(params=["video", "splat"])
+_ASSET_NOT_FOUND_DETAILS = {
+    "video": "Reconstruction video not found",
+    "splat": "Reconstruction splat not found",
+    "point-cloud": "Reconstruction point cloud not found",
+    "point-cloud/meta": "Reconstruction point cloud meta not found",
+}
+
+_ASSET_MEDIA_TYPES = {
+    "video": "video/mp4",
+    "splat": "application/octet-stream",
+    "point-cloud": "application/octet-stream",
+    "point-cloud/meta": "application/json",
+}
+
+
+@pytest.fixture(params=["video", "splat", "point-cloud", "point-cloud/meta"])
 def reconstruction_asset(
     request: pytest.FixtureRequest,
     reconstruction_api: tuple[TestClient, UUID],
@@ -1074,14 +1098,23 @@ def reconstruction_asset(
         path.parent.mkdir(parents=True)
         path.write_bytes(b"video bytes")
     else:
-        path = Path(created["workspace_directory"]) / "splat.ply"
-        path.parent.mkdir(parents=True)
-        path.write_bytes(b"ply\nformat binary_little_endian 1.0\nend_header\n")
+        splat_path = Path(created["workspace_directory"]) / "splat.ply"
+        splat_path.parent.mkdir(parents=True)
+        splat_path.write_bytes(b"ply\nformat binary_little_endian 1.0\nend_header\n")
+        splat_path.with_name(POINT_CLOUD_BINARY_FILENAME).write_bytes(
+            b"\x00\x00\x80?" * 4
+        )
+        splat_path.with_name(POINT_CLOUD_META_FILENAME).write_bytes(b'{"count": 0}')
+        path = {
+            "splat": splat_path,
+            "point-cloud": splat_path.with_name(POINT_CLOUD_BINARY_FILENAME),
+            "point-cloud/meta": splat_path.with_name(POINT_CLOUD_META_FILENAME),
+        }[artifact]
         _set_artifact_path(
             client,
             reconstruction_id,
             artifact,
-            path,
+            splat_path,
             status=ReconstructionStatus.COMPLETED,
         )
     return client, reconstruction_id, artifact, path
@@ -1099,9 +1132,7 @@ def test_reconstruction_assets_serve_inline_bytes_when_available(
 
     assert response.status_code == 200
     assert response.content == path.read_bytes()
-    assert response.headers["content-type"] == (
-        "video/mp4" if artifact == "video" else "application/octet-stream"
-    )
+    assert response.headers["content-type"] == _ASSET_MEDIA_TYPES[artifact]
     assert response.headers["content-disposition"] == f'inline; filename="{path.name}"'
     assert response.headers["content-length"] == str(path.stat().st_size)
     assert response.headers["cache-control"] == "private, no-store"
@@ -1129,9 +1160,9 @@ def test_unfinished_reconstructions_serve_video_but_not_splat(
         assert response.status_code == 200
         assert response.content == path.read_bytes()
     else:
-        # A path recorded at 95% and a physical file do not publish a splat.
+        # A path recorded at 95% and a physical file do not publish an artifact.
         assert response.status_code == 404
-        assert response.json() == {"detail": "Reconstruction splat not found"}
+        assert response.json() == {"detail": _ASSET_NOT_FOUND_DETAILS[artifact]}
 
 
 @pytest.mark.parametrize(
@@ -1229,9 +1260,7 @@ def test_reconstruction_assets_reject_unavailable_or_escaped_paths(
     assert response.status_code == 404
     assert response.json() == {
         "detail": (
-            f"Reconstruction {artifact} not found"
-            if case == "unset"
-            else "File not found"
+            _ASSET_NOT_FOUND_DETAILS[artifact] if case == "unset" else "File not found"
         )
     }
 
@@ -1299,6 +1328,168 @@ def test_reconstruction_assets_map_database_failures_to_503(
 
     assert response.status_code == 503
     assert response.json() == {"detail": "Reconstruction database is unavailable"}
+
+
+def _completed_reconstruction_with_splat(
+    client: TestClient,
+    building_id: UUID,
+) -> tuple[UUID, Path]:
+    """A COMPLETED reconstruction whose splat.ply is readable by plyfile."""
+    from test_point_cloud import _make_splat_arrays, _write_splat_ply
+
+    created = _submit_reconstruction(client, building_id).json()
+    reconstruction_id = UUID(created["id"])
+    splat_path = Path(created["workspace_directory"]) / "splat.ply"
+    splat_path.parent.mkdir(parents=True)
+    means, scales, opacities = _make_splat_arrays()
+    _write_splat_ply(splat_path, means, scales, opacities)
+    _set_artifact_path(
+        client,
+        reconstruction_id,
+        "splat",
+        splat_path,
+        status=ReconstructionStatus.COMPLETED,
+    )
+    return reconstruction_id, splat_path
+
+
+def _fake_point_cloud_colmap(monkeypatch: pytest.MonkeyPatch) -> None:
+    from test_point_cloud import _fake_geometric_data
+
+    monkeypatch.setattr(
+        "api.lib.compute.colmap_geometric_data.colmap_compute_geometric_data",
+        lambda sparse_dir: _fake_geometric_data(),
+    )
+
+
+def test_missing_point_cloud_artifacts_are_generated_on_request(
+    reconstruction_api: tuple[TestClient, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, building_id = reconstruction_api
+    reconstruction_id, splat_path = _completed_reconstruction_with_splat(
+        client,
+        building_id,
+    )
+    monkeypatch.setattr(config, "PLAN_DENSITY_THRESHOLD", 1.0)
+    _fake_point_cloud_colmap(monkeypatch)
+    url = f"/buildings/{BUILDING_ID}/reconstructions/{reconstruction_id}"
+
+    binary_response = client.get(f"{url}/point-cloud")
+    meta_response = client.get(f"{url}/point-cloud/meta")
+
+    assert binary_response.status_code == 200
+    assert binary_response.headers["content-type"] == "application/octet-stream"
+    assert meta_response.status_code == 200
+    assert meta_response.headers["content-type"] == "application/json"
+    binary_path = splat_path.with_name(POINT_CLOUD_BINARY_FILENAME)
+    meta_path = splat_path.with_name(POINT_CLOUD_META_FILENAME)
+    assert binary_response.content == binary_path.read_bytes()
+    assert binary_path.read_bytes() == struct.pack("<6f", 1.0, 2.0, 2.0, -4.0, 0.5, 2.0)
+    meta = json.loads(meta_path.read_text())
+    assert meta_response.content == meta_path.read_bytes()
+    assert meta["count"] == 2
+    assert meta["cm_per_unit"] == pytest.approx(170.0 * 0.9 / 3.0)
+    assert sorted(item.name for item in splat_path.parent.iterdir()) == sorted(
+        ["splat.ply", POINT_CLOUD_BINARY_FILENAME, POINT_CLOUD_META_FILENAME]
+    )
+
+
+def test_point_cloud_artifacts_are_generated_once_across_requests(
+    reconstruction_api: tuple[TestClient, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, building_id = reconstruction_api
+    reconstruction_id, splat_path = _completed_reconstruction_with_splat(
+        client,
+        building_id,
+    )
+    monkeypatch.setattr(config, "PLAN_DENSITY_THRESHOLD", 1.0)
+    _fake_point_cloud_colmap(monkeypatch)
+    calls: list[Path] = []
+    original = point_cloud_compute.generate_plan_point_cloud
+
+    def counting_generate(splat_path: Path, colmap_directory: Path) -> None:
+        calls.append(splat_path)
+        original(splat_path, colmap_directory)
+
+    monkeypatch.setattr(
+        point_cloud_compute, "generate_plan_point_cloud", counting_generate
+    )
+    url = f"/buildings/{BUILDING_ID}/reconstructions/{reconstruction_id}"
+
+    assert client.get(f"{url}/point-cloud").status_code == 200
+    assert client.get(f"{url}/point-cloud/meta").status_code == 200
+    assert client.get(f"{url}/point-cloud").status_code == 200
+
+    assert calls == [splat_path]
+
+
+def test_point_cloud_generation_failure_answers_not_found(
+    reconstruction_api: tuple[TestClient, UUID],
+) -> None:
+    client, building_id = reconstruction_api
+    reconstruction_id, splat_path = _completed_reconstruction_with_splat(
+        client,
+        building_id,
+    )
+    # No colmap/sparse/0: the real conversion raises before writing anything.
+    url = f"/buildings/{BUILDING_ID}/reconstructions/{reconstruction_id}"
+
+    binary_response = client.get(f"{url}/point-cloud")
+    meta_response = client.get(f"{url}/point-cloud/meta")
+
+    assert binary_response.status_code == 404
+    assert binary_response.json() == {"detail": "File not found"}
+    assert meta_response.status_code == 404
+    assert meta_response.json() == {"detail": "File not found"}
+    assert not splat_path.with_name(POINT_CLOUD_BINARY_FILENAME).exists()
+    assert not splat_path.with_name(POINT_CLOUD_META_FILENAME).exists()
+
+
+def test_concurrent_point_cloud_requests_generate_once(
+    reconstruction_api: tuple[TestClient, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, building_id = reconstruction_api
+    reconstruction_id, splat_path = _completed_reconstruction_with_splat(
+        client,
+        building_id,
+    )
+    monkeypatch.setattr(config, "PLAN_DENSITY_THRESHOLD", 1.0)
+    _fake_point_cloud_colmap(monkeypatch)
+    started = threading.Event()
+    release = threading.Event()
+    calls: list[Path] = []
+    original = point_cloud_compute.generate_plan_point_cloud
+
+    def blocking_generate(splat_path: Path, colmap_directory: Path) -> None:
+        calls.append(splat_path)
+        started.set()
+        assert release.wait(timeout=30), "generation was never released"
+        original(splat_path, colmap_directory)
+
+    monkeypatch.setattr(
+        point_cloud_compute, "generate_plan_point_cloud", blocking_generate
+    )
+    url = f"/buildings/{BUILDING_ID}/reconstructions/{reconstruction_id}"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        binary_request = pool.submit(client.get, f"{url}/point-cloud")
+        meta_request = pool.submit(client.get, f"{url}/point-cloud/meta")
+        assert started.wait(timeout=30), "generation never started"
+        assert len(calls) == 1
+        release.set()
+        binary_response = binary_request.result(timeout=30)
+        meta_response = meta_request.result(timeout=30)
+
+    assert binary_response.status_code == 200
+    assert meta_response.status_code == 200
+    assert (
+        binary_response.content
+        == splat_path.with_name(POINT_CLOUD_BINARY_FILENAME).read_bytes()
+    )
+    assert calls == [splat_path]
 
 
 def test_nested_reconstruction_routes_hide_foreign_building(
@@ -1484,6 +1675,9 @@ def test_reconstruction_flow_records_milestones_and_artifacts(
     async def fake_brush(**kwargs):
         return str(tmp_path / "splat.ply")
 
+    async def fake_point_cloud(**kwargs):
+        return None
+
     monkeypatch.setattr(splat_workflow, "get_run_logger", lambda: FakeRunLogger())
     monkeypatch.setattr(
         splat_workflow,
@@ -1510,6 +1704,11 @@ def test_reconstruction_flow_records_milestones_and_artifacts(
         "train_with_brush_task",
         fake_brush,
     )
+    monkeypatch.setattr(
+        splat_workflow,
+        "generate_plan_point_cloud_task",
+        fake_point_cloud,
+    )
 
     result = asyncio.run(
         splat_workflow.splat_generation_flow.fn(
@@ -1527,7 +1726,7 @@ def test_reconstruction_flow_records_milestones_and_artifacts(
     )
 
     assert result == str(tmp_path / "splat.ply")
-    assert [progress for progress, _ in updates] == [0.25, 0.4, 0.7, 0.95]
+    assert [progress for progress, _ in updates] == [0.25, 0.4, 0.7, 0.92, 0.95]
     first_artifacts = updates[0][1]
     assert first_artifacts is not None
     if use_frame_picker:
