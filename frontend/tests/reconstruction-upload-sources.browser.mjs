@@ -45,6 +45,7 @@ try {
             const context = await browser.newContext({ viewport, serviceWorkers: 'block' });
             const rows = [];
             const patches = [];
+            const query = '?buildingId=existing';
             let rejectCreation = false;
             let creationRequests = 0;
             try {
@@ -76,7 +77,17 @@ try {
                         assert.ok(row, 'Detail must only open after its row exists');
                         return route.fulfill({ json: row });
                     }
-                    if (path === '/buildings') return route.fulfill({ json: [] });
+                    if (path === '/buildings')
+                        return route.fulfill({
+                            json: [
+                                {
+                                    id: 'existing',
+                                    name: 'Existing building',
+                                    latitude: null,
+                                    longitude: null,
+                                },
+                            ],
+                        });
                     assert.ok(path.startsWith('/tus/files/'), `Unexpected request: ${path}`);
                     const headers = { 'Tus-Resumable': '1.0.0' };
                     if (request.method() === 'POST') {
@@ -138,7 +149,7 @@ try {
                 const errors = [];
                 page.on('pageerror', (error) => errors.push(error.message));
                 const picker = async () => {
-                    await page.goto(`${origin}/#/reconstructions/from-upload`);
+                    await page.goto(`${origin}/#/reconstructions/from-upload${query}`);
                     await page
                         .getByRole('link', { name: text.capture.video.takeVideo, exact: true })
                         .waitFor();
@@ -153,7 +164,7 @@ try {
                     await page
                         .getByRole('link', { name: text.capture.video.takeVideo, exact: true })
                         .click();
-                    await page.waitForURL('**/#/reconstructions/from-upload/record');
+                    await page.waitForURL(`**/#/reconstructions/from-upload/record${query}`);
                     await page.waitForFunction(() => {
                         const button = document.querySelector('.record-btn-rec');
                         return button && !button.disabled;
@@ -171,7 +182,7 @@ try {
                 };
                 const detail = async (index) => {
                     const row = rows[index];
-                    await page.waitForURL(`**/#/reconstructions/from-upload/${row.id}`);
+                    await page.waitForURL(`**/#/reconstructions/from-upload/${row.id}${query}`);
                     await page
                         .locator('.upload-summary')
                         .getByText(row.filename, { exact: true })
@@ -179,6 +190,13 @@ try {
                     await waitFor(() => patches.some((patch) => patch.row.id === row.id));
                     assert.equal(row.status, 'pending');
                     assert.equal(await page.locator('input[type=file], video').count(), 0);
+                    const buildingPicker = page.locator('.reconstruction-form .q-select').first();
+                    await buildingPicker.getByText('Existing building', { exact: true }).waitFor();
+                    await buildingPicker.click();
+                    await page
+                        .getByRole('option')
+                        .getByText(text.buildings.picker.createNew, { exact: true })
+                        .click();
                     const name = page.getByLabel(text.buildings.fields.name, { exact: true });
                     await name.fill(`Preserved ${index}`);
                     patches.find((patch) => patch.row.id === row.id).release();
@@ -187,7 +205,9 @@ try {
                         .getByText(text.uploads.status.uploaded, { exact: false })
                         .waitFor();
                     assert.equal(await name.inputValue(), `Preserved ${index}`);
-                    assert.ok(page.url().endsWith(`/reconstructions/from-upload/${row.id}`));
+                    assert.ok(
+                        page.url().endsWith(`/reconstructions/from-upload/${row.id}${query}`),
+                    );
                 };
 
                 await picker();
@@ -266,7 +286,7 @@ try {
                     await page
                         .getByRole('button', { name: text.capture.record.discard, exact: true })
                         .click();
-                    await page.waitForURL('**/#/reconstructions/from-upload');
+                    await page.waitForURL(`**/#/reconstructions/from-upload${query}`);
                     assert.equal(creationRequests, previousRequests);
                     await camera();
                     await page.locator('.record-btn-rec').click();

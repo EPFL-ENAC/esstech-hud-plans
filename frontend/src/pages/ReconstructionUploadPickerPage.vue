@@ -26,7 +26,10 @@
                 icon="videocam"
                 :label="t('capture.video.takeVideo')"
                 :disable="busy || uploadId !== null"
-                :to="{ name: 'record-reconstruction-upload' }"
+                :to="{
+                    name: 'record-reconstruction-upload',
+                    query: { buildingId: route.query.buildingId },
+                }"
             />
             <q-banner v-if="errorMessage" class="bg-red-1 text-negative upload-error" role="alert">
                 {{ errorMessage }}
@@ -57,6 +60,7 @@
                     :to="{
                         name: 'reconstruction-from-upload',
                         params: { uploadId: upload.id },
+                        query: { buildingId: route.query.buildingId },
                     }"
                     @click.stop
                 />
@@ -70,7 +74,7 @@
 <script setup lang="ts">
 import { shallowRef, useTemplateRef } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import PageHeader from 'src/components/PageHeader.vue';
 import MyUploadsList from 'src/components/MyUploadsList.vue';
 import FilePickerButton from 'src/components/FilePickerButton.vue';
@@ -80,6 +84,7 @@ import { useUploadForReconstruction } from 'src/composables/useUploadForReconstr
 
 const { t } = useI18n();
 const router = useRouter();
+const route = useRoute();
 const uploadsList = useTemplateRef<InstanceType<typeof MyUploadsList>>('uploadsList');
 const selectedFile = shallowRef<File | null>(null);
 const { startUpload, retry, busy, uploadId, errorMessage } = useUploadForReconstruction();
@@ -88,6 +93,7 @@ function openUpload(upload: UserUpload): void {
     void router.push({
         name: 'reconstruction-from-upload',
         params: { uploadId: upload.id },
+        query: { buildingId: route.query.buildingId },
     });
 }
 

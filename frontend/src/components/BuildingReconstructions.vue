@@ -11,7 +11,7 @@
                 class="full-width"
                 unelevated
                 no-caps
-                :to="{ path: '/capture', query: { buildingId } }"
+                :to="{ name: 'reconstruction-upload-picker', query: { buildingId } }"
             />
         </div>
 

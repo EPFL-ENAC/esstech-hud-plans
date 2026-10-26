@@ -11,7 +11,7 @@ class ApiError extends Error {
     }
 }
 
-async function fixture(t) {
+async function fixture(t, buildingId) {
     const uploads = [];
     const navigations = [];
     const notifications = [];
@@ -31,6 +31,7 @@ async function fixture(t) {
                 },
             },
             'vue-router': {
+                useRoute: () => ({ query: { buildingId } }),
                 useRouter: () => ({
                     replace(to) {
                         navigations.push(to);
@@ -77,32 +78,38 @@ async function fixture(t) {
 
 const file = { name: 'video.mp4', size: 100 };
 
-test('navigates on availability once, while completion only notifies', async (t) => {
-    const f = await fixture(t);
-    f.uploader.startUpload(file);
-    assert.equal(f.uploader.busy.value, true);
-    f.uploader.startUpload(file);
-    assert.equal(f.uploads.length, 1);
-    f.uploads[0].onUploadAvailable('pending-id');
-    await nextTurn();
-    assert.equal(f.uploader.busy.value, false);
-    assert.equal(f.uploader.uploadId.value, 'pending-id');
-    assert.deepEqual(f.navigations, [
-        { name: 'reconstruction-from-upload', params: { uploadId: 'pending-id' } },
-    ]);
-    assert.deepEqual(f.notifications, []);
-    f.uploads[0].onUploadAvailable('pending-id');
-    f.uploads[0].onUploadAvailable('another-id');
-    assert.equal(f.navigations.length, 1);
-    f.unmount();
-    f.uploads[0].gate.resolve({ uploadId: 'pending-id' });
-    await nextTurn();
-    assert.equal(f.navigations.length, 1);
-    assert.equal(f.notifications[0].type, 'positive');
-});
+for (const buildingId of [undefined, 'existing-building']) {
+    test(`navigates on availability once with building context ${buildingId}, while completion only notifies`, async (t) => {
+        const f = await fixture(t, buildingId);
+        f.uploader.startUpload(file);
+        assert.equal(f.uploader.busy.value, true);
+        f.uploader.startUpload(file);
+        assert.equal(f.uploads.length, 1);
+        f.uploads[0].onUploadAvailable('pending-id');
+        await nextTurn();
+        assert.equal(f.uploader.busy.value, false);
+        assert.equal(f.uploader.uploadId.value, 'pending-id');
+        assert.deepEqual(f.navigations, [
+            {
+                name: 'reconstruction-from-upload',
+                params: { uploadId: 'pending-id' },
+                query: { buildingId },
+            },
+        ]);
+        assert.deepEqual(f.notifications, []);
+        f.uploads[0].onUploadAvailable('pending-id');
+        f.uploads[0].onUploadAvailable('another-id');
+        assert.equal(f.navigations.length, 1);
+        f.unmount();
+        f.uploads[0].gate.resolve({ uploadId: 'pending-id' });
+        await nextTurn();
+        assert.equal(f.navigations.length, 1);
+        assert.equal(f.notifications[0].type, 'positive');
+    });
+}
 
 test('creation errors retry the retained file; navigation errors retry only navigation', async (t) => {
-    const f = await fixture(t);
+    const f = await fixture(t, 'existing-building');
     f.uploader.startUpload(file);
     f.uploads[0].gate.reject(new ApiError('Invalid', 400));
     await nextTurn();
@@ -118,6 +125,13 @@ test('creation errors retry the retained file; navigation errors retry only navi
     await f.uploader.retry();
     assert.equal(f.uploads.length, 2);
     assert.equal(f.navigations.length, 2);
+    for (const navigation of f.navigations) {
+        assert.deepEqual(navigation, {
+            name: 'reconstruction-from-upload',
+            params: { uploadId: 'created' },
+            query: { buildingId: 'existing-building' },
+        });
+    }
     assert.equal(f.uploader.errorMessage.value, '');
     f.uploads[1].gate.resolve({ uploadId: 'created' });
     await nextTurn();

@@ -22,7 +22,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import VideoRecorder from 'src/components/VideoRecorder.vue';
 import LoadingOverlay from 'src/components/LoadingOverlay.vue';
@@ -31,6 +31,7 @@ import { type RecordedVideo, toCapturedVideo } from 'src/lib/captured-video';
 
 const { t } = useI18n();
 const router = useRouter();
+const route = useRoute();
 const { startUpload, retry, busy, uploadId, errorMessage } = useUploadForReconstruction();
 const accepted = ref(false);
 const closing = ref(false);
@@ -53,7 +54,10 @@ async function openPicker(): Promise<void> {
     closing.value = true;
     localError.value = '';
     try {
-        const failure = await router.replace({ name: 'reconstruction-upload-picker' });
+        const failure = await router.replace({
+            name: 'reconstruction-upload-picker',
+            query: { buildingId: route.query.buildingId },
+        });
         if (failure) localError.value = t('reconstructions.fromUpload.pickerNavigationFailed');
     } catch {
         localError.value = t('reconstructions.fromUpload.pickerNavigationFailed');
