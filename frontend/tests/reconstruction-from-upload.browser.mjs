@@ -52,6 +52,11 @@ try {
             let releaseDetail;
             let reconstruction;
             let destination;
+            let releaseSubmission;
+            let notifySubmission;
+            const submissionStarted = new Promise((resolve) => {
+                notifySubmission = resolve;
+            });
             const building = (id, name = 'Existing building') => ({
                 id,
                 name,
@@ -145,6 +150,12 @@ try {
                             splat_path: null,
                             input_video_path: null,
                         };
+                        if (submissions.length === 1) {
+                            await new Promise((resolve) => {
+                                releaseSubmission = resolve;
+                                notifySubmission();
+                            });
+                        }
                         return route.fulfill({
                             status: 202,
                             json: body.building
@@ -304,6 +315,20 @@ try {
                     );
                 });
                 await start().click();
+                await submissionStarted;
+                const submitting = page
+                    .getByRole('status')
+                    .filter({ hasText: text.capture.submittingReconstruction });
+                await submitting.waitFor();
+                assert.equal(
+                    await submitting.getByRole('progressbar').getAttribute('aria-valuenow'),
+                    null,
+                );
+                assert.equal(await start().isDisabled(), true);
+                assert.equal(await name.isDisabled(), true);
+                assert.equal(submissions.length, 1);
+                releaseSubmission();
+                await submitting.waitFor({ state: 'detached' });
                 await page
                     .getByRole('button', { name: text.buildings.view, exact: true })
                     .waitFor();
@@ -470,6 +495,7 @@ try {
                     `${locale} ${size}: upload progress, background refresh, visibility, form preservation, submissions and terminal uploads passed`,
                 );
             } finally {
+                releaseSubmission?.();
                 await context.close();
             }
         }

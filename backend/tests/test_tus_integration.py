@@ -409,8 +409,8 @@ def test_real_tus_upload_is_reusable_for_both_reconstruction_routes(
     client = real_tus.client
     location, upload_id = _start_upload(real_tus)
     first = client.post(
-        "/buildings/from-reconstruction/resumable",
-        json={"tus_upload_id": upload_id},
+        "/buildings/from-reconstruction/from-upload",
+        json={"upload_id": upload_id},
     )
     assert first.status_code == 202, first.text
     assert first.json()["reconstruction"]["status"] == "waiting_for_upload"
@@ -426,8 +426,8 @@ def test_real_tus_upload_is_reusable_for_both_reconstruction_routes(
     assert response.status_code == 204
     building_id = first.json()["building"]["id"]
     second = client.post(
-        f"/buildings/{building_id}/reconstructions/resumable",
-        json={"tus_upload_id": upload_id},
+        f"/buildings/{building_id}/reconstructions/from-upload",
+        json={"upload_id": upload_id},
     )
     assert second.status_code == 202, second.text
     source = upload_file_path(UUID(upload_id), "scan.mp4")

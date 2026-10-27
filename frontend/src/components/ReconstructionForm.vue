@@ -45,11 +45,12 @@
             </q-banner>
         </section>
 
-        <video-upload-progress
-            v-if="submissionState.phase !== 'idle'"
-            :state="submissionState"
-            class="q-mb-md"
-        />
+        <div v-if="submitting" class="q-mb-md" role="status" aria-live="polite">
+            <q-linear-progress indeterminate rounded color="primary" />
+            <div class="text-caption text-grey-7 q-mt-xs">
+                {{ t('capture.submittingReconstruction') }}
+            </div>
+        </div>
 
         <q-btn
             :label="t('capture.startProcessing')"
@@ -71,8 +72,7 @@ import { useQuasar } from 'quasar';
 import { useI18n } from 'vue-i18n';
 import BuildingPicker from 'src/components/BuildingPicker.vue';
 import ReconstructionSettings from 'src/components/ReconstructionSettings.vue';
-import VideoUploadProgress from 'src/components/VideoUploadProgress.vue';
-import type { BuildingSelection, ReconstructionSource } from 'src/lib/buildings';
+import type { BuildingSelection } from 'src/lib/buildings';
 import {
     type ReconstructionPreset,
     type ReconstructionSettingsConfig,
@@ -84,7 +84,7 @@ import { useSubmitReconstructionMutation } from 'src/mutations/reconstructions';
 import { useUiStore } from 'src/stores/ui';
 
 const props = defineProps<{
-    source: ReconstructionSource | null;
+    uploadId: string;
     disabled?: boolean;
 }>();
 const buildingSelection = defineModel<BuildingSelection>('buildingSelection', { required: true });
@@ -99,7 +99,6 @@ const $q = useQuasar();
 const {
     mutateAsync: submitReconstruction,
     isLoading: submitting,
-    submissionState,
     destinationBuildingId,
     errorMessage: mutationError,
 } = useSubmitReconstructionMutation();
@@ -116,16 +115,11 @@ const hasValidSettings = computed(
 );
 const locked = computed(() => submitting.value || destinationBuildingId.value !== null);
 const canSubmit = computed(
-    () =>
-        !props.disabled &&
-        !locked.value &&
-        props.source !== null &&
-        hasValidSettings.value &&
-        hasValidBuilding.value,
+    () => !props.disabled && !locked.value && hasValidSettings.value && hasValidBuilding.value,
 );
 
 async function startProcessing(): Promise<void> {
-    if (!canSubmit.value || !props.source) return;
+    if (!canSubmit.value) return;
 
     const settings = toSplatGenerationSettings(
         preset.value === 'advanced'
@@ -134,9 +128,11 @@ async function startProcessing(): Promise<void> {
     );
     navigationError.value = '';
     // Colada exposes submission errors through mutationError, including retained IDs.
-    await submitReconstruction({ ...props.source, settings, ...buildingSelection.value }).catch(
-        () => undefined,
-    );
+    await submitReconstruction({
+        uploadId: props.uploadId,
+        settings,
+        ...buildingSelection.value,
+    }).catch(() => undefined);
 
     if (destinationBuildingId.value === null) return;
     $q.notify({

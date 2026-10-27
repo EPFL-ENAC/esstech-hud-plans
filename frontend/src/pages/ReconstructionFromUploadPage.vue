@@ -46,7 +46,7 @@
                     v-model:building-selection="buildingSelection"
                     v-model:preset="preset"
                     v-model:advanced-settings="advancedSettings"
-                    :source="{ uploadId: upload.id }"
+                    :upload-id="upload.id"
                     :disabled="!canSubmitUpload"
                 />
             </template>

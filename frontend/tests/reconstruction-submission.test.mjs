@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict';
 import { setImmediate as nextTurn } from 'node:timers/promises';
 import { test } from 'node:test';
-import { createApp, effectScope, isReadonly } from 'vue';
+import { createApp, effectScope } from 'vue';
 import { createPinia, disposePinia, setActivePinia } from 'pinia';
 import { PiniaColada, useQueryCache } from '@pinia/colada';
 import { deferred, importTypeScript } from './helpers/typescript.mjs';
 
 async function fixture(t) {
-    const uploads = [];
     const submissions = [];
     const api = await importTypeScript(t, 'src/lib/api.ts', {
         'boot/api': { baseUrl: 'https://hud.test' },
@@ -33,13 +32,6 @@ async function fixture(t) {
             '@pinia/colada': import.meta.resolve('@pinia/colada'),
             'src/lib/auth': { getAuthSubject: () => 'test-user' },
             'src/lib/buildings': buildings,
-            'src/lib/utils/tusUpload': {
-                uploadVideoResumable(file, options) {
-                    const gate = deferred();
-                    uploads.push({ file, options, gate });
-                    return gate.promise;
-                },
-            },
         },
     );
     const app = createApp({});
@@ -55,7 +47,6 @@ async function fixture(t) {
         setActivePinia(undefined);
     });
     return {
-        uploads,
         submissions,
         invalidation,
         mutation: () => app.runWithContext(() => scope.run(useSubmitReconstructionMutation)),
@@ -64,7 +55,7 @@ async function fixture(t) {
 
 function variables(buildingId = 'existing-building') {
     return {
-        video: { name: 'scan.mp4' },
+        uploadId: 'stored-upload',
         settings: { ffmpeg: { fps: 4 } },
         ...(buildingId === null
             ? {
@@ -91,44 +82,26 @@ function expectedInvalidations(buildingId) {
 }
 
 for (const buildingId of ['existing-building', null]) {
-    test(`submission lifecycle awaits the ${buildingId === null ? 'new' : 'existing'} building endpoint`, async (t) => {
+    test(`submits an upload ID to the ${buildingId === null ? 'new' : 'existing'} building endpoint`, async (t) => {
         const f = await fixture(t);
         const mutation = f.mutation();
-        assert.equal(isReadonly(mutation.submissionState), true);
-        assert.deepEqual(mutation.submissionState.value, { phase: 'idle' });
+        assert.equal(mutation.isLoading.value, false);
         const input = variables(buildingId);
         const promise = mutation.mutateAsync(input);
         await nextTurn();
-        assert.deepEqual(mutation.submissionState.value, {
-            phase: 'uploading',
-            progress: null,
-            resumed: false,
-        });
-        const upload = f.uploads[0];
-        assert.equal(upload.file, input.video);
-        upload.options.onProgress({ loaded: 12, total: 0 });
-        upload.options.onResumed();
-        assert.deepEqual(mutation.submissionState.value, {
-            phase: 'uploading',
-            progress: { loaded: 12, total: 0 },
-            resumed: true,
-        });
-        upload.gate.resolve({ uploadId: 'upload-id', resumed: true });
-        await nextTurn();
-        assert.deepEqual(mutation.submissionState.value, { phase: 'submitting' });
         assert.equal(mutation.isLoading.value, true);
-        upload.options.onProgress({ loaded: 100, total: 100 });
-        upload.options.onResumed();
-        assert.deepEqual(mutation.submissionState.value, { phase: 'submitting' });
+        assert.equal(mutation.destinationBuildingId.value, null);
+        assert.equal(f.submissions.length, 1);
         const request = f.submissions[0];
         assert.equal(
             request.url,
             buildingId === null
-                ? 'https://hud.test/buildings/from-reconstruction/resumable'
-                : 'https://hud.test/buildings/existing-building/reconstructions/resumable',
+                ? 'https://hud.test/buildings/from-reconstruction/from-upload'
+                : 'https://hud.test/buildings/existing-building/reconstructions/from-upload',
         );
+        assert.equal(request.init.method, 'POST');
         assert.deepEqual(JSON.parse(request.init.body), {
-            tus_upload_id: 'upload-id',
+            upload_id: input.uploadId,
             settings: input.settings,
             ...(buildingId === null ? { building: input.building } : {}),
         });
@@ -141,86 +114,21 @@ for (const buildingId of ['existing-building', null]) {
                 : reconstruction,
         );
         assert.deepEqual(await promise, reconstruction);
-        assert.deepEqual(mutation.submissionState.value, { phase: 'idle' });
+        assert.equal(mutation.isLoading.value, false);
         assert.equal(mutation.destinationBuildingId.value, destination);
         assert.equal(mutation.errorMessage.value, '');
         assert.deepEqual(
             f.invalidation.mock.calls.map((call) => call.arguments[0]),
             expectedInvalidations(destination),
         );
-        upload.options.onProgress({ loaded: 200, total: 200 });
-        assert.deepEqual(mutation.submissionState.value, { phase: 'idle' });
     });
-}
 
-test('independent mutation instances never share progress or resumed state', async (t) => {
-    const f = await fixture(t);
-    const first = f.mutation();
-    const second = f.mutation();
-    const firstPromise = first.mutateAsync(variables('first'));
-    const secondPromise = second.mutateAsync(variables('second'));
-    await nextTurn();
-    const [firstUpload, secondUpload] = f.uploads;
-    firstUpload.options.onProgress({ loaded: 25, total: 100 });
-    firstUpload.options.onResumed();
-    secondUpload.options.onProgress({ loaded: 10, total: 200 });
-    assert.deepEqual(first.submissionState.value, {
-        phase: 'uploading',
-        progress: { loaded: 25, total: 100 },
-        resumed: true,
-    });
-    assert.deepEqual(second.submissionState.value, {
-        phase: 'uploading',
-        progress: { loaded: 10, total: 200 },
-        resumed: false,
-    });
-    const failed = assert.rejects(secondPromise, { message: 'Connection lost' });
-    secondUpload.gate.reject(new Error('Connection lost'));
-    await failed;
-    assert.deepEqual(second.submissionState.value, { phase: 'idle' });
-    assert.equal(first.submissionState.value.phase, 'uploading');
-    assert.equal(f.submissions.length, 0);
-    firstUpload.gate.resolve({ uploadId: 'first-upload' });
-    await nextTurn();
-    respond(f.submissions[0], { id: 'reconstruction-id', building_id: 'first' });
-    await firstPromise;
-});
-
-test('upload failure never submits, resets state, and allows a fresh attempt', async (t) => {
-    const f = await fixture(t);
-    const mutation = f.mutation();
-    const promise = mutation.mutateAsync(variables());
-    const failed = assert.rejects(promise, { name: 'AbortError' });
-    await nextTurn();
-    f.uploads[0].options.onResumed();
-    f.uploads[0].gate.reject(new DOMException('Aborted', 'AbortError'));
-    await failed;
-    assert.deepEqual(mutation.submissionState.value, { phase: 'idle' });
-    assert.equal(f.submissions.length, 0);
-    assert.equal(f.invalidation.mock.callCount(), 0);
-    const retry = mutation.mutateAsync(variables());
-    await nextTurn();
-    assert.deepEqual(mutation.submissionState.value, {
-        phase: 'uploading',
-        progress: null,
-        resumed: false,
-    });
-    f.uploads[1].gate.resolve({ uploadId: 'retry-upload' });
-    await nextTurn();
-    respond(f.submissions[0], { id: 'reconstruction-id', building_id: 'existing-building' });
-    await retry;
-});
-
-for (const buildingId of ['existing-building', null]) {
-    test(`submission failure retains IDs and invalidates the ${buildingId === null ? 'new' : 'existing'} building`, async (t) => {
+    test(`scheduling failure retains IDs for the ${buildingId === null ? 'new' : 'existing'} building`, async (t) => {
         const f = await fixture(t);
         const mutation = f.mutation();
         const promise = mutation.mutateAsync(variables(buildingId));
         const failed = assert.rejects(promise, { status: 503 });
         await nextTurn();
-        f.uploads[0].gate.resolve({ uploadId: 'upload-id' });
-        await nextTurn();
-        assert.equal(mutation.submissionState.value.phase, 'submitting');
         const destination = buildingId ?? 'retained-building';
         respond(
             f.submissions[0],
@@ -234,7 +142,7 @@ for (const buildingId of ['existing-building', null]) {
             503,
         );
         await failed;
-        assert.deepEqual(mutation.submissionState.value, { phase: 'idle' });
+        assert.equal(mutation.isLoading.value, false);
         assert.equal(mutation.destinationBuildingId.value, destination);
         assert.equal(mutation.errorMessage.value, 'Scheduling failed');
         assert.deepEqual(
@@ -244,85 +152,76 @@ for (const buildingId of ['existing-building', null]) {
     });
 }
 
-for (const buildingId of ['existing-building', null]) {
-    for (const fail of [false, true]) {
-        test(`stored upload skips tus for ${buildingId ?? 'new building'} (${fail ? 'failure' : 'success'})`, async (t) => {
-            const f = await fixture(t);
-            const mutation = f.mutation();
-            const { video, ...rest } = variables(buildingId);
-            const input = { ...rest, uploadId: 'stored-upload' };
-            const promise = mutation.mutateAsync(input);
-            const failed = fail ? assert.rejects(promise, { status: 503 }) : null;
-            await nextTurn();
-            assert.equal(f.uploads.length, 0);
-            assert.deepEqual(mutation.submissionState.value, { phase: 'submitting' });
-            assert.equal(mutation.isLoading.value, true);
-            assert.equal(f.submissions.length, 1);
-            const request = f.submissions[0];
-            assert.equal(
-                request.url,
-                buildingId === null
-                    ? 'https://hud.test/buildings/from-reconstruction/from-upload'
-                    : 'https://hud.test/buildings/existing-building/reconstructions/from-upload',
-            );
-            assert.deepEqual(JSON.parse(request.init.body), {
-                upload_id: 'stored-upload',
-                settings: input.settings,
-                ...(buildingId === null ? { building: input.building } : {}),
-            });
-            const destination = buildingId ?? 'created-building';
-            const reconstruction = { id: 'reconstruction-id', building_id: destination };
-            if (fail) {
-                respond(
-                    request,
-                    {
-                        detail: {
-                            message: 'Scheduling failed',
-                            reconstruction_id: reconstruction.id,
-                            ...(buildingId === null ? { building_id: destination } : {}),
-                        },
-                    },
-                    503,
-                );
-                await failed;
-                assert.equal(mutation.errorMessage.value, 'Scheduling failed');
-            } else {
-                respond(
-                    request,
-                    buildingId === null
-                        ? { building: { id: destination }, reconstruction }
-                        : reconstruction,
-                );
-                assert.deepEqual(await promise, reconstruction);
-            }
-            assert.deepEqual(mutation.submissionState.value, { phase: 'idle' });
-            assert.equal(mutation.destinationBuildingId.value, destination);
-            assert.deepEqual(
-                f.invalidation.mock.calls.map((call) => call.arguments[0]),
-                expectedInvalidations(destination),
-            );
-        });
-    }
+test('independent mutations settle their loading and destination state separately', async (t) => {
+    const f = await fixture(t);
+    const first = f.mutation();
+    const second = f.mutation();
+    const firstPromise = first.mutateAsync(variables('first'));
+    const secondPromise = second.mutateAsync(variables('second'));
+    const failed = assert.rejects(secondPromise, { message: 'Connection lost' });
+    await nextTurn();
+    assert.equal(first.isLoading.value, true);
+    assert.equal(second.isLoading.value, true);
+    f.submissions[1].gate.reject(new Error('Connection lost'));
+    await failed;
+    assert.equal(first.isLoading.value, true);
+    assert.equal(second.isLoading.value, false);
+    assert.equal(second.destinationBuildingId.value, null);
+    respond(f.submissions[0], { id: 'reconstruction-id', building_id: 'first' });
+    await firstPromise;
+    assert.equal(first.isLoading.value, false);
+    assert.equal(first.destinationBuildingId.value, 'first');
+    assert.equal(second.destinationBuildingId.value, null);
+});
+
+for (const status of [404, 409, 422, 503]) {
+    test(`HTTP ${status} without retained IDs allows retry without a destination`, async (t) => {
+        const f = await fixture(t);
+        const mutation = f.mutation();
+        const input = variables();
+        const attempt = mutation.mutateAsync(input);
+        const failure = assert.rejects(attempt, { status });
+        await nextTurn();
+        respond(f.submissions[0], { detail: 'Upload unavailable' }, status);
+        await failure;
+        assert.equal(mutation.destinationBuildingId.value, null);
+        assert.equal(mutation.isLoading.value, false);
+        assert.equal(mutation.errorMessage.value, 'Upload unavailable');
+        assert.equal(f.invalidation.mock.callCount(), 0);
+        const retry = mutation.mutateAsync(input);
+        await nextTurn();
+        assert.equal(mutation.isLoading.value, true);
+        respond(f.submissions[1], { id: 'retry', building_id: 'existing-building' });
+        await retry;
+        assert.equal(mutation.isLoading.value, false);
+        assert.equal(mutation.destinationBuildingId.value, 'existing-building');
+        assert.equal(mutation.errorMessage.value, '');
+    });
 }
 
-test('rejected stored uploads allow retry without retaining a destination', async (t) => {
+test('a retained building remains available when reconstruction persistence fails', async (t) => {
     const f = await fixture(t);
     const mutation = f.mutation();
-    const input = { uploadId: 'stored-upload', settings: {}, buildingId: 'existing-building' };
-    const attempt = mutation.mutateAsync(input);
-    const failure = assert.rejects(attempt, { status: 409 });
+    const promise = mutation.mutateAsync(variables(null));
+    const failure = assert.rejects(promise, { status: 503 });
     await nextTurn();
-    respond(f.submissions[0], { detail: 'Upload has not finished uploading' }, 409);
+    respond(
+        f.submissions[0],
+        {
+            detail: {
+                message: 'Reconstruction database is unavailable',
+                building_id: 'retained-building',
+            },
+        },
+        503,
+    );
     await failure;
-    assert.equal(mutation.destinationBuildingId.value, null);
-    assert.deepEqual(mutation.submissionState.value, { phase: 'idle' });
-    assert.equal(f.invalidation.mock.callCount(), 0);
-    const retry = mutation.mutateAsync(input);
-    await nextTurn();
-    respond(f.submissions[1], { id: 'retry', building_id: 'existing-building' });
-    await retry;
-    assert.equal(f.uploads.length, 0);
-    assert.equal(mutation.destinationBuildingId.value, 'existing-building');
+    assert.equal(mutation.isLoading.value, false);
+    assert.equal(mutation.destinationBuildingId.value, 'retained-building');
+    assert.deepEqual(
+        f.invalidation.mock.calls.map((call) => call.arguments[0]),
+        expectedInvalidations('retained-building'),
+    );
 });
 
 test('cache refresh failure does not change a successful submission', async (t) => {
@@ -332,10 +231,9 @@ test('cache refresh failure does not change a successful submission', async (t) 
     const mutation = f.mutation();
     const promise = mutation.mutateAsync(variables());
     await nextTurn();
-    f.uploads[0].gate.resolve({ uploadId: 'upload-id' });
-    await nextTurn();
     respond(f.submissions[0], { id: 'reconstruction-id', building_id: 'existing-building' });
     await promise;
+    assert.equal(mutation.isLoading.value, false);
     assert.equal(mutation.error.value, null);
     assert.equal(mutation.destinationBuildingId.value, 'existing-building');
     assert.equal(warn.mock.callCount(), 1);

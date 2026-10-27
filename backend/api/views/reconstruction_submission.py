@@ -10,7 +10,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from api.db import get_session
-from api.lib.tus import parse_upload_id
 from api.models.building import BuildingCreate
 from api.models.uploads import UploadStatus, UserUploads
 from api.models.workflows import SplatGenerationWorkflowSettings
@@ -30,25 +29,6 @@ def get_reconstruction_service(
     """Build a request-scoped reconstruction service."""
 
     return ReconstructionService(session)
-
-
-class ResumableReconstructionSubmission(BaseModel):
-    """Body for resumable (tus) reconstruction submissions."""
-
-    tus_upload_id: str
-    settings: SplatGenerationWorkflowSettings = Field(
-        default_factory=SplatGenerationWorkflowSettings
-    )
-
-
-class ResumableBuildingFromReconstructionSubmission(BaseModel):
-    """Body for resumable (tus) building-plus-reconstruction submissions."""
-
-    tus_upload_id: str
-    building: BuildingCreate = Field(default_factory=BuildingCreate)
-    settings: SplatGenerationWorkflowSettings = Field(
-        default_factory=SplatGenerationWorkflowSettings
-    )
 
 
 class UploadReconstructionSubmission(BaseModel):
@@ -89,15 +69,3 @@ async def validate_user_upload(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "Upload persistence is unavailable",
         ) from exc
-
-
-async def validate_tus_upload(
-    upload_id: str,
-    *,
-    user_id: UUID,
-    uploads: UserUploadsService,
-) -> UserUploads:
-    """Resolve a pending or completed tus upload belonging to the user."""
-
-    parsed_id = parse_upload_id(upload_id)
-    return await validate_user_upload(parsed_id, user_id=user_id, uploads=uploads)

@@ -413,7 +413,7 @@ def _register_tus_upload(
     asyncio.run(register())
 
 
-def test_resumable_reconstruction_submission_schedules_copy(
+def test_from_upload_reconstruction_submission_schedules_copy(
     tus_api: tuple[TestClient, UUID, Path],
 ) -> None:
     client, building_id, tus_dir = tus_api
@@ -422,8 +422,8 @@ def test_resumable_reconstruction_submission_schedules_copy(
     _register_tus_upload(client, upload_id)
 
     response = client.post(
-        f"/buildings/{building_id}/reconstructions/resumable",
-        json={"tus_upload_id": upload_id, "settings": {}},
+        f"/buildings/{building_id}/reconstructions/from-upload",
+        json={"upload_id": upload_id, "settings": {}},
     )
 
     assert response.status_code == 202
@@ -433,7 +433,7 @@ def test_resumable_reconstruction_submission_schedules_copy(
     assert created["input_video_path"].endswith("video/input.mp4")
 
 
-def test_resumable_reconstruction_submission_passes_tus_parameters(
+def test_from_upload_reconstruction_submission_passes_tus_parameters(
     monkeypatch: pytest.MonkeyPatch,
     tus_api: tuple[TestClient, UUID, Path],
 ) -> None:
@@ -460,8 +460,8 @@ def test_resumable_reconstruction_submission_passes_tus_parameters(
     )
 
     response = client.post(
-        f"/buildings/{building_id}/reconstructions/resumable",
-        json={"tus_upload_id": upload_id, "settings": {"ffmpeg": {"fps": 4}}},
+        f"/buildings/{building_id}/reconstructions/from-upload",
+        json={"upload_id": upload_id, "settings": {"ffmpeg": {"fps": 4}}},
     )
 
     assert response.status_code == 202
@@ -497,11 +497,11 @@ def test_permanent_upload_can_be_submitted_twice(
             await UserUploadsService(session).complete(UUID(upload_id))
 
     asyncio.run(complete())
-    url = f"/buildings/{building_id}/reconstructions/resumable"
-    first = client.post(url, json={"tus_upload_id": upload_id})
+    url = f"/buildings/{building_id}/reconstructions/from-upload"
+    first = client.post(url, json={"upload_id": upload_id})
     assert first.status_code == 202
     assert not (tus_dir / upload_id).exists()
-    second = client.post(url, json={"tus_upload_id": upload_id})
+    second = client.post(url, json={"upload_id": upload_id})
     assert second.status_code == 202
     assert first.json()["id"] != second.json()["id"]
     assert upload_file_path(UUID(upload_id), "scan.mp4").read_bytes() == b"video bytes"
@@ -530,11 +530,11 @@ def test_reconstruction_rejects_unavailable_upload_before_creating_records(
         )
     before = client.get("/buildings").json()
     url = (
-        "/buildings/from-reconstruction/resumable"
+        "/buildings/from-reconstruction/from-upload"
         if new_building
-        else f"/buildings/{building_id}/reconstructions/resumable"
+        else f"/buildings/{building_id}/reconstructions/from-upload"
     )
-    response = client.post(url, json={"tus_upload_id": upload_id})
+    response = client.post(url, json={"upload_id": upload_id})
     expected = {
         "unknown": 404,
         "unowned": 404,
@@ -554,13 +554,13 @@ def test_reconstruction_rejects_invalid_upload_id(
 ) -> None:
     client, building_id, _ = tus_api
     response = client.post(
-        f"/buildings/{building_id}/reconstructions/resumable",
-        json={"tus_upload_id": upload_id},
+        f"/buildings/{building_id}/reconstructions/from-upload",
+        json={"upload_id": upload_id},
     )
-    assert response.status_code == 400
+    assert response.status_code == 422
 
 
-def test_resumable_building_from_reconstruction_creates_linked_records(
+def test_from_upload_building_from_reconstruction_creates_linked_records(
     tus_api: tuple[TestClient, UUID, Path],
 ) -> None:
     client, _, tus_dir = tus_api
@@ -569,9 +569,9 @@ def test_resumable_building_from_reconstruction_creates_linked_records(
     _register_tus_upload(client, upload_id)
 
     response = client.post(
-        "/buildings/from-reconstruction/resumable",
+        "/buildings/from-reconstruction/from-upload",
         json={
-            "tus_upload_id": upload_id,
+            "upload_id": upload_id,
             "building": {"name": "New hall"},
             "settings": {},
         },
@@ -585,7 +585,7 @@ def test_resumable_building_from_reconstruction_creates_linked_records(
     assert body["reconstruction"]["status"] == "scheduled"
 
 
-def test_resumable_submission_waits_for_incomplete_upload(
+def test_from_upload_submission_waits_for_incomplete_upload(
     tus_api: tuple[TestClient, UUID, Path],
 ) -> None:
     client, building_id, tus_dir = tus_api
@@ -594,8 +594,8 @@ def test_resumable_submission_waits_for_incomplete_upload(
     _register_tus_upload(client, upload_id, status=UploadStatus.PENDING)
 
     response = client.post(
-        f"/buildings/{building_id}/reconstructions/resumable",
-        json={"tus_upload_id": upload_id, "settings": {}},
+        f"/buildings/{building_id}/reconstructions/from-upload",
+        json={"upload_id": upload_id, "settings": {}},
     )
 
     assert response.status_code == 202
@@ -606,7 +606,7 @@ def test_resumable_submission_waits_for_incomplete_upload(
     ]
 
 
-def test_resumable_submission_maps_scheduling_failure_to_503(
+def test_from_upload_submission_maps_scheduling_failure_to_503(
     monkeypatch: pytest.MonkeyPatch,
     tus_api: tuple[TestClient, UUID, Path],
 ) -> None:
@@ -623,8 +623,8 @@ def test_resumable_submission_maps_scheduling_failure_to_503(
     )
 
     response = client.post(
-        f"/buildings/{building_id}/reconstructions/resumable",
-        json={"tus_upload_id": upload_id, "settings": {}},
+        f"/buildings/{building_id}/reconstructions/from-upload",
+        json={"upload_id": upload_id, "settings": {}},
     )
 
     assert response.status_code == 503
