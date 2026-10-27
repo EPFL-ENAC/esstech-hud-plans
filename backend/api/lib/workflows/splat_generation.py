@@ -352,16 +352,13 @@ async def copy_video_from_tus_upload(
     """Copy a completed tus upload into its final artifact location."""
 
     run_logger = get_run_logger()
-    await run_in_threadpool(
-        _copy_tus_upload, tus_upload_path, tus_video_filename, video_path
-    )
+    await run_in_threadpool(_copy_tus_upload, tus_upload_path, video_path)
     run_logger.info("Copied uploaded video %s to %s", tus_video_filename, video_path)
     return video_path
 
 
 def _copy_tus_upload(
     tus_upload_path: str,
-    tus_video_filename: str,
     video_path: str,
 ) -> None:
     source = Path(tus_upload_path)

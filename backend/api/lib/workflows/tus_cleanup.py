@@ -86,26 +86,6 @@ def remove_expired_uploads(upload_dir: Path, retention_days: int) -> list[str]:
     return removed
 
 
-def remove_staging_upload(upload_path: str) -> bool:
-    """Delete one staging upload pair (binary plus .info) for an eager cleanup.
-
-    Returns whether the binary existed. The path arrives from our own flow
-    parameters; only entries directly inside TUSD_UPLOAD_DIR are touched.
-    """
-
-    upload_dir = Path(config.TUSD_UPLOAD_DIR).resolve()
-    binary = Path(upload_path)
-    try:
-        binary = binary.resolve(strict=False)
-    except OSError:
-        return False
-    if binary.parent != upload_dir or not binary.is_file():
-        return False
-    binary.unlink(missing_ok=True)
-    binary.with_name(binary.name + ".info").unlink(missing_ok=True)
-    return True
-
-
 @flow(name="tus-cleanup")
 def tus_cleanup_flow() -> list[str]:
     run_logger = get_run_logger()

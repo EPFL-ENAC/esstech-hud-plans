@@ -513,21 +513,13 @@ def _seed_completed_upload(
     filename: str = "scan.mp4",
     content: bytes = b"video bytes",
 ) -> str:
-    """Create a completed fake tus upload pair in the staging directory."""
+    """Create a completed upload row and its permanent video file."""
 
     assert isinstance(client.app, FastAPI)
     upload_id = uuid4().hex
-    upload_dir = Path(config.TUSD_UPLOAD_DIR)
-    (upload_dir / upload_id).write_bytes(content)
-    (upload_dir / f"{upload_id}.info").write_text(
-        json.dumps(
-            {
-                "Size": len(content),
-                "SizeIsDeferred": False,
-                "MetaData": {"filename": filename},
-            }
-        )
-    )
+    path = upload_file_path(UUID(upload_id), filename)
+    path.parent.mkdir(parents=True)
+    path.write_bytes(content)
 
     async def register() -> None:
         async with AsyncSession(client.app.state.upload_database) as session:
@@ -537,7 +529,7 @@ def _seed_completed_upload(
                     user_id=USER_ID,
                     filename=filename,
                     size_bytes=len(content),
-                    file_path=str(upload_dir / upload_id),
+                    file_path=str(path),
                     status=UploadStatus.UPLOADED,
                     uploaded_at=utc_now(),
                 )

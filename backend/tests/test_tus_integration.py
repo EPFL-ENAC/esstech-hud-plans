@@ -435,9 +435,7 @@ def test_real_tus_upload_is_reusable_for_both_reconstruction_routes(
     for parameters in scheduled:
         assert parameters["tus_upload_path"] == str(source)
         artifact = parameters["artifact"]
-        splat_workflow._copy_tus_upload(
-            str(source), "scan.mp4", str(artifact.video_path)
-        )
+        splat_workflow._copy_tus_upload(str(source), str(artifact.video_path))
         assert artifact.video_path.read_bytes() == b"video bytes"
         assert source.read_bytes() == b"video bytes"
     assert not (real_tus.upload_directory / upload_id).exists()
