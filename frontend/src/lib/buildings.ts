@@ -152,12 +152,6 @@ export interface Reconstruction {
     updated_at: string;
 }
 
-export type ReconstructionSource = { video: File } | { uploadId: string };
-
-export type ReconstructionSubmission = ReconstructionSource & {
-    settings: SplatGenerationSettings;
-};
-
 export function getCurrentUser(): Promise<CurrentUser> {
     return requestJson('/user/me');
 }
