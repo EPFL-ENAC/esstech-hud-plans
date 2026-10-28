@@ -17,16 +17,6 @@ const routes: RouteRecordRaw[] = [
                 component: () => import('pages/HomePage.vue'),
             },
             {
-                path: 'capture',
-                name: 'capture',
-                meta: { tab: true },
-                component: () => import('pages/CapturePage.vue'),
-            },
-            {
-                path: 'capture/new',
-                redirect: (to) => ({ path: '/capture', query: to.query, hash: to.hash }),
-            },
-            {
                 path: 'library',
                 name: 'library',
                 meta: { tab: true },
@@ -174,18 +164,6 @@ const routes: RouteRecordRaw[] = [
                 path: '',
                 component: () => import('pages/AdvancedPage.vue'),
             },
-            {
-                path: '/buildings',
-                component: () => import('pages/BuildingsPageTemp.vue'),
-            },
-            {
-                path: '/buildings/new',
-                component: () => import('pages/NewBuildingPage.vue'),
-            },
-            {
-                path: '/buildings/:id',
-                component: () => import('pages/BuildingPage.vue'),
-            },
         ],
     },
 
@@ -195,10 +173,6 @@ const routes: RouteRecordRaw[] = [
         path: '/reconstructions/from-upload/record',
         name: 'record-reconstruction-upload',
         component: () => import('pages/RecordReconstructionUploadPage.vue'),
-    },
-    {
-        path: '/capture/record',
-        component: () => import('pages/CaptureRecordPage.vue'),
     },
     {
         path: '/uploads/record',

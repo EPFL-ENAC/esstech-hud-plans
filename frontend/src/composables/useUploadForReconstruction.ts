@@ -1,5 +1,5 @@
 import { computed, onBeforeUnmount, readonly, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import { ApiError } from 'src/lib/api';
@@ -8,6 +8,7 @@ import { useUploadVideoMutation } from 'src/mutations/uploads';
 
 export function useUploadForReconstruction() {
     const router = useRouter();
+    const route = useRoute();
     const { t } = useI18n();
     const $q = useQuasar();
     const subject = getAuthSubject();
@@ -38,6 +39,7 @@ export function useUploadForReconstruction() {
             const failure = await router.replace({
                 name: 'reconstruction-from-upload',
                 params: { uploadId: uploadId.value },
+                query: { buildingId: route.query.buildingId },
             });
             if (failure && mounted) {
                 errorMessage.value = t('reconstructions.fromUpload.navigationFailed');

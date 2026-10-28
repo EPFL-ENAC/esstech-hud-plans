@@ -1,27 +1,21 @@
 import { useMutation, useQueryCache } from '@pinia/colada';
-import { computed, readonly, shallowRef } from 'vue';
+import { computed } from 'vue';
 import { getAuthSubject } from 'src/lib/auth';
-import type { FetchProgress } from 'src/lib/utils/fetchProgress';
 import {
     type BuildingSelection,
     type Reconstruction,
-    type ReconstructionSubmission,
-    createBuildingFromReconstructionResumable,
+    type SplatGenerationSettings,
     createBuildingFromReconstructionUpload,
     createReconstructionFromUpload,
-    createReconstructionResumable,
     getFailedBuildingId,
     getFailedReconstructionId,
     getReconstructionSubmissionErrorMessage,
 } from 'src/lib/buildings';
-import { uploadVideoResumable } from 'src/lib/utils/tusUpload';
 
-export type SubmitReconstructionVariables = ReconstructionSubmission & BuildingSelection;
-
-export type ReconstructionSubmissionState =
-    | { phase: 'idle' }
-    | { phase: 'uploading'; progress: FetchProgress | null; resumed: boolean }
-    | { phase: 'submitting' };
+export type SubmitReconstructionVariables = BuildingSelection & {
+    uploadId: string;
+    settings: SplatGenerationSettings;
+};
 
 function retainedBuildingId(
     error: unknown,
@@ -36,54 +30,21 @@ function retainedBuildingId(
 export function useSubmitReconstructionMutation() {
     const queryCache = useQueryCache();
     const subject = getAuthSubject();
-    const submissionState = shallowRef<ReconstructionSubmissionState>({ phase: 'idle' });
     const mutation = useMutation<Reconstruction, SubmitReconstructionVariables, unknown>({
         mutation: async (variables) => {
-            try {
-                if ('uploadId' in variables) {
-                    submissionState.value = { phase: 'submitting' };
-                    if (variables.buildingId === null) {
-                        const result = await createBuildingFromReconstructionUpload(
-                            variables.building,
-                            variables.uploadId,
-                            variables.settings,
-                        );
-                        return result.reconstruction;
-                    }
-                    return await createReconstructionFromUpload(
-                        variables.buildingId,
-                        variables.uploadId,
-                        variables.settings,
-                    );
-                }
-                submissionState.value = { phase: 'uploading', progress: null, resumed: false };
-                const { uploadId } = await uploadVideoResumable(variables.video, {
-                    onProgress(progress) {
-                        if (submissionState.value.phase !== 'uploading') return;
-                        submissionState.value = { ...submissionState.value, progress };
-                    },
-                    onResumed() {
-                        if (submissionState.value.phase !== 'uploading') return;
-                        submissionState.value = { ...submissionState.value, resumed: true };
-                    },
-                });
-                submissionState.value = { phase: 'submitting' };
-                if (variables.buildingId === null) {
-                    const result = await createBuildingFromReconstructionResumable(
-                        variables.building,
-                        uploadId,
-                        variables.settings,
-                    );
-                    return result.reconstruction;
-                }
-                return await createReconstructionResumable(
-                    variables.buildingId,
-                    uploadId,
+            if (variables.buildingId === null) {
+                const result = await createBuildingFromReconstructionUpload(
+                    variables.building,
+                    variables.uploadId,
                     variables.settings,
                 );
-            } finally {
-                submissionState.value = { phase: 'idle' };
+                return result.reconstruction;
             }
+            return createReconstructionFromUpload(
+                variables.buildingId,
+                variables.uploadId,
+                variables.settings,
+            );
         },
         onSettled(data, error, variables) {
             const buildingId = data?.building_id ?? retainedBuildingId(error, variables);
@@ -119,7 +80,6 @@ export function useSubmitReconstructionMutation() {
 
     return {
         ...mutation,
-        submissionState: readonly(submissionState),
         destinationBuildingId,
         errorMessage,
     };

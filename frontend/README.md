@@ -74,9 +74,13 @@ Only `offline.html` is precached. App assets use normal HTTP caching; `env.js`,
 API/auth responses, maps, videos, and reconstruction files are not stored in
 service-worker caches. Work requires a connection. Both SPA and PWA modes show a
 connection-loss banner without unmounting the app or clearing forms. Recordings
-and drafts still live in memory;
-closing, reloading, or OS termination can lose them. There is no background upload
-queue or offline authentication.
+and unsaved form inputs still live in memory; closing, reloading, or OS termination
+can lose them. There is no background upload queue or offline authentication.
+
+Start a reconstruction by selecting an existing upload, choosing a local video,
+or recording one. New videos begin uploading before the reconstruction form opens.
+Then choose the destination building and reconstruction settings, and submit.
+Processing waits for the upload to finish when necessary.
 
 A new service worker waits until all windows controlled by its predecessor close.
 There is no automatic page reload or forced worker activation during capture or
@@ -135,8 +139,9 @@ the HTTPS staging deployment, verify these cases before promoting to production:
   Chrome/Edge, and macOS Safari. Check ordinary browser use, including Firefox.
 - Sign in from the installed app, return from Keycloak with valid OAuth state,
   sign out, and sign in again. Verify deep links and expired-session handling.
-- Allow/deny camera permission; record, return to the form, upload, follow
-  reconstruction progress, and view plans in both browser and standalone modes.
+- Allow/deny camera permission; record and start uploading, configure and submit
+  the reconstruction, follow progress, and view plans in both browser and
+  standalone modes.
 - Check portrait/landscape layouts, notches, home indicators, and drawer footers.
 - After installation and reopening, disconnect and launch: the offline page
   appears; reconnect and Retry resumes the requested hash route. Test all locales.

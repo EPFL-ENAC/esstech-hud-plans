@@ -261,31 +261,6 @@ try {
                         .waitFor();
                     assert.equal(rows.length, 2);
 
-                    // The shared recorder still hands video back to the capture draft.
-                    await page.evaluate(() => {
-                        const router =
-                            document.querySelector('#q-app').__vue_app__.config.globalProperties
-                                .$router;
-                        return router.push('/capture?buildingId=existing');
-                    });
-                    await page.locator('.reconstruction-form .q-select').nth(1).click();
-                    await page.getByRole('option').getByText('outdoors', { exact: true }).click();
-                    await page.getByRole('button', { name: 'Take a Video', exact: true }).click();
-                    await page.waitForURL('**/#/capture/record');
-                    await page.waitForFunction(
-                        () => !document.querySelector('.record-btn-rec')?.disabled,
-                    );
-                    await record();
-                    await page.locator('.record-btn-rec').click();
-                    await page.waitForURL('**/#/capture?buildingId=existing');
-                    await page.locator('video.video-preview').waitFor();
-                    await page.getByText('Existing building', { exact: true }).waitFor();
-                    assert.match(
-                        await page.locator('.reconstruction-form .q-select').nth(1).innerText(),
-                        /outdoors/,
-                    );
-                    assert.equal(rows.length, 2);
-
                     // A previous account's completed transfer cannot notify a new account.
                     rejectCreation = false;
                     await page.evaluate(() => {

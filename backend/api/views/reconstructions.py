@@ -39,16 +39,12 @@ from api.services.reconstructions import (
     ReconstructionService,
     SortOrder,
 )
-from api.services.uploads import UserUploadsService
 from api.utils.responses import inline_file_response
 from api.views.buildings import get_current_building
 from api.views.reconstruction_submission import (
-    ResumableReconstructionSubmission,
     UploadReconstructionSubmission,
     get_reconstruction_service,
-    validate_tus_upload,
 )
-from api.views.uploads import get_uploads_service
 
 logger = logging.getLogger(__name__)
 
@@ -234,50 +230,6 @@ def get_reconstruction_point_cloud_meta(
         root_directory=root_directory,
         media_type="application/json",
     )
-
-
-@router.post(
-    "/resumable",
-    status_code=status.HTTP_202_ACCEPTED,
-    response_model=ReconstructionRead,
-)
-async def create_reconstruction_from_tus(
-    payload: ResumableReconstructionSubmission,
-    building: Annotated[Building, Depends(get_current_building)],
-    reconstructions: Annotated[
-        ReconstructionService,
-        Depends(get_reconstruction_service),
-    ],
-    uploads: Annotated[UserUploadsService, Depends(get_uploads_service)],
-) -> Reconstruction:
-    """Create a reconstruction, waiting for its tus upload when necessary."""
-    upload = await validate_tus_upload(
-        payload.tus_upload_id,
-        user_id=building.user_id,
-        uploads=uploads,
-    )
-
-    try:
-        return await reconstructions.create_from_upload(
-            user_id=building.user_id,
-            building_id=building.id,
-            upload_id=upload.id,
-            settings=payload.settings,
-        )
-    except ReconstructionInputNotFoundError as exc:
-        raise HTTPException(404, str(exc)) from exc
-    except ReconstructionConflictError as exc:
-        raise HTTPException(409, str(exc)) from exc
-    except ReconstructionCreationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "message": str(exc),
-                "reconstruction_id": str(exc.reconstruction.id),
-            },
-        ) from exc
-    except (OSError, SQLAlchemyError) as exc:
-        raise _database_unavailable(exc) from exc
 
 
 @router.post(

@@ -15,7 +15,6 @@ from api.config import config
 from api.lib.compute import scitas as scitas_compute
 from api.lib.upload_storage import validate_completed_file
 from api.lib.workflows import common as workflow_common
-from api.lib.workflows import tus_cleanup
 from api.models.building import Building
 from api.models.reconstruction import (
     Reconstruction,
@@ -29,25 +28,6 @@ from api.models.workflows import SplatGenerationWorkflowSettings
 logger = logging.getLogger(__name__)
 
 SortOrder = Literal["asc", "desc"]
-
-
-async def _remove_tus_staging_upload(workflow_id: UUID) -> None:
-    try:
-        parameters = await workflow_common.read_flow_run_parameters(workflow_id)
-    except Exception:
-        logger.exception(
-            "Failed to read flow run %s for tus staging cleanup", workflow_id
-        )
-        return
-    if parameters is None:
-        return
-    tus_upload_path = parameters.get("tus_upload_path")
-    if not isinstance(tus_upload_path, str):
-        return
-    try:
-        tus_cleanup.remove_staging_upload(tus_upload_path)
-    except OSError:
-        logger.exception("Failed to remove tus staging upload %s", tus_upload_path)
 
 
 class ReconstructionNotFoundError(Exception):
@@ -367,8 +347,6 @@ class ReconstructionService:
             reconstruction.id,
             workflow_common.WORKFLOW_DATA_DIRECTORY,
         ).remove()
-        if reconstruction.prefect_workflow_id is not None:
-            await _remove_tus_staging_upload(reconstruction.prefect_workflow_id)
         await self._session.delete(reconstruction)
 
     async def mark_running(

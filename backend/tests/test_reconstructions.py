@@ -490,26 +490,36 @@ def reconstruction_api(
     asyncio.run(engine.dispose())
 
 
+def test_only_from_upload_submission_routes_are_documented(
+    reconstruction_api: tuple[TestClient, UUID],
+) -> None:
+    client, _ = reconstruction_api
+    schema = client.get("/openapi.json").json()
+    paths = schema["paths"]
+    assert "/buildings/from-reconstruction/resumable" not in paths
+    assert "/buildings/{building_id}/reconstructions/resumable" not in paths
+    for path in (
+        "/buildings/from-reconstruction/from-upload",
+        "/buildings/{building_id}/reconstructions/from-upload",
+    ):
+        assert "202" in paths[path]["post"]["responses"]
+    schemas = schema["components"]["schemas"]
+    assert "ResumableReconstructionSubmission" not in schemas
+    assert "ResumableBuildingFromReconstructionSubmission" not in schemas
+
+
 def _seed_completed_upload(
     client: TestClient,
     filename: str = "scan.mp4",
     content: bytes = b"video bytes",
 ) -> str:
-    """Create a completed fake tus upload pair in the staging directory."""
+    """Create a completed upload row and its permanent video file."""
 
     assert isinstance(client.app, FastAPI)
     upload_id = uuid4().hex
-    upload_dir = Path(config.TUSD_UPLOAD_DIR)
-    (upload_dir / upload_id).write_bytes(content)
-    (upload_dir / f"{upload_id}.info").write_text(
-        json.dumps(
-            {
-                "Size": len(content),
-                "SizeIsDeferred": False,
-                "MetaData": {"filename": filename},
-            }
-        )
-    )
+    path = upload_file_path(UUID(upload_id), filename)
+    path.parent.mkdir(parents=True)
+    path.write_bytes(content)
 
     async def register() -> None:
         async with AsyncSession(client.app.state.upload_database) as session:
@@ -519,7 +529,7 @@ def _seed_completed_upload(
                     user_id=USER_ID,
                     filename=filename,
                     size_bytes=len(content),
-                    file_path=str(upload_dir / upload_id),
+                    file_path=str(path),
                     status=UploadStatus.UPLOADED,
                     uploaded_at=utc_now(),
                 )
@@ -533,16 +543,16 @@ def _seed_completed_upload(
 def _submit_reconstruction(client: TestClient, building_id: UUID):
     upload_id = _seed_completed_upload(client)
     return client.post(
-        f"/buildings/{building_id}/reconstructions/resumable",
-        json={"tus_upload_id": upload_id, "settings": {}},
+        f"/buildings/{building_id}/reconstructions/from-upload",
+        json={"upload_id": upload_id, "settings": {}},
     )
 
 
 def _submit_building_from_reconstruction(client: TestClient):
     upload_id = _seed_completed_upload(client)
     return client.post(
-        "/buildings/from-reconstruction/resumable",
-        json={"tus_upload_id": upload_id, "building": {}, "settings": {}},
+        "/buildings/from-reconstruction/from-upload",
+        json={"upload_id": upload_id, "building": {}, "settings": {}},
     )
 
 
@@ -602,12 +612,10 @@ def _finish_upload(client: TestClient, upload_id: UUID):
 
 
 @pytest.mark.parametrize("new_building", [False, True])
-@pytest.mark.parametrize("resumable", [False, True])
 def test_pending_upload_submission_persists_without_scheduling(
     reconstruction_api: tuple[TestClient, UUID],
     monkeypatch: pytest.MonkeyPatch,
     new_building: bool,
-    resumable: bool,
 ) -> None:
     client, building_id = reconstruction_api
     upload_id, path = _seed_stored_upload(client, status=UploadStatus.PENDING)
@@ -620,12 +628,10 @@ def test_pending_upload_submission_persists_without_scheduling(
         splat_workflow, "schedule_splat_generation_from_tus", unexpected_schedule
     )
     url = _from_upload_url(building_id, new_building)
-    if resumable:
-        url = url.removesuffix("from-upload") + "resumable"
     response = client.post(
         url,
         json={
-            "tus_upload_id" if resumable else "upload_id": str(upload_id),
+            "upload_id": str(upload_id),
             "building": {"name": "Waiting building"},
             "settings": {"ffmpeg": {"fps": 4}},
         },

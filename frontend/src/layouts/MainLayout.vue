@@ -2,8 +2,6 @@
     <q-layout view="hhh Lpr lFf" class="app-layout">
         <q-page-container>
             <router-view v-slot="{ Component, route }">
-                <!-- Capture uses a single-use draft for recording round trips;
-                     a new visit must not restore an already-submitted form. -->
                 <keep-alive :include="['HomePage', 'LibraryPage', 'MorePage']">
                     <component :is="Component" :key="route.path" />
                 </keep-alive>
@@ -143,7 +141,7 @@ watch(
     () => route.path,
     () => {
         lastNavAt = Date.now();
-        if (route.meta.tab === true && route.name !== 'capture') {
+        if (route.meta.tab === true) {
             ui.setBackground(route.name as BackgroundPageName);
         }
     },

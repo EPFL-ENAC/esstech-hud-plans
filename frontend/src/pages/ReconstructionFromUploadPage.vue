@@ -46,7 +46,7 @@
                     v-model:building-selection="buildingSelection"
                     v-model:preset="preset"
                     v-model:advanced-settings="advancedSettings"
-                    :source="{ uploadId: upload.id }"
+                    :upload-id="upload.id"
                     :disabled="!canSubmitUpload"
                 />
             </template>
@@ -55,7 +55,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, toRef } from 'vue';
+import { computed, ref, toRef, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import PageHeader from 'src/components/PageHeader.vue';
 import QueryStateSwitcher from 'src/components/QueryStateSwitcher.vue';
@@ -72,6 +73,7 @@ import { useUploadQuery } from 'src/queries/uploads';
 
 const props = defineProps<{ uploadId: string }>();
 const { t, locale } = useI18n();
+const route = useRoute();
 const { data, state, asyncStatus, isLoading, refetch } = useUploadQuery(toRef(props, 'uploadId'));
 const loadError = computed(() => {
     const error = state.value.error;
@@ -84,10 +86,29 @@ const canSubmitUpload = computed(
         state.value.status === 'success' &&
         (data.value?.status === 'pending' || data.value?.status === 'uploaded'),
 );
-const buildingSelection = ref<BuildingSelection>({
-    buildingId: null,
-    building: { name: t('buildings.defaultName', { number: 1 }), latitude: null, longitude: null },
-});
+function defaultBuildingSelection(): BuildingSelection {
+    const buildingId = route.query.buildingId;
+    if (typeof buildingId === 'string') {
+        return { buildingId };
+    }
+
+    return {
+        buildingId: null,
+        building: {
+            name: t('buildings.defaultName', { number: 1 }),
+            latitude: null,
+            longitude: null,
+        },
+    };
+}
+
+const buildingSelection = ref<BuildingSelection>(defaultBuildingSelection());
+watch(
+    () => route.query.buildingId,
+    () => {
+        buildingSelection.value = defaultBuildingSelection();
+    },
+);
 const preset = ref<ReconstructionPreset>('indoors');
 const advancedSettings = ref(makeDefaultReconstructionSettings('advanced'));
 </script>

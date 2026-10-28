@@ -52,6 +52,11 @@ try {
             let releaseDetail;
             let reconstruction;
             let destination;
+            let releaseSubmission;
+            let notifySubmission;
+            const submissionStarted = new Promise((resolve) => {
+                notifySubmission = resolve;
+            });
             const building = (id, name = 'Existing building') => ({
                 id,
                 name,
@@ -145,6 +150,12 @@ try {
                             splat_path: null,
                             input_video_path: null,
                         };
+                        if (submissions.length === 1) {
+                            await new Promise((resolve) => {
+                                releaseSubmission = resolve;
+                                notifySubmission();
+                            });
+                        }
                         return route.fulfill({
                             status: 202,
                             json: body.building
@@ -304,6 +315,20 @@ try {
                     );
                 });
                 await start().click();
+                await submissionStarted;
+                const submitting = page
+                    .getByRole('status')
+                    .filter({ hasText: text.capture.submittingReconstruction });
+                await submitting.waitFor();
+                assert.equal(
+                    await submitting.getByRole('progressbar').getAttribute('aria-valuenow'),
+                    null,
+                );
+                assert.equal(await start().isDisabled(), true);
+                assert.equal(await name.isDisabled(), true);
+                assert.equal(submissions.length, 1);
+                releaseSubmission();
+                await submitting.waitFor({ state: 'detached' });
                 await page
                     .getByRole('button', { name: text.buildings.view, exact: true })
                     .waitFor();
@@ -327,14 +352,48 @@ try {
                     .first()
                     .waitFor({ timeout: 12_000 });
 
-                // A completed upload can instead target an existing building.
-                await goto(`/reconstructions/from-upload/${rows[1].id}`);
-                await ready();
-                await page.locator('.reconstruction-form .q-select').first().click();
+                // Starting from a building carries its destination through either picker action.
+                await goto('/building/existing');
                 await page
-                    .getByRole('option')
-                    .getByText('Existing building', { exact: true })
+                    .locator('[aria-labelledby="reconstructions-title"]')
+                    .getByRole('link', { name: text.reconstructions.new, exact: true })
                     .click();
+                await page.waitForURL('**/#/reconstructions/from-upload?buildingId=existing');
+                await items
+                    .nth(1)
+                    .getByRole('link', { name: text.reconstructions.new, exact: true })
+                    .click();
+                await page.waitForURL(
+                    `**/#/reconstructions/from-upload/${rows[1].id}?buildingId=existing`,
+                );
+                await ready();
+                const buildingPicker = page.locator('.reconstruction-form .q-select').first();
+                await buildingPicker.getByText('Existing building', { exact: true }).waitFor();
+
+                // Query-only navigation updates the mounted form; unavailable buildings block submission.
+                const changeBuilding = (buildingId) =>
+                    page.evaluate(async (buildingId) => {
+                        const router =
+                            document.querySelector('#q-app').__vue_app__.config.globalProperties
+                                .$router;
+                        await router.push({ query: { buildingId } });
+                    }, buildingId);
+                await changeBuilding('unavailable');
+                await page.getByText(text.buildings.picker.unavailable, { exact: true }).waitFor();
+                assert.equal(await start().isDisabled(), true);
+                await changeBuilding('created');
+                await buildingPicker.getByText('Preserved building', { exact: true }).waitFor();
+                await ready();
+                await changeBuilding(undefined);
+                await page.getByLabel(text.buildings.fields.name, { exact: true }).waitFor();
+                await ready();
+
+                await goto('/reconstructions/from-upload?buildingId=existing');
+                await items.nth(1).getByText(rows[1].filename, { exact: true }).click();
+                await page.waitForURL(
+                    `**/#/reconstructions/from-upload/${rows[1].id}?buildingId=existing`,
+                );
+                await buildingPicker.getByText('Existing building', { exact: true }).waitFor();
                 await ready();
                 await start().click();
                 await page.waitForURL('**/#/building/existing');
@@ -436,6 +495,7 @@ try {
                     `${locale} ${size}: upload progress, background refresh, visibility, form preservation, submissions and terminal uploads passed`,
                 );
             } finally {
+                releaseSubmission?.();
                 await context.close();
             }
         }

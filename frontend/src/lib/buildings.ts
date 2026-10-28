@@ -152,12 +152,6 @@ export interface Reconstruction {
     updated_at: string;
 }
 
-export type ReconstructionSource = { video: File } | { uploadId: string };
-
-export type ReconstructionSubmission = ReconstructionSource & {
-    settings: SplatGenerationSettings;
-};
-
 export function getCurrentUser(): Promise<CurrentUser> {
     return requestJson('/user/me');
 }
@@ -334,32 +328,6 @@ export function getReconstructionPointCloudMeta(
         `/buildings/${encodeURIComponent(buildingId)}/reconstructions/${encodeURIComponent(reconstructionId)}/point-cloud/meta`,
         init,
     );
-}
-
-/** Submit a video already uploaded through the API upload proxy for reconstruction. */
-export function createReconstructionResumable(
-    buildingId: string,
-    tusUploadId: string,
-    settings: SplatGenerationSettings,
-): Promise<Reconstruction> {
-    return requestJson(`/buildings/${encodeURIComponent(buildingId)}/reconstructions/resumable`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tus_upload_id: tusUploadId, settings }),
-    });
-}
-
-/** Submit a tus-uploaded video and create the building in the same call. */
-export function createBuildingFromReconstructionResumable(
-    building: BuildingCreate,
-    tusUploadId: string,
-    settings: SplatGenerationSettings,
-): Promise<BuildingFromReconstruction> {
-    return requestJson('/buildings/from-reconstruction/resumable', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tus_upload_id: tusUploadId, building, settings }),
-    });
 }
 
 export function createReconstructionFromUpload(
