@@ -47,15 +47,8 @@ class Config(BaseSettings):
     def PREFECT_API_URL(self) -> str:
         return f"http://{self.PREFECT_HOST}:{self.PREFECT_PORT}/api"
 
-    MIN_COLMAP_IMAGES_KEEP: int = 20
-
     # Density cutoff for the plan point cloud conversion, scaled by scene radius cubed
     PLAN_DENSITY_THRESHOLD: float = 1e3
-
-    USE_RUNAI: bool = False
-    RUNAI_REGISTRY: str = ""
-    RUNAI_PVC_SCRATCH_NAME: str = ""
-    RUNAI_MOUNT_SCRATCH_PATH: str = ""
 
     USE_SCITAS: bool = False
     SCITAS_MOUNT_EXPORT_PATH: str = "/mnt/scitas"

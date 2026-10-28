@@ -1,7 +1,5 @@
 /**
  * Interactive blueprint viewer parameters.
- * Mirrors the backend model `InteractiveBlueprintParams` in
- * backend/api/models/splats.py. Keep both in sync.
  */
 export interface BlueprintParams {
     viewerSize: number;

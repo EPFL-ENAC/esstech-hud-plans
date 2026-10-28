@@ -12,28 +12,24 @@ import {
     type BlueprintSplatProcessingParams,
     generateBlueprintMesh,
 } from 'src/lib/maths/blueprintMesh';
-import { baseUrl } from 'boot/api';
 import type { BlueprintParams } from 'src/lib/blueprintParams';
-import { authFetch } from 'src/lib/auth';
-import { Notify } from 'quasar';
 
 const CAMERA_DISTANCE_FACTOR = 3.0;
 const FLOOR_SIZE_FACTOR = 2; // times radius
 const INITIAL_SECTION_HEIGHT_FACTOR = 1; // times radius
 const SECTION_HEIGTHT_FACTOR_RANGE = 5;
 
-const props = defineProps<{
+interface InteractiveBlueprintViewerProps {
     splatData: ArrayBuffer;
     fetchGeometry: () => AsyncResult<BlueprintGeometryResponse>;
-    /** Initial parameters. When set, parameters are not loaded from the backend. */
+    /** Initial viewer parameters. */
     params?: BlueprintParams;
-    generationId?: string;
     showParams?: boolean;
     /** Fill the available space instead of a fixed square viewer size. */
     fill?: boolean;
-}>();
+}
 
-const canSaveParams = computed(() => props.showParams !== false && props.generationId);
+const props = defineProps<InteractiveBlueprintViewerProps>();
 
 const container = useTemplateRef<HTMLDivElement>('container');
 let controls: OrbitControls | null = null;
@@ -118,66 +114,6 @@ function updateRendererToElementSize(): void {
     updateScaleOverlay();
 }
 
-let paramsSaveTimeout: ReturnType<typeof setTimeout> | null = null;
-
-async function saveBlueprintParams(): Promise<void> {
-    const params = {
-        viewerSize: viewerSize.value,
-        sceneZRotation: sceneZRotation.value,
-        displayCameraPositions: displayCameraPositions.value,
-        displayFloor: displayFloor.value,
-        floorZOffset: floorZOffset.value,
-        cameramanHeightCm: cameramanHeightCm.value,
-        sectionZFactor: sectionZFactor.value,
-        densityThreshold: densityThreshold.value,
-        splatSizeMultiplier: splatSizeMultiplier.value,
-        opacityMultiplier: opacityMultiplier.value,
-        contrast: contrast.value,
-    };
-
-    try {
-        const response = await authFetch(
-            `${baseUrl}/splats/blueprint-params/${props.generationId}`,
-            {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(params),
-            },
-        );
-        if (!response.ok) {
-            console.error('Failed to save blueprint parameters:', response.statusText);
-            Notify.create({
-                message: 'Failed to save blueprint parameters',
-                color: 'negative',
-                icon: 'error',
-                position: 'top',
-                timeout: 3000,
-            });
-        }
-    } catch (error) {
-        console.error('Failed to save blueprint parameters:', error);
-        Notify.create({
-            message: 'Failed to save blueprint parameters',
-            color: 'negative',
-            icon: 'error',
-            position: 'top',
-            timeout: 3000,
-        });
-    }
-}
-
-function scheduleParamsSave(): void {
-    if (!canSaveParams.value) return;
-    if (paramsSaveTimeout) {
-        clearTimeout(paramsSaveTimeout);
-    }
-    paramsSaveTimeout = setTimeout(() => {
-        void saveBlueprintParams();
-    }, 500);
-}
-
 function resetView(): void {
     if (controls && initialCameraPosition.value && initialCameraTarget.value) {
         camera?.position.copy(initialCameraPosition.value);
@@ -193,7 +129,7 @@ function exportImage(): void {
     if (!canvas) return;
 
     const link = document.createElement('a');
-    link.download = `blueprint-${props.generationId}.png`;
+    link.download = 'blueprint.png';
     link.href = canvas.toDataURL('image/png');
     link.click();
 }
@@ -213,19 +149,7 @@ onMounted(() => {
                 return;
             }
 
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            let params: Record<string, any> = {};
-            if (props.params) {
-                params = props.params;
-            } else if (canSaveParams.value) {
-                const response = yield* AsyncResult.fromValuePromise(
-                    authFetch(`${baseUrl}/splats/blueprint-params/${props.generationId}`),
-                );
-                params = response.ok ? yield* AsyncResult.fromValuePromise(response.json()) : {};
-                if (!response.ok) {
-                    console.error('Failed to load blueprint parameters:', response.statusText);
-                }
-            }
+            const params: Partial<BlueprintParams> = props.params ?? {};
             if (params.viewerSize) viewerSize.value = params.viewerSize;
             if (params.sceneZRotation !== undefined && params.sceneZRotation !== null)
                 sceneZRotation.value = params.sceneZRotation;
@@ -346,7 +270,6 @@ watch(viewerSize, (newSize) => {
         camera.updateProjectionMatrix();
     }
     updateScaleOverlay();
-    scheduleParamsSave();
 });
 
 watch(
@@ -360,16 +283,8 @@ watch(
     ],
     () => {
         collection.value.add(`generation-${Date.now()}`, generateBlueprint());
-        scheduleParamsSave();
     },
 );
-
-watch(sceneZRotation, () => scheduleParamsSave());
-watch(displayCameraPositions, () => scheduleParamsSave());
-watch(displayFloor, () => scheduleParamsSave());
-watch(floorZOffset, () => scheduleParamsSave());
-watch(cameramanHeightCm, () => scheduleParamsSave());
-watch(contrast, () => scheduleParamsSave());
 
 function generateBlueprint(onFinishedLoading?: (mesh: SplatMesh) => void): AsyncResult<SplatMesh> {
     return AsyncResult.run(function* () {

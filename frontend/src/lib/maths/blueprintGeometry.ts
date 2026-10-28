@@ -70,12 +70,6 @@ export class BlueprintGeometry {
     }
 }
 
-export function fetchBlueprintGeometryJSON(id: string): AsyncResult<BlueprintGeometryResponse> {
-    return fetchBlueprintGeometryJSONFromUrl(
-        `${baseUrl}/splats/blueprint-geometry/${encodeURIComponent(id)}`,
-    );
-}
-
 export function fetchReconstructionBlueprintGeometryJSON(
     buildingId: string,
     reconstructionId: string,

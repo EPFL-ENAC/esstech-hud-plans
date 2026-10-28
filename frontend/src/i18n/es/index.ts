@@ -27,8 +27,6 @@ export default {
         error: 'Error: {message}',
     },
     navigation: {
-        admin: 'Administración',
-        splatPipeline: 'Proceso de generación de splats',
         workflowTest: 'Prueba de la API de flujos de trabajo',
         home: 'Inicio',
         capture: 'Captura',
@@ -398,7 +396,6 @@ export default {
         cancelFailed: 'No se pudo cancelar el procesamiento. Inténtalo de nuevo.',
     },
     plans: {
-        interactiveBlueprint: 'Plano interactivo',
         associated: 'Plano asociado',
         twoDimensional: 'Plano 2D',
         threeDimensional: 'Plano 3D',

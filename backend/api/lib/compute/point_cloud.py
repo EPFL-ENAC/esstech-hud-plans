@@ -103,7 +103,7 @@ def generate_plan_point_cloud(splat_path: Path, colmap_directory: Path) -> None:
     except ImportError as exc:
         raise RuntimeError(
             "Required libraries for the point cloud conversion are missing. "
-            "Please install the [blueprint] extras."
+            "Please install the backend dependencies with `uv sync`."
         ) from exc
 
     plydata = PlyData.read(splat_path)

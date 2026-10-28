@@ -19,12 +19,13 @@ def test_plyfile_is_a_main_dependency() -> None:
     assert any(d.startswith("plyfile") for d in dependencies)
 
 
-def test_blueprint_extra_keeps_the_cuda_stack_and_drops_plyfile() -> None:
+def test_retired_dependencies_are_not_declared() -> None:
     pyproject = _load_toml("pyproject.toml")
-    blueprint = pyproject["project"]["optional-dependencies"]["blueprint"]
-    names = {d.split(">")[0].split("=")[0].strip().lower() for d in blueprint}
-    assert {"gsplat", "packaging", "pillow"} <= names
-    assert not any(n.startswith("plyfile") for n in names)
+    dependencies = {d.split(">=")[0] for d in pyproject["project"]["dependencies"]}
+    assert dependencies.isdisjoint(
+        {"fastapi-cache2", "pandas", "openpyxl", "cachetools", "jinja2"}
+    )
+    assert "blueprint" not in pyproject["project"]["optional-dependencies"]
 
 
 def test_uv_lock_tracks_plyfile_as_main_dependency() -> None:
@@ -56,6 +57,7 @@ def test_dockerfile_uses_locked_sync_on_supported_python() -> None:
 
 def test_dockerfile_keeps_system_packages_and_ffmpeg_symlink() -> None:
     dockerfile = _dockerfile_text()
-    for package in ("libglew-dev", "ffmpeg", "rclone", "rsync"):
+    for package in ("libglew-dev", "ffmpeg", "rsync"):
         assert package in dockerfile
+    assert "rclone" not in dockerfile
     assert "ln -s $(which ffmpeg) /app/external/bin/ffmpeg" in dockerfile

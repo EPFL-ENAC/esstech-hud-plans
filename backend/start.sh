@@ -6,20 +6,6 @@ if [ -n "$SSH_PRIVATE_KEY" ]; then
 	unset SSH_PRIVATE_KEY
 fi
 
-curl -sLo /tmp/runai https://rcp-caas-prod.rcp.epfl.ch/cli/linux \
-	&& install /tmp/runai /usr/local/bin/runai \
-	&& rm /tmp/runai
-
-mkdir -p ~/.kube
-if [ ! -f ~/.kube/config ]; then
-	curl https://wiki.rcp.epfl.ch/public/files/kube-config.yaml -o ~/.kube/config && chmod 600 ~/.kube/config
-fi
-
-# Must run `runai login` manually. Requires web browser interaction
-# Then, run `runai list projects` and `runai config project <project_name>` to set the default project
-
-rclone config create jumphost.rcp.epfl.ch sftp host=jumphost.rcp.epfl.ch user=$SSH_USERNAME key_file=/root/.ssh/id_ed25519
-
 alembic upgrade head
 
 # PREFECT_API_URL must be set to http://prefect-host:4200/api

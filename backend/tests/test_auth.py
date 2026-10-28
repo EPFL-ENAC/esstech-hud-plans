@@ -7,7 +7,6 @@ from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.exc import OperationalError
 
-from api.config import config
 from api.models.auth import AuthenticatedUser
 from api.models.user import User
 from api.services import auth
@@ -45,8 +44,6 @@ def test_authenticate_user_parses_and_normalizes_claims(
         username="user",
         email=None,
         name=None,
-        roles=["realm-role"],
-        client_roles=["admin"],
     )
 
 
@@ -89,24 +86,5 @@ def test_require_user_not_accepted_maps_database_errors_to_service_unavailable()
                 FailingUserService(),  # type: ignore[arg-type]
             )
         assert exc_info.value.status_code == 503
-
-    asyncio.run(run())
-
-
-def test_require_admin_uses_current_token_roles() -> None:
-    user = User(keycloak_sub="subject-1", terms_accepted_version=config.TERMS_VERSION)
-
-    async def run() -> None:
-        assert (
-            await auth.require_admin(
-                user,
-                AuthenticatedUser(sub="subject-1", client_roles=["admin"]),
-            )
-            is user
-        )
-
-        with pytest.raises(HTTPException) as exc_info:
-            await auth.require_admin(user, AuthenticatedUser(sub="subject-1"))
-        assert exc_info.value.status_code == 403
 
     asyncio.run(run())

@@ -24,8 +24,7 @@ make install-external-softwares-macos
 # On Linux, use: make install-external-softwares-linux
 ```
 
-> [!NOTE]
-> By default, dependencies to generate blueprints in the backend are not installed. To install them, run `cd backend && uv pip install -e .[blueprint]`.
+Plan point-cloud dependencies are included in the backend installation.
 
 
 ### Backend and workflows
@@ -76,10 +75,17 @@ before starting the updated backend, then recreate tusd with
 
 The API and workflow process must share the `backend/data/workflows` directory.
 The `splat-generation/default` deployment runs FFmpeg, optionally selects frames
-locally with the frame picker, then runs COLMAP and Brush. It is submitted through
-`POST /workflows/splat-generation`. Submitted videos, extracted frames (including
+locally with the frame picker, then runs COLMAP and Brush. Submit a user upload
+through `POST /buildings/{building_id}/reconstructions/from-upload`, or create a
+building and its first reconstruction through
+`POST /buildings/from-reconstruction/from-upload`. Both endpoints accept an
+`upload_id` and workflow settings. Submitted videos, extracted frames (including
 raw frames when selection is enabled), sparse COLMAP reconstructions, and generated
 `splat.ply` files are retained there until removed manually.
+
+Keep `USE_SCITAS=false` for local execution. The retired RunAI backend and
+`/splats/*` API are no longer available, along with the `/advanced`, `/splat/:id`,
+and historical `/admin` export pages. Existing generation files are left on disk.
 
 The interactive API documentation will be available at [http://localhost:8000/docs](http://localhost:8000/docs).
 

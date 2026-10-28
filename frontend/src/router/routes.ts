@@ -130,40 +130,6 @@ const routes: RouteRecordRaw[] = [
                     detail: () => import('pages/ProcessingPage.vue'),
                 },
             },
-
-            {
-                path: '/admin',
-                component: () => import('pages/AdminPage.vue'),
-            },
-        ],
-    },
-
-    // Splat viewer: its own full-screen page plus a left pipeline drawer
-    // (named view "drawer"). Uses a dedicated layout so the main navigation
-    // drawer and footer do not affect it.
-    {
-        path: '/splat/:id',
-        component: () => import('layouts/SplatLayout.vue'),
-        children: [
-            {
-                path: '',
-                components: {
-                    default: () => import('pages/SplatPage.vue'),
-                    drawer: () => import('src/drawers/SplatPipelineDrawer.vue'),
-                },
-            },
-        ],
-    },
-
-    // Advanced pipeline page, using its own duplicate layout (no tab bar)
-    {
-        path: '/advanced',
-        component: () => import('layouts/AdvancedLayout.vue'),
-        children: [
-            {
-                path: '',
-                component: () => import('pages/AdvancedPage.vue'),
-            },
         ],
     },
 

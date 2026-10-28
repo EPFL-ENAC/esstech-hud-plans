@@ -417,6 +417,9 @@ def test_splat_generation_flow_selects_gpu_environment(
         calls.append(("brush", kwargs))
         return str(tmp_path / "splat.ply")
 
+    async def fake_point_cloud_task(**kwargs):
+        calls.append(("point-cloud", kwargs))
+
     monkeypatch.setattr(splat_workflow, "get_run_logger", lambda: FakeRunLogger())
     monkeypatch.setattr(splat_workflow.config, "USE_SCITAS", use_scitas)
     monkeypatch.setattr(splat_workflow, "extract_frames_task", fake_extract_frames_task)
@@ -427,6 +430,9 @@ def test_splat_generation_flow_selects_gpu_environment(
         fake_colmap_task,
     )
     monkeypatch.setattr(splat_workflow, "train_with_brush_task", fake_brush_task)
+    monkeypatch.setattr(
+        splat_workflow, "generate_plan_point_cloud_task", fake_point_cloud_task
+    )
 
     result = asyncio.run(
         splat_workflow.splat_generation_flow.fn(
@@ -503,6 +509,15 @@ def test_splat_generation_flow_selects_gpu_environment(
     )
     for _, arguments in expected_calls:
         arguments["report_progress"] = None
+    expected_calls.append(
+        (
+            "point-cloud",
+            {
+                "splat_path": str(tmp_path / "splat.ply"),
+                "colmap_directory": str(tmp_path / "colmap"),
+            },
+        )
+    )
     assert calls == expected_calls
 
 

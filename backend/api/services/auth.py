@@ -53,20 +53,11 @@ def _parse_authenticated_user(payload: dict[str, Any]) -> AuthenticatedUser:
     if sub is None:
         raise jwt.InvalidTokenError("Token is missing its subject")
 
-    realm_access = payload.get("realm_access") or {}
-    roles = list(realm_access.get("roles") or [])
-    # Client roles are read from resource_access[<client_id>].roles so that
-    # "admin" means the same thing here as in the frontend gate.
-    resource_access = payload.get("resource_access") or {}
-    client_entry = resource_access.get(config.KEYCLOAK_CLIENT_ID) or {}
-    client_roles = list(client_entry.get("roles") or [])
     return AuthenticatedUser(
         sub=sub,
         username=_optional_string(payload.get("preferred_username")),
         email=_optional_string(payload.get("email")),
         name=_optional_string(payload.get("name")),
-        roles=roles,
-        client_roles=client_roles,
     )
 
 
@@ -76,7 +67,7 @@ def authenticate_user(
     """Validate a bearer token and return its authenticated identity.
 
     Verifies the JWT signature against the Keycloak JWKS and parses the
-    identity and roles from the token claims. Raises 401 when the token is
+    identity from the token claims. Raises 401 when the token is
     missing or invalid.
     """
 
@@ -156,23 +147,5 @@ async def require_user(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="terms_not_accepted",
-        )
-    return current_user
-
-
-async def require_admin(
-    current_user: User = Depends(require_user),
-    identity: AuthenticatedUser = Depends(authenticate_user),
-) -> User:
-    """Resolve the authenticated user and require the admin role.
-
-    Terms acceptance is enforced first, then the "admin" client role.
-    Raises 403 when either check fails.
-    """
-
-    if not identity.is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin privileges required",
         )
     return current_user

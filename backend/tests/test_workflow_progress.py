@@ -227,11 +227,19 @@ def test_flow_combines_intermediate_updates_with_validated_milestones(
             raise RuntimeError("Brush failed to export")
         return kwargs["splat_path"]
 
+    async def fake_point_cloud(**kwargs):
+        assert not fail_brush
+        assert kwargs == {
+            "splat_path": str(tmp_path / "splat.ply"),
+            "colmap_directory": str(tmp_path / "colmap"),
+        }
+
     monkeypatch.setattr(workflow, "_record_reconstruction_progress", record)
     monkeypatch.setattr(workflow, "extract_frames_task", fake_task)
     monkeypatch.setattr(workflow, "pick_frames_task", fake_task)
     monkeypatch.setattr(workflow, "reconstruct_with_colmap_task", fake_task)
     monkeypatch.setattr(workflow, "train_with_brush_task", fake_brush)
+    monkeypatch.setattr(workflow, "generate_plan_point_cloud_task", fake_point_cloud)
 
     async def run():
         return await workflow.splat_generation_flow.fn(
@@ -258,10 +266,10 @@ def test_flow_combines_intermediate_updates_with_validated_milestones(
     expected = [0.15, 0.25]
     if use_frame_picker:
         expected.append(0.325)
-    expected.extend([0.4, 0.55, 0.7, 0.825])
+    expected.extend([0.4, 0.55, 0.7, 0.81])
     if not fail_brush:
-        expected.append(0.95)
+        expected.extend([0.92, 0.95])
     assert [progress for progress, _ in updates] == pytest.approx(expected)
     assert [progress for progress, artifacts in updates if artifacts is not None] == (
-        [0.25, 0.4, 0.7] if fail_brush else [0.25, 0.4, 0.7, 0.95]
+        [0.25, 0.4, 0.7] if fail_brush else [0.25, 0.4, 0.7, 0.92, 0.95]
     )

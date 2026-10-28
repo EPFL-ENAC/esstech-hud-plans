@@ -4,18 +4,14 @@ from logging import warning
 
 from fastapi import FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi_cache import FastAPICache
-from fastapi_cache.backends.inmemory import InMemoryBackend
 from pydantic import BaseModel
 
 from api.config import config
 from api.db import dispose_engine
 from api.logging_config import setup_logging
-from api.views.admin import router as admin_router
 from api.views.auth import router as auth_router
 from api.views.buildings import router as buildings_router
 from api.views.reconstructions import router as reconstructions_router
-from api.views.splats import router as splats_router
 from api.views.terms import router as terms_router
 from api.views.tus import router as tus_router
 from api.views.tus_proxy import close_tus_proxy
@@ -24,15 +20,11 @@ from api.views.uploads import router as uploads_router
 from api.views.users import router as users_router
 from api.views.workflows import router as workflows_router
 
-# from api.views.files import router as files_router
-
-
 setup_logging()
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    FastAPICache.init(InMemoryBackend(), prefix="fastapi-cache")
     try:
         yield
     finally:
@@ -95,12 +87,6 @@ app.include_router(
 )
 
 app.include_router(
-    splats_router,
-    prefix="/splats",
-    tags=["Splats"],
-)
-
-app.include_router(
     workflows_router,
     prefix="/workflows",
     tags=["Workflows"],
@@ -128,12 +114,6 @@ app.include_router(
     reconstructions_router,
     prefix="/buildings/{building_id}/reconstructions",
     tags=["Reconstructions"],
-)
-
-app.include_router(
-    admin_router,
-    prefix="/admin",
-    tags=["Admin"],
 )
 
 app.include_router(

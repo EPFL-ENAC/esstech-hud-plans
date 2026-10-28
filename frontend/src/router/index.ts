@@ -6,7 +6,7 @@ import {
     createWebHistory,
 } from 'vue-router';
 import routes from './routes';
-import { getTermsAccepted, isAdmin, isAuthenticated } from 'src/lib/auth';
+import { getTermsAccepted, isAuthenticated } from 'src/lib/auth';
 
 /*
  * If not building with SSR mode, you can
@@ -36,8 +36,7 @@ export default defineRouter(function (/* { store, ssrContext } */) {
 
     // Redirect unauthenticated users to /login (except on auth routes),
     // send authenticated users away from the login page, and gate every other
-    // route behind terms acceptance (including /admin: an unaccepted admin
-    // sees the terms first).
+    // route behind terms acceptance.
     Router.beforeEach(async (to) => {
         // Keycloak strips the fragment from the redirect_uri, so the OAuth
         // response (code, session_state) arrives in window.location.search
@@ -58,11 +57,6 @@ export default defineRouter(function (/* { store, ssrContext } */) {
             return forward;
         }
 
-        if (to.path === '/admin' && !isAdmin()) {
-            // Admin area: require the client role "admin". Return to home when
-            // authenticated without the role, or to login when logged out.
-            return isAuthenticated() ? '/' : '/login';
-        }
         if (to.path === '/callback') {
             return;
         }

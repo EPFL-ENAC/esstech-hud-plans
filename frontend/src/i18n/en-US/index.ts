@@ -25,8 +25,6 @@ export default {
         error: 'Error: {message}',
     },
     navigation: {
-        admin: 'Admin',
-        splatPipeline: 'Splat Generation Pipeline',
         workflowTest: 'Workflows API test',
         home: 'Home',
         capture: 'Capture',
@@ -383,7 +381,6 @@ export default {
         cancelFailed: 'Could not cancel processing. Please try again.',
     },
     plans: {
-        interactiveBlueprint: 'Interactive Blueprint',
         associated: 'Associated Plan',
         twoDimensional: '2D Plan',
         threeDimensional: '3D Plan',

@@ -73,33 +73,6 @@ export function getAuthSubject(): string | null {
     return typeof subject === 'string' && subject.length > 0 ? subject : null;
 }
 
-/** Roles granted to this client for the app's Keycloak client. */
-export function getClientRoles(): string[] {
-    const payload = decodeJwtPayload();
-    if (!payload) {
-        return [];
-    }
-    const resourceAccess = payload.resource_access as
-        | Record<string, { roles?: string[] }>
-        | undefined;
-    return resourceAccess?.[keycloakClientId]?.roles ?? [];
-}
-
-/** Realm (global) roles granted to the user. */
-export function getRealmRoles(): string[] {
-    const payload = decodeJwtPayload();
-    if (!payload) {
-        return [];
-    }
-    const realmAccess = payload.realm_access as { roles?: string[] } | undefined;
-    return realmAccess?.roles ?? [];
-}
-
-/** True when the user holds the client role "admin" for this app. */
-export function isAdmin(): boolean {
-    return getClientRoles().includes('admin');
-}
-
 /** Clear the stored token. The caller is responsible for navigation. */
 export function logout(): void {
     clearAccessToken();
