@@ -159,9 +159,6 @@ const tools = computed(() => [
     flex-direction: column;
     flex: 1;
     min-height: 0;
-    /* Cancel the page's q-px-md/q-py-md so the viewer is flush with the page
-       edges on the sides and the bottom. */
-    margin: 0 -16px -16px;
 }
 
 .splat-query :deep(.query-content) {
@@ -174,5 +171,9 @@ const tools = computed(() => [
     position: relative;
     flex: 1;
     min-height: 0;
+    /* Cancel the page's q-px-md/q-py-md so the viewer is flush with the page
+       edges on the sides and the bottom. Only the viewer bleeds: the loading
+       and progress states keep the page padding. */
+    margin: 0 -16px -16px;
 }
 </style>
