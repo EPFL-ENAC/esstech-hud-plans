@@ -79,6 +79,48 @@ def test_compute_plan_point_cloud_applies_transposed_rotation() -> None:
     )
 
 
+def test_compute_plan_point_cloud_drops_non_finite_positions() -> None:
+    means = np.array(
+        [
+            [1.0, 2.0, 2.0],
+            [np.nan, 0.0, 0.0],
+            [0.0, 0.0, np.inf],
+            [-4.0, 0.5, 2.0],
+        ]
+    )
+    scales = np.zeros((4, 3))
+    opacities = np.full(4, 20.0)
+    camera_positions = np.array([[0.0, 0.0, 5.0]])
+
+    positions, cm_per_unit = compute_plan_point_cloud(
+        means,
+        scales,
+        opacities,
+        center=np.zeros(3),
+        world_rotation=np.eye(3),
+        radius=1.0,
+        threshold=0.0,
+        camera_positions=camera_positions,
+    )
+
+    np.testing.assert_allclose(positions, [[1.0, 2.0, 2.0], [-4.0, 0.5, 2.0]])
+    assert cm_per_unit == pytest.approx(170.0 * 0.9 / 3.0)
+
+    empty_positions, no_scale = compute_plan_point_cloud(
+        means[[1, 2]],
+        scales[:2],
+        opacities[:2],
+        center=np.zeros(3),
+        world_rotation=np.eye(3),
+        radius=1.0,
+        threshold=0.0,
+        camera_positions=camera_positions,
+    )
+
+    assert empty_positions.shape == (0, 3)
+    assert no_scale is None
+
+
 def test_compute_plan_point_cloud_cm_per_unit_from_camera_height() -> None:
     means = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]])
     scales = np.zeros((3, 3))

@@ -36,7 +36,9 @@ def compute_plan_point_cloud(
     frontend filter sees Spark-decoded values (sigmoid/exp), so decode the
     same way and keep splats with density >= threshold * radius**3. The plan
     frame is world_rotation.T @ (p - center): the frontend transposes
-    world_rotation before applying it to the centered position.
+    world_rotation before applying it to the centered position. Trained
+    splats can hold non-finite positions, and a degenerate reconstruction
+    makes the whole frame non-finite, so drop them before the stats below.
     """
     center = np.asarray(center, dtype=np.float64)
     world_rotation = np.asarray(world_rotation, dtype=np.float64)
@@ -51,6 +53,7 @@ def compute_plan_point_cloud(
     keep = densities >= threshold * radius**3
 
     plan_positions = (world_rotation.T @ (means[keep] - center).T).T
+    plan_positions = plan_positions[np.isfinite(plan_positions).all(axis=1)]
     floor_z = _floor_z_offset(plan_positions)
     cm_per_unit = _cm_per_unit(camera_positions, center, world_rotation, floor_z)
     return plan_positions.astype(np.float32), cm_per_unit
