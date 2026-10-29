@@ -5,6 +5,8 @@ import { useI18n } from 'vue-i18n';
 import { useAsyncResultCollection } from 'unwrapped/vue';
 import { AsyncResult } from 'unwrapped/core';
 import type { ReconstructionPointCloudMeta } from 'src/lib/buildings';
+import type { ZAxisRange } from 'src/lib/maths/zDistribution';
+import PlanPointDensityBar from 'src/components/PlanPointDensityBar.vue';
 
 const PAN_MARGIN = 0.2;
 const FIT_MARGIN = 1.1;
@@ -22,6 +24,8 @@ const DEFAULT_POINT_SIZE = 0.5;
 const DEFAULT_POINT_OPACITY = 0.15;
 const FIXED_VIEWER_SIZE = 700;
 const MIN_SPAN = 1e-6;
+/** Clip plane constant that keeps every point; the plane count must stay fixed. */
+const CLIP_OPEN = 1e6;
 
 const DEFAULT_BOUNDS: ReconstructionPointCloudMeta['bounds'] = [
     [-1, -1, -1],
@@ -46,6 +50,14 @@ let points: THREE.Points | null = null;
 let geometry: THREE.BufferGeometry | null = null;
 let material: THREE.PointsMaterial | null = null;
 const group = new THREE.Group();
+
+// Points outside the selected height range are discarded on the GPU. The group only
+// rotates around Z and translates in X/Y, so local Z is world Z here; transform the
+// planes by group.matrixWorld if that ever changes.
+const minPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), CLIP_OPEN);
+const maxPlane = new THREE.Plane(new THREE.Vector3(0, 0, -1), CLIP_OPEN);
+const clipPlanes = [minPlane, maxPlane];
+const zRange = ref<ZAxisRange | null>(null);
 
 let resizeObserver: ResizeObserver | null = null;
 let bounds: ReconstructionPointCloudMeta['bounds'] = DEFAULT_BOUNDS;
@@ -332,6 +344,7 @@ function rebuildPoints(): void {
         transparent: true,
         depthWrite: false,
         opacity: pointOpacity.value,
+        clippingPlanes: clipPlanes,
     });
     applyPointSize();
     points = new THREE.Points(geometry, material);
@@ -374,6 +387,7 @@ onMounted(() => {
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setClearColor(0xffffff, 1);
+            renderer.localClippingEnabled = true;
             const initialWidth = props.fill ? container.value.clientWidth : FIXED_VIEWER_SIZE;
             const initialHeight = props.fill ? container.value.clientHeight : FIXED_VIEWER_SIZE;
             renderer.setSize(initialWidth, initialHeight);
@@ -436,6 +450,11 @@ watch(pointOpacity, (value) => {
         material.opacity = value;
     }
 });
+
+watch(zRange, (value) => {
+    minPlane.constant = value === null ? CLIP_OPEN : -value.min;
+    maxPlane.constant = value === null ? CLIP_OPEN : value.max;
+});
 </script>
 
 <template>
@@ -462,13 +481,21 @@ watch(pointOpacity, (value) => {
                 dense
             />
         </div>
-        <div class="canvas-area">
-            <div ref="container" class="canvas-container">
-                <div v-if="hasScale" class="scale-overlay" aria-label="Scale: 1 meter">
-                    <div class="scale-bar" :style="{ width: `${scaleBarWidthPx}px` }" />
-                    <div class="scale-text">1 m</div>
+        <div class="viewer-body">
+            <div class="canvas-area">
+                <div ref="container" class="canvas-container">
+                    <div v-if="hasScale" class="scale-overlay" aria-label="Scale: 1 meter">
+                        <div class="scale-bar" :style="{ width: `${scaleBarWidthPx}px` }" />
+                        <div class="scale-text">1 m</div>
+                    </div>
                 </div>
             </div>
+            <plan-point-density-bar
+                v-model="zRange"
+                :buffer="buffer"
+                :meta="meta"
+                :reconstruction-id="reconstructionId"
+            />
         </div>
     </div>
 </template>
@@ -496,10 +523,7 @@ watch(pointOpacity, (value) => {
     grid-template-columns: max-content 1fr;
     gap: 8px 16px;
     align-items: center;
-    /* Bleed over the host page's q-px-md (16px) so the bar reaches the drawer edges.
-       16px side padding keeps the drag bubble (~10px past the slider box) inside the drawer. */
-    margin-left: -16px;
-    margin-right: -16px;
+    /* 16px side padding keeps the drag bubble (~10px past the slider box) inside the drawer. */
     padding: 8px 16px;
     background: #fafafa;
     border-bottom: 1px solid #e5e5ea;
@@ -514,9 +538,16 @@ watch(pointOpacity, (value) => {
     display: none;
 }
 
+.viewer-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
 .canvas-area {
     position: relative;
     flex: 1;
+    min-width: 0;
     min-height: 0;
 }
 
@@ -539,9 +570,9 @@ watch(pointOpacity, (value) => {
     bottom: 12px;
     z-index: 30;
     pointer-events: none;
-    background: rgba(255, 255, 255, 0.85);
+    background: #fff;
     color: #111;
-    border: 1px solid rgba(0, 0, 0, 0.25);
+    border: 1px solid #e5e5ea;
     border-radius: 6px;
     padding: 8px 10px;
     display: grid;
@@ -549,9 +580,8 @@ watch(pointOpacity, (value) => {
 }
 
 .scale-bar {
-    height: 6px;
-    background: #00aa00;
-    border: 1px solid rgba(0, 0, 0, 0.4);
+    height: 5px;
+    background: #000;
     border-radius: 2px;
 }
 

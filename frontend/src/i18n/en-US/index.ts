@@ -414,6 +414,7 @@ export default {
             pointSize: 'Point size',
             pointOpacity: 'Point opacity',
             preparing: 'Preparing point cloud…',
+            density: 'Point density by height',
         },
     },
     settings: {

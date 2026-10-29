@@ -437,6 +437,7 @@ export default {
             pointSize: 'Taille des points',
             pointOpacity: 'Opacité des points',
             preparing: 'Préparation du nuage de points…',
+            density: 'Densité des points par hauteur',
         },
     },
     settings: {

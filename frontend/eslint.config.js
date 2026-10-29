@@ -65,6 +65,10 @@ export default defineConfigWithVueTs(
         rules: {
             'prefer-promise-reject-errors': 'off',
 
+            // `({ offset, ...row }) => row` is the idiomatic "drop a key"; the
+            // omitted rest sibling is intentional, not a leftover variable.
+            '@typescript-eslint/no-unused-vars': ['error', { ignoreRestSiblings: true }],
+
             // allow debugger during development only
             'no-debugger': process.env.NODE_ENV === 'production' ? 'error' : 'off',
         },

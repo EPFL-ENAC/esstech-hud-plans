@@ -159,6 +159,9 @@ const tools = computed(() => [
     flex-direction: column;
     flex: 1;
     min-height: 0;
+    /* Cancel the page's q-px-md/q-py-md so the viewer is flush with the page
+       edges on the sides and the bottom. */
+    margin: 0 -16px -16px;
 }
 
 .splat-query :deep(.query-content) {
