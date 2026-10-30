@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import threading
 from pathlib import Path
@@ -18,6 +19,8 @@ POINT_CLOUD_META_FILENAME = "point-cloud.meta.json"
 # One lock per splat path ever generated on demand; the count stays small per process.
 _POINT_CLOUD_LOCKS: dict[str, threading.Lock] = {}
 _POINT_CLOUD_LOCKS_GUARD = threading.Lock()
+
+logger = logging.getLogger(__name__)
 
 
 def compute_plan_point_cloud(
@@ -133,6 +136,13 @@ def generate_plan_point_cloud(splat_path: Path, colmap_directory: Path) -> None:
 
     if positions.shape[0] == 0:
         bounds = [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
+        logger.warning(
+            "Plan point cloud for %s is empty: every splat was filtered out "
+            "(threshold=%g, %d splats considered)",
+            splat_path,
+            config.PLAN_DENSITY_THRESHOLD * geometric_data.radius**3,
+            len(means),
+        )
     else:
         bounds = [
             [float(value) for value in positions.min(axis=0)],
