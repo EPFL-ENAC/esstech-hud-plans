@@ -344,24 +344,21 @@ class SplatGenerationArtifact:
 
 
 @task(name="copy-uploaded-video", cache_policy=DEFAULT - "report_progress")
-async def copy_video_from_tus_upload(
-    tus_upload_path: str,
-    tus_video_filename: str,
+async def copy_video_from_upload(
+    upload_path: str,
+    upload_filename: str,
     video_path: str,
 ) -> str:
-    """Copy a completed tus upload into its final artifact location."""
+    """Copy a permanent user upload into the reconstruction's artifact layout."""
 
     run_logger = get_run_logger()
-    await run_in_threadpool(_copy_tus_upload, tus_upload_path, video_path)
-    run_logger.info("Copied uploaded video %s to %s", tus_video_filename, video_path)
+    await run_in_threadpool(_copy_uploaded_video, upload_path, video_path)
+    run_logger.info("Copied uploaded video %s to %s", upload_filename, video_path)
     return video_path
 
 
-def _copy_tus_upload(
-    tus_upload_path: str,
-    video_path: str,
-) -> None:
-    source = Path(tus_upload_path)
+def _copy_uploaded_video(upload_path: str, video_path: str) -> None:
+    source = Path(upload_path)
     copy_completed_file(source, Path(video_path), expected_size=source.stat().st_size)
 
 
@@ -529,8 +526,8 @@ async def splat_generation_flow(
     settings: SplatGenerationWorkflowSettings,
     owner_id: UUID,
     reconstruction_id: UUID | None = None,
-    tus_upload_path: str | None = None,
-    tus_video_filename: str | None = None,
+    upload_path: str | None = None,
+    upload_filename: str | None = None,
 ) -> str:
     run_logger = get_run_logger()
     run_logger.info("Starting splat generation for artifact %s", artifact_id)
@@ -541,14 +538,14 @@ async def splat_generation_flow(
         else LOCAL_EXECUTION_ENVIRONMENT
     )
 
-    if tus_upload_path is not None:
-        if tus_video_filename is None:
-            raise ValueError("A tus upload requires its path and filename")
+    if upload_path is not None:
+        if upload_filename is None:
+            raise ValueError("An upload requires its path and filename")
         # The permanent upload remains reusable; the pipeline copies its
         # video into this reconstruction's artifact layout.
-        await copy_video_from_tus_upload(
-            tus_upload_path=tus_upload_path,
-            tus_video_filename=tus_video_filename,
+        await copy_video_from_upload(
+            upload_path=upload_path,
+            upload_filename=upload_filename,
             video_path=video_path,
         )
 
@@ -673,15 +670,15 @@ async def _submit_splat_generation_run(
     return flow_run.id
 
 
-async def schedule_splat_generation_from_tus(
+async def schedule_splat_generation_from_upload(
     artifact: SplatGenerationArtifact,
-    tus_upload_path: str,
-    tus_video_filename: str,
+    upload_path: str,
+    upload_filename: str,
     settings: SplatGenerationWorkflowSettings,
     owner_id: UUID,
     reconstruction_id: UUID | None = None,
 ) -> UUID:
-    """Schedule the splat generation of an already-uploaded tus video.
+    """Schedule splat generation from a permanent user upload.
 
     The flow's first task copies the permanent upload into the artifact
     layout before frame extraction, preserving the original upload.
@@ -692,8 +689,8 @@ async def schedule_splat_generation_from_tus(
     )
     parameters.update(
         {
-            "tus_upload_path": tus_upload_path,
-            "tus_video_filename": tus_video_filename,
+            "upload_path": upload_path,
+            "upload_filename": upload_filename,
         }
     )
     return await _submit_splat_generation_run(parameters, reconstruction_id)

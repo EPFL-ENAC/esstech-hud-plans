@@ -151,7 +151,7 @@ def test_registration_serializes_other_operations(
                 return workflow_id
 
             monkeypatch.setattr(
-                splat_generation, "schedule_splat_generation_from_tus", register
+                splat_generation, "schedule_splat_generation_from_upload", register
             )
             cancel = AsyncMock()
             monkeypatch.setattr(common, "cancel_workflow", cancel)
@@ -338,7 +338,7 @@ def test_creation_and_completion_never_miss_dispatch(
 
             registered = AsyncMock(return_value=uuid4())
             monkeypatch.setattr(
-                splat_generation, "schedule_splat_generation_from_tus", registered
+                splat_generation, "schedule_splat_generation_from_upload", registered
             )
             paused = asyncio.Event()
             release = asyncio.Event()
@@ -459,7 +459,9 @@ def test_cancelled_registration_request_rolls_back_and_releases_lock(
                 await asyncio.Event().wait()
 
             monkeypatch.setattr(
-                splat_generation, "schedule_splat_generation_from_tus", never_finishes
+                splat_generation,
+                "schedule_splat_generation_from_upload",
+                never_finishes,
             )
             async with AsyncSession(state.engine, expire_on_commit=False) as session:
                 registration = asyncio.create_task(

@@ -2,17 +2,20 @@ from __future__ import annotations
 
 import builtins
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 from uuid import UUID, uuid4
 
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import col, select
+from sqlmodel import col, select, update
 from sqlmodel.ext.asyncio.session import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
+from api.lib.tus import tus_file_path
 from api.lib.upload_storage import (
     copy_completed_file,
+    is_tus_upload_expired,
     remove_tus_files,
     upload_file_path,
     validate_completed_file,
@@ -219,6 +222,62 @@ class UserUploadsService:
             upload_id
         )
         return upload
+
+    async def expire_abandoned_uploads(
+        self,
+        *,
+        now: datetime,
+        retention_days: int,
+    ) -> builtins.list[UUID]:
+        """Fail abandoned uploads and their waiting reconstructions before cleanup."""
+
+        expired: list[UUID] = []
+        try:
+            result = await self._session.exec(
+                select(UserUploads.id).where(UserUploads.status == UploadStatus.PENDING)
+            )
+            upload_ids = result.all()
+            for upload_id in upload_ids:
+                try:
+                    upload = await self._get_for_update(upload_id)
+                except UploadNotFoundError:
+                    await self._session.commit()
+                    continue
+                if upload.status != UploadStatus.PENDING:
+                    await self._session.commit()
+                    continue
+                is_expired = await run_in_threadpool(
+                    is_tus_upload_expired,
+                    Path(tus_file_path(upload_id)),
+                    now=now,
+                    retention_days=retention_days,
+                    created_at=upload.created_at,
+                )
+                if not is_expired:
+                    await self._session.commit()
+                    continue
+
+                upload.status = UploadStatus.FAILED
+                self._session.add(upload)
+                await self._session.exec(
+                    update(Reconstruction)
+                    .where(
+                        Reconstruction.upload_id == upload_id,
+                        Reconstruction.status
+                        == ReconstructionStatus.WAITING_FOR_UPLOAD,
+                    )
+                    .values(
+                        status=ReconstructionStatus.FAILED,
+                        error_message="Source upload expired",
+                        updated_at=now,
+                    )
+                )
+                await self._session.commit()
+                expired.append(upload_id)
+            return expired
+        except BaseException:
+            await self._session.rollback()
+            raise
 
     async def get_completed(
         self,

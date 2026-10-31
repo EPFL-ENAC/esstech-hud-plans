@@ -30,7 +30,7 @@ export interface ResumableUploadOptions {
 }
 
 export interface ResumableUploadResult {
-    /** tusd-side upload id extracted from the proxied upload location URL. */
+    /** Application upload ID extracted from the proxied upload location URL. */
     uploadId: string;
     /** True when a previously started upload of this file was continued. */
     resumed: boolean;
@@ -43,10 +43,6 @@ export function uploadVideoResumable(
     return new Promise((resolve, reject) => {
         if (opts.signal?.aborted) {
             reject(new DOMException('Aborted', 'AbortError'));
-            return;
-        }
-        if (!tusEndpoint) {
-            reject(new ApiError('Resumable upload endpoint is not configured', 0, null));
             return;
         }
         let settled = false;
