@@ -70,6 +70,14 @@ progress approximately every five seconds during transfers and at request end;
 completion records the full size after the file is persisted. The upload list and
 detail endpoints expose these counts, including while an upload is pending.
 
+The daily `tus-cleanup` flow marks abandoned pending uploads and reconstructions
+waiting for them as failed before deleting expired staging files. It uses
+`TUSD_UPLOAD_RETENTION_DAYS` (seven days by default), preserves recently modified
+binaries, and removes orphan binaries after one day. Old pending uploads whose
+staging files are already missing also become failed. Permanent uploads are kept.
+If staging deletion fails, the next run retries it; database failures prevent
+deletion. A missing staging directory causes the run to skip cleanup.
+
 The API and workflow process must share the `backend/data/workflows` directory.
 The `splat-generation/default` deployment runs FFmpeg, optionally selects frames
 locally with the frame picker, then runs COLMAP and Brush. Submit a user upload

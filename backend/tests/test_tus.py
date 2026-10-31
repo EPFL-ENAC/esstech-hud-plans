@@ -27,7 +27,7 @@ from api.lib.workflows import tus_cleanup
 from api.models.auth import AuthenticatedUser
 from api.models.building import Building
 from api.models.uploads import UploadStatus, UserUploads
-from api.models.user import User
+from api.models.user import User, utc_now
 from api.services.auth import require_user
 from api.services.uploads import UserUploadsService
 from api.views import buildings as building_views
@@ -711,7 +711,9 @@ def test_remove_expired_uploads_deletes_old_pairs_and_orphans(
     fresh_orphan.write_bytes(b"chunk")
     os.utime(fresh_orphan, (recent, recent))
 
-    removed = tus_cleanup.remove_expired_uploads(upload_dir, retention_days=7)
+    removed = tus_cleanup.remove_expired_uploads(
+        upload_dir, retention_days=7, now=utc_now()
+    )
 
     assert sorted(removed) == ["oldorphan", "oldupload"]
     assert not old_binary.exists()
@@ -734,7 +736,9 @@ def test_remove_expired_uploads_keeps_recently_touched_binaries(
     os.utime(copied_binary, (recent, recent))
     os.utime(upload_dir / "copiedupload.info", (old, old))
 
-    removed = tus_cleanup.remove_expired_uploads(upload_dir, retention_days=7)
+    removed = tus_cleanup.remove_expired_uploads(
+        upload_dir, retention_days=7, now=utc_now()
+    )
 
     assert removed == []
     assert copied_binary.exists()
@@ -744,18 +748,23 @@ def test_remove_expired_uploads_keeps_recently_touched_binaries(
 def test_tus_cleanup_flow_uses_configured_directory(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    tus_hook_api: TestClient,
 ) -> None:
     _fake_flow_logger(monkeypatch, tus_cleanup)
     upload_dir = tmp_path / "tus"
     upload_dir.mkdir()
     monkeypatch.setattr(config, "TUSD_UPLOAD_DIR", str(upload_dir))
     monkeypatch.setattr(config, "TUSD_UPLOAD_RETENTION_DAYS", 0)
+    assert isinstance(tus_hook_api.app, FastAPI)
+    monkeypatch.setattr(
+        tus_cleanup, "get_engine", lambda: tus_hook_api.app.state.upload_database
+    )
     _make_tus_upload(upload_dir, "expired")
     expired = time.time() - 2 * 24 * 60 * 60
     os.utime(upload_dir / "expired", (expired, expired))
     os.utime(upload_dir / "expired.info", (expired, expired))
 
-    removed = tus_cleanup.tus_cleanup_flow.fn()
+    removed = asyncio.run(tus_cleanup.tus_cleanup_flow.fn())
 
     assert removed == ["expired"]
     assert not (upload_dir / "expired").exists()
