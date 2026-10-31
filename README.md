@@ -69,9 +69,6 @@ Upload metadata includes `uploaded_bytes` alongside `size_bytes`. tusd reports
 progress approximately every five seconds during transfers and at request end;
 completion records the full size after the file is persisted. The upload list and
 detail endpoints expose these counts, including while an upload is pending.
-When deploying this change, apply the migration with `make -C backend db-upgrade`
-before starting the updated backend, then recreate tusd with
-`docker compose up -d --force-recreate tusd` to enable the progress hooks.
 
 The API and workflow process must share the `backend/data/workflows` directory.
 The `splat-generation/default` deployment runs FFmpeg, optionally selects frames

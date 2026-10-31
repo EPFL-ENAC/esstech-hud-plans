@@ -341,7 +341,9 @@ def test_head_completion_dispatches_waiting_reconstruction(
             return row
 
     schedule = AsyncMock(return_value=UUID(int=300))
-    monkeypatch.setattr(splat_workflow, "schedule_splat_generation_from_tus", schedule)
+    monkeypatch.setattr(
+        splat_workflow, "schedule_splat_generation_from_upload", schedule
+    )
     received: list[httpx.Request] = []
     _install_transport(
         monkeypatch,
@@ -388,7 +390,7 @@ def test_head_completion_dispatches_waiting_reconstruction(
     assert len(received) == 1
     schedule.assert_awaited_once()
     assert schedule.call_args.kwargs["reconstruction_id"] == reconstruction_id
-    assert schedule.call_args.kwargs["tus_upload_path"] == str(
+    assert schedule.call_args.kwargs["upload_path"] == str(
         upload_file_path(upload_id, "video.mp4")
     )
 

@@ -1,20 +1,17 @@
 """Cleanup of abandoned tus uploads from the tusd staging directory.
 
 tusd's filestore performs no expiration cleanup, so a scheduled flow removes
-uploads that were never finished or never picked up by a submission.
+expired staging files and orphan binaries. Completed uploads are stored separately.
 """
 
 from __future__ import annotations
 
-import logging
 import time
 from pathlib import Path
 
 from prefect import flow, get_run_logger
 
 from api.config import config
-
-logger = logging.getLogger(__name__)
 
 # Binaries without an .info file can never be resumed; keep them for a day so
 # a crash during tusd state writes does not discard live uploads.

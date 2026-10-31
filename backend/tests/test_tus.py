@@ -359,7 +359,7 @@ def tus_api(
         return WORKFLOW_ID
 
     monkeypatch.setattr(
-        splat_workflow, "schedule_splat_generation_from_tus", fake_schedule
+        splat_workflow, "schedule_splat_generation_from_upload", fake_schedule
     )
 
     app = FastAPI()
@@ -433,7 +433,7 @@ def test_from_upload_reconstruction_submission_schedules_copy(
     assert created["input_video_path"].endswith("video/input.mp4")
 
 
-def test_from_upload_reconstruction_submission_passes_tus_parameters(
+def test_from_upload_reconstruction_submission_passes_upload_parameters(
     monkeypatch: pytest.MonkeyPatch,
     tus_api: tuple[TestClient, UUID, Path],
 ) -> None:
@@ -456,7 +456,7 @@ def test_from_upload_reconstruction_submission_passes_tus_parameters(
         return WORKFLOW_ID
 
     monkeypatch.setattr(
-        splat_workflow, "schedule_splat_generation_from_tus", fake_schedule
+        splat_workflow, "schedule_splat_generation_from_upload", fake_schedule
     )
 
     response = client.post(
@@ -466,10 +466,10 @@ def test_from_upload_reconstruction_submission_passes_tus_parameters(
 
     assert response.status_code == 202
     created = response.json()
-    assert captured["tus_upload_path"] == str(
+    assert captured["upload_path"] == str(
         upload_file_path(UUID(upload_id), "recording.mov")
     )
-    assert captured["tus_video_filename"] == "recording.mov"
+    assert captured["upload_filename"] == "recording.mov"
     assert captured["owner_id"] == USER_ID
     assert captured["reconstruction_id"] == UUID(created["id"])
     parameters = captured["artifact"]
@@ -484,7 +484,9 @@ def test_permanent_upload_can_be_submitted_twice(
     async def schedule(**kwargs: object) -> UUID:
         return uuid4()
 
-    monkeypatch.setattr(splat_workflow, "schedule_splat_generation_from_tus", schedule)
+    monkeypatch.setattr(
+        splat_workflow, "schedule_splat_generation_from_upload", schedule
+    )
     client, building_id, tus_dir = tus_api
     upload_id = uuid4().hex
     _make_tus_upload(tus_dir, upload_id)
@@ -619,7 +621,7 @@ def test_from_upload_submission_maps_scheduling_failure_to_503(
         raise RuntimeError("Prefect unavailable")
 
     monkeypatch.setattr(
-        splat_workflow, "schedule_splat_generation_from_tus", fail_schedule
+        splat_workflow, "schedule_splat_generation_from_upload", fail_schedule
     )
 
     response = client.post(
@@ -643,35 +645,32 @@ def _fake_flow_logger(monkeypatch: pytest.MonkeyPatch, module: object) -> None:
     monkeypatch.setattr(module, "get_run_logger", lambda: FakeRunLogger())
 
 
-def test_copy_video_from_tus_upload_preserves_original(
+def test_copy_video_from_upload_preserves_original(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     _fake_flow_logger(monkeypatch, splat_workflow)
-    tus_dir = tmp_path / "tus"
-    tus_dir.mkdir()
     upload_id = uuid4().hex
-    binary = tus_dir / upload_id
-    binary.write_bytes(b"video bytes")
-    (tus_dir / f"{upload_id}.info").write_text("{}")
+    source = upload_file_path(UUID(upload_id), "scan.mp4")
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"video bytes")
     video_path = tmp_path / "workflows" / upload_id / "video" / "input.mp4"
 
     result = asyncio.run(
-        splat_workflow.copy_video_from_tus_upload.fn(
-            tus_upload_path=str(binary),
-            tus_video_filename="scan.mp4",
+        splat_workflow.copy_video_from_upload.fn(
+            upload_path=str(source),
+            upload_filename="scan.mp4",
             video_path=str(video_path),
         )
     )
 
     assert result == str(video_path)
     assert video_path.read_bytes() == b"video bytes"
-    assert binary.read_bytes() == b"video bytes"
-    assert (tus_dir / f"{upload_id}.info").exists()
+    assert source.read_bytes() == b"video bytes"
     assert not video_path.with_name("input.mp4.tmp").exists()
 
 
-def test_copy_video_from_tus_upload_fails_on_missing_source(
+def test_copy_video_from_upload_fails_on_missing_source(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -680,9 +679,9 @@ def test_copy_video_from_tus_upload_fails_on_missing_source(
 
     with pytest.raises(FileNotFoundError):
         asyncio.run(
-            splat_workflow.copy_video_from_tus_upload.fn(
-                tus_upload_path=str(tmp_path / "missing"),
-                tus_video_filename="scan.mp4",
+            splat_workflow.copy_video_from_upload.fn(
+                upload_path=str(tmp_path / "missing"),
+                upload_filename="scan.mp4",
                 video_path=str(destination),
             )
         )
