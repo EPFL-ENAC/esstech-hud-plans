@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import codecs
 import logging
 import time
@@ -5,11 +7,6 @@ from pathlib import Path, PurePosixPath
 from typing import Callable
 
 from api.lib.compute import scitas as scitas_compute
-from api.lib.compute.scitas import (
-    SLURM_STATES_COMPLETED,
-    Scitas,
-    ScitasJobResult,
-)
 
 from .base import (
     Command,
@@ -90,22 +87,20 @@ class ScitasCommandExecutionEnvironment(CommandExecutionEnvironment):
         command: Command,
         job_name: str,
         on_log: Callable[[str], None],
-    ) -> ScitasJobResult:
-        log_path = Path(Scitas.get_log_file_path(job_name))
+    ) -> scitas_compute.ScitasJobResult:
+        log_path = Path(scitas_compute.Scitas.get_log_file_path(job_name))
         log_tail = _IncrementalLogTail()
         status_failures = 0
 
         while True:
-            Scitas.refresh_logs()
             log_tail.read(log_path, on_log)
-            status = Scitas.get_job_status(job_name)
+            status = scitas_compute.Scitas.get_job_status(job_name)
 
             if status is None:
                 status_failures += 1
-            elif status in SLURM_STATES_COMPLETED:
-                result = Scitas.get_job_result(job_name)
+            elif status in scitas_compute.SLURM_STATES_COMPLETED:
+                result = scitas_compute.Scitas.get_job_result(job_name)
                 if result is not None:
-                    Scitas.refresh_logs()
                     log_tail.read(log_path, on_log)
                     log_tail.finish(on_log)
                     return result
@@ -152,11 +147,10 @@ class ScitasCommandExecutionEnvironment(CommandExecutionEnvironment):
                 "brush": ["brush"],
             }
             argv = [*launchers[command.tool], *command.arguments]
-            job_name = Scitas.submit_job(
+            job_name = scitas_compute.Scitas.submit_job(
                 tool=command.tool,
                 command=argv,
                 workspace_rel_path=remote_workspace,
-                working_directory_rel_path=remote_workspace,
                 capture=command.capture,
             )
             scitas_compute.register_job(job_name, workspace.name)
@@ -165,7 +159,7 @@ class ScitasCommandExecutionEnvironment(CommandExecutionEnvironment):
         except BaseException:
             if job_name is not None and not job_finished:
                 try:
-                    Scitas.cancel_job(job_name)
+                    scitas_compute.Scitas.cancel_job(job_name)
                     scitas_compute.forget_job(job_name, workspace.name)
                 except Exception:
                     logger.exception("Failed to cancel Scitas job %s", job_name)

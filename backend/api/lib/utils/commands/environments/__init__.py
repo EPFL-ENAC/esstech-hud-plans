@@ -1,8 +1,8 @@
+from ..common import CommandLogCapture
 from .base import (
     Command,
     CommandExecutionEnvironment,
     CommandExecutionError,
-    CommandLogCapture,
     CommandLogStream,
     CommandResult,
     LogCallback,

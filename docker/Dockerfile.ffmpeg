@@ -1,23 +1,9 @@
 FROM nvcr.io/nvidia/cuda:13.1.1-runtime-ubuntu24.04
 
 ########################################
-# RCP CaaS requirement
-########################################
-# Mapping needed to access files from the external storage
-ARG LDAP_USERNAME
-ARG LDAP_UID
-ARG LDAP_GROUPNAME
-ARG LDAP_GID
-RUN groupadd ${LDAP_GROUPNAME} --gid ${LDAP_GID}
-RUN useradd -m -s /bin/bash -g ${LDAP_GROUPNAME} -u ${LDAP_UID} ${LDAP_USERNAME}
-RUN mkdir -p /home/${LDAP_USERNAME}
-
-########################################
 # Setup
 ########################################
 RUN apt update && \
     apt install -y \
-	ffmpeg && \
-	apt clean && rm -rf /var/lib/apt/lists/*
-
-USER ${LDAP_USERNAME}
+        ffmpeg && \
+    apt clean && rm -rf /var/lib/apt/lists/*
