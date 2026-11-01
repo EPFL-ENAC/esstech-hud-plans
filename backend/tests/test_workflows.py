@@ -85,9 +85,9 @@ def test_splat_generation_artifact_owns_its_paths_and_lifecycle(
 ) -> None:
     artifact = splat_workflow.SplatGenerationArtifact.create(workflow_data_directory)
 
-    assert artifact.video_path.name == "input.mp4"
     assert artifact.root_directory.parent == workflow_data_directory
-    assert artifact.video_path.parent == artifact.root_directory / "video"
+    assert artifact.root_directory.is_dir()
+    assert list(artifact.root_directory.iterdir()) == []
     assert artifact.frames_directory == artifact.root_directory / "frames"
     assert artifact.raw_frames_directory == artifact.root_directory / "frames_raw"
     assert artifact.colmap_directory == artifact.root_directory / "colmap"
@@ -106,8 +106,64 @@ def test_splat_generation_artifact_owns_its_paths_and_lifecycle(
     )
     assert from_flow_run == artifact
 
-    artifact.video_path.write_bytes(b"video")
+    artifact.splat_path.write_bytes(b"splat")
     artifact.remove()
+    assert not artifact.root_directory.exists()
+
+
+def test_schedule_splat_generation_passes_permanent_source_without_copying(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    artifact = splat_workflow.SplatGenerationArtifact(
+        artifact_id=uuid4(),
+        storage_root=tmp_path / "workflows",
+    )
+    source = tmp_path / "uploads" / uuid4().hex / "input.mov"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"permanent video")
+    reconstruction_id = artifact.artifact_id
+    flow_id = uuid4()
+    settings = SplatGenerationWorkflowSettings()
+    calls: list[dict] = []
+
+    async def submit(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(id=flow_id)
+
+    monkeypatch.setattr(splat_workflow, "arun_deployment", submit)
+    result = asyncio.run(
+        splat_workflow.schedule_splat_generation_from_upload(
+            artifact=artifact,
+            video_path=source,
+            settings=settings,
+            owner_id=USER_ID,
+            reconstruction_id=reconstruction_id,
+        )
+    )
+
+    assert result == flow_id
+    assert calls == [
+        {
+            "name": splat_workflow.SPLAT_GENERATION_DEPLOYMENT,
+            "parameters": {
+                "artifact_id": str(artifact.artifact_id),
+                "workspace_directory": str(artifact.root_directory.resolve()),
+                "video_path": str(source.resolve()),
+                "raw_frames_directory": str(artifact.raw_frames_directory.resolve()),
+                "frames_directory": str(artifact.frames_directory.resolve()),
+                "colmap_directory": str(artifact.colmap_directory.resolve()),
+                "splat_path": str(artifact.splat_path.resolve()),
+                "settings": settings.model_dump(mode="json"),
+                "owner_id": str(USER_ID),
+                "reconstruction_id": str(reconstruction_id),
+            },
+            "timeout": 0,
+            "as_subflow": False,
+            "idempotency_key": f"reconstruction:{reconstruction_id}",
+        }
+    ]
+    assert source.read_bytes() == b"permanent video"
     assert not artifact.root_directory.exists()
 
 
@@ -394,6 +450,11 @@ def test_splat_generation_flow_selects_gpu_environment(
     use_frame_picker: bool,
 ) -> None:
     calls: list[tuple] = []
+    video_path = tmp_path / "uploads" / "source video.mov"
+    video_path.parent.mkdir()
+    video_path.write_bytes(b"permanent video")
+    workspace = tmp_path / "workflow"
+    workspace.mkdir()
     picker_settings = FramePickerSettings() if use_frame_picker else None
     settings = SplatGenerationWorkflowSettings(frame_picker=picker_settings)
 
@@ -403,19 +464,22 @@ def test_splat_generation_flow_selects_gpu_environment(
 
     async def fake_extract_frames_task(**kwargs):
         calls.append(("ffmpeg", kwargs))
-        return kwargs["frames_directory"]
+        frames = Path(kwargs["frames_directory"])
+        frames.mkdir()
+        (frames / "frame_00001.jpg").write_bytes(b"frame")
+        return str(frames)
 
     async def fake_picker_task(**kwargs):
         calls.append(("frame-picker", kwargs))
-        return str(tmp_path / "frames")
+        return str(workspace / "frames")
 
     async def fake_colmap_task(**kwargs):
         calls.append(("colmap", kwargs))
-        return str(tmp_path / "colmap")
+        return str(workspace / "colmap")
 
     async def fake_brush_task(**kwargs):
         calls.append(("brush", kwargs))
-        return str(tmp_path / "splat.ply")
+        return str(workspace / "splat.ply")
 
     async def fake_point_cloud_task(**kwargs):
         calls.append(("point-cloud", kwargs))
@@ -437,18 +501,18 @@ def test_splat_generation_flow_selects_gpu_environment(
     result = asyncio.run(
         splat_workflow.splat_generation_flow.fn(
             artifact_id=uuid4(),
-            workspace_directory=str(tmp_path),
-            video_path="input.mov",
-            raw_frames_directory=str(tmp_path / "frames_raw"),
-            frames_directory=str(tmp_path / "frames"),
-            colmap_directory=str(tmp_path / "colmap"),
-            splat_path=str(tmp_path / "splat.ply"),
+            workspace_directory=str(workspace),
+            video_path=str(video_path),
+            raw_frames_directory=str(workspace / "frames_raw"),
+            frames_directory=str(workspace / "frames"),
+            colmap_directory=str(workspace / "colmap"),
+            splat_path=str(workspace / "splat.ply"),
             settings=settings,
             owner_id=USER_ID,
         )
     )
 
-    assert result == str(tmp_path / "splat.ply")
+    assert result == str(workspace / "splat.ply")
     gpu_environment = (
         splat_workflow.SCITAS_EXECUTION_ENVIRONMENT
         if use_scitas
@@ -458,10 +522,10 @@ def test_splat_generation_flow_selects_gpu_environment(
         (
             "ffmpeg",
             {
-                "workspace_directory": str(tmp_path),
-                "video_path": "input.mov",
+                "workspace_directory": str(workspace),
+                "video_path": str(video_path),
                 "frames_directory": str(
-                    tmp_path / ("frames_raw" if use_frame_picker else "frames")
+                    workspace / ("frames_raw" if use_frame_picker else "frames")
                 ),
                 "fps": None if use_frame_picker else 2.0,
                 "fit_in_width": 1920,
@@ -475,10 +539,10 @@ def test_splat_generation_flow_selects_gpu_environment(
             (
                 "frame-picker",
                 {
-                    "workspace_directory": str(tmp_path),
-                    "video_path": "input.mov",
-                    "input_frames_directory": str(tmp_path / "frames_raw"),
-                    "frames_directory": str(tmp_path / "frames"),
+                    "workspace_directory": str(workspace),
+                    "video_path": str(video_path),
+                    "input_frames_directory": str(workspace / "frames_raw"),
+                    "frames_directory": str(workspace / "frames"),
                     "settings": picker_settings,
                 },
             )
@@ -488,9 +552,9 @@ def test_splat_generation_flow_selects_gpu_environment(
             (
                 "colmap",
                 {
-                    "workspace_directory": str(tmp_path),
-                    "frames_directory": str(tmp_path / "frames"),
-                    "colmap_directory": str(tmp_path / "colmap"),
+                    "workspace_directory": str(workspace),
+                    "frames_directory": str(workspace / "frames"),
+                    "colmap_directory": str(workspace / "colmap"),
                     "settings": settings.colmap,
                     "execution_environment": gpu_environment,
                 },
@@ -498,9 +562,9 @@ def test_splat_generation_flow_selects_gpu_environment(
             (
                 "brush",
                 {
-                    "workspace_directory": str(tmp_path),
-                    "dataset_directory": str(tmp_path),
-                    "splat_path": str(tmp_path / "splat.ply"),
+                    "workspace_directory": str(workspace),
+                    "dataset_directory": str(workspace),
+                    "splat_path": str(workspace / "splat.ply"),
                     "settings": settings.brush,
                     "execution_environment": gpu_environment,
                 },
@@ -513,12 +577,16 @@ def test_splat_generation_flow_selects_gpu_environment(
         (
             "point-cloud",
             {
-                "splat_path": str(tmp_path / "splat.ply"),
-                "colmap_directory": str(tmp_path / "colmap"),
+                "splat_path": str(workspace / "splat.ply"),
+                "colmap_directory": str(workspace / "colmap"),
             },
         )
     )
     assert calls == expected_calls
+
+    assert video_path.read_bytes() == b"permanent video"
+    assert not (workspace / "video").exists()
+    assert list(workspace.rglob("*.mov")) == []
 
 
 def test_submit_counter_returns_202(
@@ -1161,7 +1229,7 @@ def test_reconstruction_terminal_hooks_tolerate_deleted_reconstruction(
             "reconstruction_id": str(reconstruction_id),
             "settings": {},
             "workspace_directory": "/data/workspace",
-            "video_path": "/data/workspace/video/input.mp4",
+            "video_path": "/data/uploads/source/input.mp4",
             "frames_directory": "/data/workspace/frames",
             "colmap_directory": "/data/workspace/colmap",
             "splat_path": "/data/workspace/splat.ply",

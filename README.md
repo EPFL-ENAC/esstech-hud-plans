@@ -78,15 +78,25 @@ staging files are already missing also become failed. Permanent uploads are kept
 If staging deletion fails, the next run retries it; database failures prevent
 deletion. A missing staging directory causes the run to skip cleanup.
 
-The API and workflow process must share the `backend/data/workflows` directory.
+The API and workflow process must share the permanent `DATA_DIR/uploads` files
+and the generated `DATA_DIR/workflows` artifacts (`DATA_DIR` defaults to
+`backend/data`). Each permanent video is stored once under
+`uploads/<upload_id>/input.<extension>` and can be reused by multiple reconstructions.
 The `splat-generation/default` deployment runs FFmpeg, optionally selects frames
 locally with the frame picker, then runs COLMAP and Brush. Submit a user upload
 through `POST /buildings/{building_id}/reconstructions/from-upload`, or create a
 building and its first reconstruction through
 `POST /buildings/from-reconstruction/from-upload`. Both endpoints accept an
-`upload_id` and workflow settings. Submitted videos, extracted frames (including
-raw frames when selection is enabled), sparse COLMAP reconstructions, and generated
-`splat.ply` files are retained there until removed manually.
+`upload_id` and workflow settings. FFmpeg and frame selection read the permanent
+video directly. Each `workflows/<reconstruction_id>` directory contains only
+generated artifacts: extracted frames (including raw frames when selection is
+enabled), sparse COLMAP reconstructions, and `splat.ply` files. The source video
+is never copied into the reconstruction directory or staged to SCITAS scratch.
+
+Deleting a reconstruction removes its generated artifacts and preserves the
+source video. Deleting an upload removes its metadata while retaining the
+permanent file, so existing reconstructions can still read and serve their source.
+Existing reconstruction paths and files are not migrated to this layout.
 
 Keep `USE_SCITAS=false` for local execution. Set `USE_SCITAS=true` to run COLMAP
 and Brush on SCITAS through SSH, Slurm, and Apptainer. FFmpeg and frame selection

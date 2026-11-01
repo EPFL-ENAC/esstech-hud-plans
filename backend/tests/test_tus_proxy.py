@@ -390,8 +390,9 @@ def test_head_completion_dispatches_waiting_reconstruction(
     assert len(received) == 1
     schedule.assert_awaited_once()
     assert schedule.call_args.kwargs["reconstruction_id"] == reconstruction_id
-    assert schedule.call_args.kwargs["upload_path"] == str(
-        upload_file_path(upload_id, "video.mp4")
+    assert (
+        schedule.call_args.kwargs["video_path"]
+        == (upload_file_path(upload_id, "video.mp4")).resolve()
     )
 
     row = asyncio.run(read_reconstruction())

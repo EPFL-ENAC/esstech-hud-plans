@@ -22,7 +22,7 @@ def build_frame_extraction_command(
     )
     if fps is not None:
         filters += f",fps={fps}"
-    relative_video_path = workspace_relative_path(video_path, workspace_directory)
+    input_path = video_path.resolve()
     relative_frames_directory = workspace_relative_path(
         frames_directory, workspace_directory
     )
@@ -34,7 +34,7 @@ def build_frame_extraction_command(
             "-nostdin",
             "-y",
             "-i",
-            relative_video_path.as_posix(),
+            str(input_path),
             "-vf",
             filters,
             "-q:v",

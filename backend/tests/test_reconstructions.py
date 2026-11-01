@@ -25,7 +25,6 @@ from api.config import config
 from api.db import get_session
 from api.lib.compute import point_cloud as point_cloud_compute
 from api.lib.compute import scitas as scitas_compute
-from api.lib.compute.colmap_geometric_data import ColmapGeometricData
 from api.lib.compute.point_cloud import (
     POINT_CLOUD_BINARY_FILENAME,
     POINT_CLOUD_META_FILENAME,
@@ -54,6 +53,7 @@ from api.services.reconstructions import (
 from api.views import buildings as building_views
 from api.views import reconstructions as reconstruction_views
 from api.views import tus as tus_views
+from api.views import uploads as upload_views
 
 USER_ID = UUID("00000000-0000-0000-0000-000000000001")
 OTHER_USER_ID = UUID("00000000-0000-0000-0000-000000000002")
@@ -71,8 +71,9 @@ def _stored_reconstruction(
 ) -> tuple[Reconstruction, Path]:
     artifact_id = uuid4()
     root = tmp_path / artifact_id.hex
-    (root / "video").mkdir(parents=True)
-    video_path = root / "video" / "input.mp4"
+    root.mkdir(parents=True)
+    video_path = tmp_path / "uploads" / uuid4().hex / "input.mp4"
+    video_path.parent.mkdir(parents=True)
     video_path.write_bytes(b"video bytes")
     (root / "frames").mkdir()
     (root / "frames_raw").mkdir()
@@ -473,6 +474,7 @@ def reconstruction_api(
     app.state.upload_database = engine
     app.include_router(building_views.router, prefix="/buildings")
     app.include_router(tus_views.router, prefix="/tus")
+    app.include_router(upload_views.router, prefix="/uploads")
     app.include_router(
         reconstruction_views.router,
         prefix="/buildings/{building_id}/reconstructions",
@@ -682,7 +684,7 @@ def test_completion_dispatches_all_waiting_settings_and_skips_repeated_hooks(
 
     async def schedule(**kwargs):
         calls.append(kwargs)
-        assert kwargs["upload_path"] == str(path)
+        assert kwargs["video_path"] == path.resolve()
         assert path.read_bytes() == b"stored video bytes"
         assert kwargs["owner_id"] == USER_ID
         if fail_first and kwargs["settings"].ffmpeg.fps == 3:
@@ -876,11 +878,15 @@ def test_reconstruction_from_stored_upload_is_reusable(
         results.append(reconstruction)
 
     assert results[0]["id"] != results[1]["id"]
-    assert results[0]["input_video_path"] != results[1]["input_video_path"]
+    assert (
+        results[0]["input_video_path"]
+        == results[1]["input_video_path"]
+        == str(path.resolve())
+    )
+    assert results[0]["workspace_directory"] != results[1]["workspace_directory"]
     assert len(scheduled) == 2
     for call in scheduled:
-        assert call["upload_path"] == str(path)
-        assert call["upload_filename"] == "stored.mp4"
+        assert call["video_path"] == path.resolve()
         assert call["owner_id"] == USER_ID
     assert path.read_bytes() == b"stored video bytes"
 
@@ -982,6 +988,54 @@ def test_reconstruction_from_upload_retains_rows_on_scheduling_failure(
     assert reconstruction.status_code == 200
     assert reconstruction.json()["status"] == "failed"
     assert path.read_bytes() == b"stored video bytes"
+
+
+def test_reconstructions_keep_serving_source_after_upload_metadata_is_deleted(
+    reconstruction_api: tuple[TestClient, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, building_id = reconstruction_api
+    monkeypatch.setattr(
+        splat_workflow,
+        "schedule_splat_generation_from_upload",
+        AsyncMock(side_effect=[uuid4(), uuid4()]),
+    )
+    upload_id, source = _seed_stored_upload(client)
+    rows = []
+    for _ in range(2):
+        response = client.post(
+            _from_upload_url(building_id, False),
+            json={"upload_id": str(upload_id)},
+        )
+        assert response.status_code == 202
+        rows.append(response.json())
+
+    assert client.delete(f"/uploads/{upload_id}").status_code == 204
+    assert client.get(f"/uploads/{upload_id}").status_code == 404
+    for row in rows:
+        response = client.get(_asset_url(UUID(row["id"]), "video"))
+        assert response.status_code == 200
+        assert response.content == source.read_bytes()
+
+    first_workspace = Path(rows[0]["workspace_directory"])
+    first_workspace.mkdir(parents=True)
+    (first_workspace / "splat.ply").write_bytes(b"generated splat")
+    _set_artifact_path(
+        client,
+        UUID(rows[0]["id"]),
+        "splat",
+        first_workspace / "splat.ply",
+        status=ReconstructionStatus.COMPLETED,
+    )
+    assert (
+        client.delete(
+            f"/buildings/{building_id}/reconstructions/{rows[0]['id']}"
+        ).status_code
+        == 204
+    )
+    assert not first_workspace.exists()
+    assert source.read_bytes() == b"stored video bytes"
+    assert client.get(_asset_url(UUID(rows[1]["id"]), "video")).status_code == 200
 
 
 def test_nested_reconstruction_routes_create_list_and_get(
@@ -1105,7 +1159,7 @@ def reconstruction_asset(
     artifact = request.param
     if artifact == "video":
         path = Path(created["input_video_path"])
-        path.parent.mkdir(parents=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"video bytes")
     else:
         splat_path = Path(created["workspace_directory"]) / "splat.ply"
@@ -1192,7 +1246,7 @@ def test_reconstruction_video_infers_media_type(
     created = _submit_reconstruction(client, building_id).json()
     reconstruction_id = UUID(created["id"])
     path = Path(created["input_video_path"]).with_suffix(suffix)
-    path.parent.mkdir(parents=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"video bytes")
     _set_artifact_path(client, reconstruction_id, "video", path)
 
@@ -1229,7 +1283,7 @@ def test_reconstruction_assets_support_byte_ranges(
         "outside",
         "sibling",
         "symlink",
-        "workspace_symlink",
+        "storage_root_symlink",
     ],
 )
 def test_reconstruction_assets_reject_unavailable_or_escaped_paths(
@@ -1258,11 +1312,15 @@ def test_reconstruction_assets_reject_unavailable_or_escaped_paths(
             path = tmp_path / reconstruction_id.hex / ".." / "outside" / target.name
         else:
             path = target
-    elif case == "workspace_symlink":
-        workspace = tmp_path / reconstruction_id.hex
+    elif case == "storage_root_symlink":
+        storage_root = (
+            config.DATA_PATH / "uploads"
+            if artifact == "video"
+            else tmp_path / reconstruction_id.hex
+        )
         moved = tmp_path / "moved"
-        workspace.rename(moved)
-        workspace.symlink_to(moved, target_is_directory=True)
+        storage_root.rename(moved)
+        storage_root.symlink_to(moved, target_is_directory=True)
     _set_artifact_path(client, reconstruction_id, artifact, path)
 
     response = client.get(_asset_url(reconstruction_id, artifact))
@@ -1906,6 +1964,8 @@ def test_delete_removes_files_and_row_for_completed_reconstruction(
             await service.delete(reconstruction.id)
 
             assert not root.exists()
+            assert reconstruction.input_video_path is not None
+            assert Path(reconstruction.input_video_path).read_bytes() == b"video bytes"
             assert await service.get(reconstruction.id, building_id=building.id) is None
             assert await service.list(building_id=building.id) == []
             assert cancel_calls == []
@@ -1948,6 +2008,8 @@ def test_delete_cancels_scitas_jobs_for_processing_reconstruction(
             await service.delete(reconstruction.id)
 
             assert not root.exists()
+            assert reconstruction.input_video_path is not None
+            assert Path(reconstruction.input_video_path).read_bytes() == b"video bytes"
             assert await service.get(reconstruction.id, building_id=building.id) is None
             if use_scitas:
                 assert cancelled_workspaces == [reconstruction.id.hex]
@@ -1984,6 +2046,8 @@ def test_delete_cancels_running_workflow_then_removes_files_and_row(
 
             assert cancel_calls == [WORKFLOW_ID]
             assert not root.exists()
+            assert reconstruction.input_video_path is not None
+            assert Path(reconstruction.input_video_path).read_bytes() == b"video bytes"
             assert await service.get(reconstruction.id, building_id=building.id) is None
 
     asyncio.run(run())
@@ -2016,6 +2080,8 @@ def test_delete_removes_files_and_row_for_failed_reconstruction(
 
             assert cancel_calls == []
             assert not root.exists()
+            assert reconstruction.input_video_path is not None
+            assert Path(reconstruction.input_video_path).read_bytes() == b"video bytes"
             assert await service.get(reconstruction.id, building_id=building.id) is None
 
     asyncio.run(run())
@@ -2049,6 +2115,8 @@ def test_delete_tolerates_missing_workflow_run(
 
             assert cancel_calls == [WORKFLOW_ID]
             assert not root.exists()
+            assert reconstruction.input_video_path is not None
+            assert Path(reconstruction.input_video_path).read_bytes() == b"video bytes"
             assert await service.get(reconstruction.id, building_id=building.id) is None
 
     asyncio.run(run())
