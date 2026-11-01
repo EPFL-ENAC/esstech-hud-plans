@@ -237,6 +237,7 @@ def test_workflow_runner_serves_both_deployments(
     serve.assert_called_once_with(
         reconstruction.to_deployment.return_value,
         cleanup.to_deployment.return_value,
+        pause_on_shutdown=False,
         limit=9,
     )
 
