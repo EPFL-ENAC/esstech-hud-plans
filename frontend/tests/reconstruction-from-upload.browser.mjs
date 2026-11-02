@@ -178,10 +178,21 @@ try {
                                 total: destination?.id === 'created' ? 2 : 1,
                             },
                         });
-                    if (/^\/buildings\/[^/]+$/.test(path))
+                    if (/^\/buildings\/[^/]+$/.test(path)) {
+                        const id = path.split('/').pop();
+                        if (
+                            id !== 'existing' &&
+                            !(id === 'created' && destination?.id === 'created')
+                        ) {
+                            return route.fulfill({
+                                status: 404,
+                                json: { detail: 'Building not found' },
+                            });
+                        }
                         return route.fulfill({
-                            json: building(path.split('/').pop(), destination?.name),
+                            json: building(id, id === 'created' ? destination.name : undefined),
                         });
+                    }
                     if (path.endsWith('/reconstructions'))
                         return route.fulfill({
                             json: {

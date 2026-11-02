@@ -1,5 +1,4 @@
-import type { Page } from 'src/lib/pagination';
-import { useQuery } from '@pinia/colada';
+import { useInfiniteQuery, useQuery } from '@pinia/colada';
 import {
     computed,
     onActivated,
@@ -19,31 +18,55 @@ import {
     isReconstructionProcessing,
     listBuildingLocations,
     listBuildings,
-    type BuildingListItem,
     type ReconstructionStatusFilter,
 } from 'src/lib/buildings';
 
 export const MY_BUILDINGS_PAGE_SIZE = 20;
 
-export function useAllBuildingsQuery() {
-    const subject = getAuthSubject();
+export const BUILDING_PICKER_PAGE_SIZE = 20;
 
-    return useQuery({
-        key: ['buildings', subject, 'all'],
-        enabled: () => subject !== null,
-        query: async () => {
-            const buildings: BuildingListItem[] = [];
-            const limit = 100;
-            let page: Page<BuildingListItem>;
-            do {
-                page = await listBuildings({ offset: buildings.length, limit });
-                buildings.push(...page.items);
-            } while (page.items.length > 0 && buildings.length < page.total);
-            return buildings;
+export function useBuildingPickerQuery() {
+    const subject = getAuthSubject();
+    const active = ref(true);
+    const visible = useDocumentVisibility();
+    const enabled = () =>
+        subject !== null && getAuthSubject() === subject && active.value && visible.value;
+
+    onActivated(() => {
+        active.value = true;
+    });
+    onDeactivated(() => {
+        active.value = false;
+    });
+
+    const query = useInfiniteQuery({
+        key: ['buildings', subject, 'picker'],
+        enabled,
+        initialPageParam: 0,
+        query: ({ pageParam }) =>
+            listBuildings({
+                offset: pageParam,
+                limit: BUILDING_PICKER_PAGE_SIZE,
+                sort_order: 'desc',
+            }),
+        getNextPageParam: (lastPage, _pages, offset) => {
+            const nextOffset = offset + lastPage.items.length;
+            return lastPage.items.length > 0 && nextOffset < lastPage.total
+                ? nextOffset
+                : undefined;
         },
         staleTime: 30_000,
         refetchOnWindowFocus: true,
     });
+
+    const loadNextPage: typeof query.loadNextPage = (options) => {
+        if (!enabled() || query.isLoading.value || !query.hasNextPage.value) {
+            return Promise.resolve();
+        }
+        return query.loadNextPage({ ...options, cancelRefetch: false });
+    };
+
+    return { ...query, loadNextPage };
 }
 
 export function useBuildingLocationsQuery() {

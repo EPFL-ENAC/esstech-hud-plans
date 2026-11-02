@@ -75,6 +75,21 @@ try {
                             },
                         });
                     }
+                    if (path.startsWith('/buildings/')) {
+                        return path === '/buildings/existing'
+                            ? route.fulfill({
+                                  json: {
+                                      id: 'existing',
+                                      name: 'Existing building',
+                                      latitude: null,
+                                      longitude: null,
+                                  },
+                              })
+                            : route.fulfill({
+                                  status: 404,
+                                  json: { detail: 'Building not found' },
+                              });
+                    }
                     if (path === '/buildings') {
                         return route.fulfill({
                             json: {

@@ -22,7 +22,7 @@ export function useUpdateBuildingMutation() {
 
             // Refresh dependent views without making a successful save depend on them.
             void Promise.all([
-                queryCache.invalidateQueries({ key: ['buildings', subject, 'all'] }),
+                queryCache.invalidateQueries({ key: ['buildings', subject, 'picker'] }),
                 queryCache.invalidateQueries({ key: ['buildings', subject, 'list'] }),
                 queryCache.invalidateQueries({ key: ['buildings', subject, 'locations'] }),
             ]).catch((error: unknown) => console.warn('Could not refresh building data', error));

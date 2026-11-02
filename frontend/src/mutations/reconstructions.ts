@@ -53,7 +53,7 @@ export function useSubmitReconstructionMutation() {
             // Mark cached data stale immediately, but don't let background refresh
             // failures change the outcome of a submission that already finished.
             void Promise.all([
-                queryCache.invalidateQueries({ key: ['buildings', subject, 'all'] }),
+                queryCache.invalidateQueries({ key: ['buildings', subject, 'picker'] }),
                 queryCache.invalidateQueries({ key: ['buildings', subject, 'list'] }),
                 queryCache.invalidateQueries({ key: ['buildings', subject, 'locations'] }),
                 queryCache.invalidateQueries({
