@@ -46,6 +46,7 @@ try {
             let hold = false;
             let release;
             const offsets = [];
+            const searches = [];
             const listPath =
                 kind === 'buildings' ? '/buildings' : '/buildings/selected/reconstructions';
             await context.route('**/pagination-api/**', async (route) => {
@@ -62,6 +63,7 @@ try {
                 assert.equal(url.searchParams.get('limit'), '20');
                 const offset = Number(url.searchParams.get('offset'));
                 offsets.push(offset);
+                searches.push(url.searchParams.get('search'));
                 if (hold)
                     await new Promise((resolve) => {
                         release = resolve;
@@ -80,7 +82,7 @@ try {
                             : {
                                   id,
                                   building_id: building.id,
-                                  status: 'running',
+                                  status: 'waiting_for_upload',
                                   progress: 0.5,
                                   settings: {},
                                   splat_path: null,
@@ -109,6 +111,12 @@ try {
             await rows.first().waitFor();
             assert.equal(await rows.count(), 20);
 
+            if (kind === 'reconstructions') {
+                const header = rows.first().locator('[aria-expanded]').first();
+                await header.click();
+                assert.equal(await header.getAttribute('aria-expanded'), 'true');
+            }
+
             hold = true;
             await navigation.getByRole('button', { name: '4', exact: true }).click();
             await waitFor(() => release !== undefined);
@@ -124,6 +132,32 @@ try {
                 .waitFor();
             assert.equal(await rows.count(), 5);
             assert.equal(offsets.at(-1), 60);
+
+            if (kind === 'buildings') {
+                await page.getByRole('textbox', { name: 'Search buildings' }).fill('Hall');
+                await page.clock.fastForward(300);
+                await waitFor(() => offsets.at(-1) === 0 && searches.at(-1) === 'Hall');
+                await section.getByText('Building 00000000', { exact: true }).waitFor();
+            } else {
+                await navigation.getByRole('button', { name: '1', exact: true }).click();
+                await section
+                    .getByText(/00000000/)
+                    .first()
+                    .waitFor();
+                assert.equal(
+                    await rows
+                        .first()
+                        .locator('[aria-expanded]')
+                        .first()
+                        .getAttribute('aria-expanded'),
+                    'false',
+                );
+            }
+            await navigation.getByRole('button', { name: '4', exact: true }).click();
+            await section
+                .getByText(kind === 'buildings' ? 'Building 00000060' : /00000060/)
+                .first()
+                .waitFor();
 
             total = 40;
             await page.clock.fastForward(5_000);
@@ -142,6 +176,7 @@ try {
             await page.clock.fastForward(5_000);
             await waitFor(() => offsets.at(-1) === 0);
             await rows.first().waitFor({ state: 'detached' });
+            assert.equal(await navigation.count(), 0);
             assert.deepEqual(errors, []);
             console.log(
                 `${kind}: exact page counts, loading bounds, polling, and shrinking totals passed`,

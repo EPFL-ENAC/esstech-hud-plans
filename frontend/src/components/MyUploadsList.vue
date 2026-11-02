@@ -89,29 +89,22 @@
             </template>
         </QueryStateSwitcher>
 
-        <nav
-            v-if="(data && data.items.length > 0) || offset > 0"
-            :aria-label="t('uploads.pagination')"
-            class="row justify-center q-pa-md"
-        >
-            <q-pagination
-                v-model="page"
-                :max="totalPages"
-                :max-pages="5"
-                :boundary-numbers="false"
-                :ellipses="false"
-                direction-links
-                color="primary"
-                :disable="isLoading"
-            />
-        </nav>
+        <ListPaginator
+            v-model:offset="offset"
+            :query="query"
+            :page-size="MY_UPLOADS_PAGE_SIZE"
+            :disabled="isLoading"
+            :ariaLabel="t('uploads.pagination')"
+            class="q-pa-md"
+        />
     </section>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import QueryStateSwitcher from 'src/components/QueryStateSwitcher.vue';
+import ListPaginator from 'src/components/ListPaginator.vue';
 import type { UploadStatus, UserUpload } from 'src/lib/uploads';
 import { formatFileSize } from 'src/lib/utils/formatFileSize';
 import { MY_UPLOADS_PAGE_SIZE, useMyUploadsQuery } from 'src/queries/uploads';
@@ -125,38 +118,9 @@ const props = defineProps<{
 }>();
 const { t, locale } = useI18n();
 const offset = ref(0);
-const {
-    data,
-    state,
-    asyncStatus,
-    isLoading: queryIsLoading,
-    refetch: refetchQuery,
-} = useMyUploadsQuery(offset);
-const manualRefreshing = ref(false);
-const isLoading = computed(
-    () => queryIsLoading.value && (data.value === undefined || manualRefreshing.value),
-);
+const query = useMyUploadsQuery(offset);
+const { data, state, refetch, isForegroundLoading: isLoading } = query;
 const uploads = computed(() => data.value?.items ?? []);
-// Keep the paginator's bounds while a different page is loading.
-const totalPages = computed<number>((previous = 1) =>
-    data.value === undefined || asyncStatus.value === 'loading'
-        ? previous
-        : Math.max(1, Math.ceil(data.value.total / MY_UPLOADS_PAGE_SIZE)),
-);
-watch([state, asyncStatus], ([result, status]) => {
-    if (result.status !== 'success' || status === 'loading') return;
-    const lastOffset = (totalPages.value - 1) * MY_UPLOADS_PAGE_SIZE;
-    if (offset.value > lastOffset) {
-        offset.value = lastOffset;
-        void refetch();
-    }
-});
-const page = computed({
-    get: () => offset.value / MY_UPLOADS_PAGE_SIZE + 1,
-    set: (value: number) => {
-        offset.value = (value - 1) * MY_UPLOADS_PAGE_SIZE;
-    },
-});
 const statusColors: Record<UploadStatus, string> = {
     pending: 'grey-7',
     uploaded: 'positive',
@@ -202,15 +166,6 @@ function uploadStatusLabel(upload: UserUpload): string {
             ? Math.min(1, Math.max(0, upload.uploaded_bytes / upload.size_bytes))
             : 0;
     return percentFormatter.value.format(ratio);
-}
-
-async function refetch() {
-    manualRefreshing.value = true;
-    try {
-        return await refetchQuery();
-    } finally {
-        manualRefreshing.value = false;
-    }
 }
 
 defineExpose({ refetch, isLoading });

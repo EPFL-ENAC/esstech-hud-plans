@@ -85,6 +85,19 @@ export function useMyUploadsQuery(offset: Ref<number>) {
         },
     });
 
+    const manualRefreshing = ref(false);
+    const isForegroundLoading = computed(
+        () => query.isLoading.value && (query.data.value === undefined || manualRefreshing.value),
+    );
+    const refetch: typeof query.refetch = async (throwOnError) => {
+        manualRefreshing.value = true;
+        try {
+            return await query.refetch(throwOnError);
+        } finally {
+            manualRefreshing.value = false;
+        }
+    };
+
     watch(
         [options, enabled],
         () => {
@@ -96,5 +109,5 @@ export function useMyUploadsQuery(offset: Ref<number>) {
         { immediate: true, flush: 'post' },
     );
 
-    return query;
+    return { ...query, isForegroundLoading, refetch };
 }

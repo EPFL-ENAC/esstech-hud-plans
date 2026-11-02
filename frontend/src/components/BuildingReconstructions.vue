@@ -208,27 +208,20 @@
                 </p>
             </template>
         </QueryStateSwitcher>
-        <nav
-            v-if="data || offset > 0"
-            :aria-label="t('reconstructions.pagination')"
-            class="row justify-center q-pt-md"
-        >
-            <q-pagination
-                v-model="page"
-                :max="totalPages"
-                :max-pages="5"
-                :boundary-numbers="false"
-                :ellipses="false"
-                direction-links
-                color="primary"
-                :disable="isLoading"
-            />
-        </nav>
+        <ListPaginator
+            v-model:offset="offset"
+            :query="query"
+            :page-size="RECONSTRUCTIONS_PAGE_SIZE"
+            :disabled="isLoading"
+            :ariaLabel="t('reconstructions.pagination')"
+            class="q-pt-md"
+        />
     </section>
 </template>
 
 <script setup lang="ts">
 import QueryStateSwitcher from 'src/components/QueryStateSwitcher.vue';
+import ListPaginator from 'src/components/ListPaginator.vue';
 import { computed, ref, toRef, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import ReconstructionStatusChip from 'src/components/ReconstructionStatusChip.vue';
@@ -244,36 +237,13 @@ const $q = useQuasar();
 const props = defineProps<{ buildingId: string }>();
 const offset = ref(0);
 const expandedId = ref<string | null>(null);
-const {
-    data,
-    state,
-    asyncStatus,
-    refetch,
-    isForegroundLoading: isLoading,
-} = useReconstructionsQuery(toRef(props, 'buildingId'), offset);
+watch(offset, () => {
+    expandedId.value = null;
+});
+const query = useReconstructionsQuery(toRef(props, 'buildingId'), offset);
+const { data, state, refetch, isForegroundLoading: isLoading } = query;
 const reconstructions = computed(() => data.value?.items ?? []);
 const reconstructionProcessingStore = useReconstructionProcessingStore();
-// Keep the paginator's bounds while a different page is loading.
-const totalPages = computed<number>((previous = 1) =>
-    data.value === undefined || asyncStatus.value === 'loading'
-        ? previous
-        : Math.max(1, Math.ceil(data.value.total / RECONSTRUCTIONS_PAGE_SIZE)),
-);
-watch([state, asyncStatus], ([result, status]) => {
-    if (result.status !== 'success' || status === 'loading') return;
-    const lastOffset = (totalPages.value - 1) * RECONSTRUCTIONS_PAGE_SIZE;
-    if (offset.value > lastOffset) {
-        offset.value = lastOffset;
-        void refetch();
-    }
-});
-const page = computed({
-    get: () => offset.value / RECONSTRUCTIONS_PAGE_SIZE + 1,
-    set: (value: number) => {
-        expandedId.value = null;
-        offset.value = (value - 1) * RECONSTRUCTIONS_PAGE_SIZE;
-    },
-});
 const dateFormatter = computed(
     () =>
         new Intl.DateTimeFormat(locale.value, {

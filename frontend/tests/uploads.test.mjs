@@ -285,6 +285,37 @@ test('an unauthenticated query does not start a request', async (t) => {
     assert.equal(f.requests.length, 0);
 });
 
+test('upload lists distinguish foreground requests from background polling', async (t) => {
+    t.mock.method(console, 'error', () => {});
+    const f = await fixture(t);
+    const query = f.query();
+    const pending = [{ ...rows('list')[0], status: 'pending' }];
+    assert.equal(query.isForegroundLoading.value, true);
+    respondPage(f.requests[0], pending);
+    await nextTurn();
+    assert.equal(query.isForegroundLoading.value, false);
+
+    await f.advance(5_000);
+    assert.equal(query.isLoading.value, true);
+    assert.equal(query.isForegroundLoading.value, false);
+    respondPage(f.requests[1], pending);
+    await nextTurn();
+
+    const refresh = query.refetch(true);
+    assert.equal(query.isForegroundLoading.value, true);
+    const failure = assert.rejects(refresh, (error) => error.status === 503);
+    respond(f.requests[2], { detail: 'Unavailable' }, 503);
+    await failure;
+    assert.equal(query.isForegroundLoading.value, false);
+
+    await f.advance(5_000);
+    assert.equal(query.isLoading.value, true);
+    assert.equal(query.isForegroundLoading.value, false);
+    respondPage(f.requests[3], rows('completed'));
+    await nextTurn();
+    assert.equal(query.isForegroundLoading.value, false);
+});
+
 test('refresh failures preserve cached rows and retry can recover', async (t) => {
     const f = await fixture(t);
     const query = f.query();
