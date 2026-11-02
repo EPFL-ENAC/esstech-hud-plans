@@ -131,8 +131,14 @@ function page(kind, status = 'running', id = 'item') {
     return { items: [item], total: 1 };
 }
 
-const processingStatuses = ['waiting_for_upload', 'preparing', 'scheduled', 'running'];
-const terminalStatuses = ['cancelling', 'completed', 'failed', 'cancelled', 'crashed'];
+const processingStatuses = [
+    'waiting_for_upload',
+    'preparing',
+    'scheduled',
+    'running',
+    'cancelling',
+];
+const terminalStatuses = ['completed', 'failed', 'cancelled', 'crashed'];
 
 for (const kind of ['buildings', 'reconstructions']) {
     for (const status of processingStatuses) {
@@ -152,7 +158,7 @@ for (const kind of ['buildings', 'reconstructions']) {
             assert.equal(f.requests[1].options.sort_order, 'desc');
             await f.advance(20_000);
             assert.equal(f.requests.length, 2, 'Slow polls must not overlap');
-            const completed = page(kind, 'completed');
+            const completed = page(kind, status === 'cancelling' ? 'cancelled' : 'completed');
             f.requests[1].gate.resolve(completed);
             await nextTurn();
             await f.advance(20_000);

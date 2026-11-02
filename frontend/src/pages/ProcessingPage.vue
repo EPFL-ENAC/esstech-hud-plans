@@ -25,13 +25,14 @@
             <h2 class="text-h6 text-weight-bold q-mb-sm q-mt-lg">{{ chipMessage }}</h2>
 
             <q-btn
-                v-if="!isFailureState && !isCompletedState && !isCancelling"
+                v-if="!isFailureState && !isCompletedState"
                 :label="t('processing.cancelButton')"
                 outline
                 color="negative"
                 class="full-width q-mb-md"
                 unelevated
                 no-caps
+                :loading="isCancelPending"
                 @click="confirmCancel"
             />
 
@@ -85,13 +86,7 @@ const reconstruction = computed(() => {
     const requested = requestedReconstructionId.value
         ? list.find(({ id }) => id === requestedReconstructionId.value)
         : undefined;
-    return (
-        requested ??
-        list.find(
-            (item) => isReconstructionProcessing(item.status) || item.status === 'cancelling',
-        ) ??
-        list[0]
-    );
+    return requested ?? list.find((item) => isReconstructionProcessing(item.status)) ?? list[0];
 });
 
 const isFailureState = computed(
@@ -161,13 +156,20 @@ function confirmCancel() {
 
 async function confirmCancelProcessing() {
     const reconstructionId = reconstruction.value?.id;
-    if (!reconstructionId || isCancelling.value || isCancelPending.value) return;
+    if (!reconstructionId || isCancelPending.value) return;
 
     try {
-        await cancelReconstruction({ buildingId: buildingId.value, reconstructionId });
+        const result = await cancelReconstruction({
+            buildingId: buildingId.value,
+            reconstructionId,
+        });
         $q.notify({
             type: 'positive',
-            message: t('processing.cancelled'),
+            message: t(
+                result.status === 'cancelling'
+                    ? 'processing.cancelRequested'
+                    : 'processing.cancelled',
+            ),
             position: 'top',
         });
         void router.replace(`/building/${buildingId.value}`);

@@ -261,7 +261,7 @@ class ReconstructionService:
             )
 
     async def cancel(self, reconstruction_id: UUID) -> Reconstruction:
-        """Serialize cancellation with registration and worker lifecycle updates."""
+        """Publish cancellation before contacting external workers."""
 
         try:
             reconstruction = await self._get_for_update(reconstruction_id)
@@ -273,22 +273,33 @@ class ReconstructionService:
                 ReconstructionStatus.PREPARING,
                 ReconstructionStatus.SCHEDULED,
                 ReconstructionStatus.RUNNING,
+                ReconstructionStatus.CANCELLING,
             }:
                 raise ReconstructionConflictError(
                     "Reconstruction is not processing "
                     f"(current status: {reconstruction.status})"
                 )
 
-            await self._cancel_external_work(reconstruction)
-            reconstruction.mark_terminal_in_memory(
-                ReconstructionStatus.CANCELLED,
-                "Cancellation requested",
-            )
+            if (
+                reconstruction.status == ReconstructionStatus.WAITING_FOR_UPLOAD
+                and reconstruction.prefect_workflow_id is None
+            ):
+                reconstruction.mark_terminal_in_memory(
+                    ReconstructionStatus.CANCELLED,
+                    "Cancellation requested",
+                )
+            elif reconstruction.status != ReconstructionStatus.CANCELLING:
+                reconstruction.status = ReconstructionStatus.CANCELLING
+                reconstruction.error_message = "Cancellation requested"
             reconstruction.updated_at = utc_now()
             self._session.add(reconstruction)
-            await self._session.flush()
-            await self._session.refresh(reconstruction)
             await self._session.commit()
+
+            # Release the row lock so reads see the request and the workflow's
+            # cancellation hook can persist its final state independently.
+            if reconstruction.status == ReconstructionStatus.CANCELLING:
+                await self._cancel_external_work(reconstruction)
+            await self._session.refresh(reconstruction)
             return reconstruction
         except BaseException:
             await self._session.rollback()
@@ -303,6 +314,7 @@ class ReconstructionService:
                 ReconstructionStatus.PREPARING,
                 ReconstructionStatus.SCHEDULED,
                 ReconstructionStatus.RUNNING,
+                ReconstructionStatus.CANCELLING,
             }
             and reconstruction.prefect_workflow_id is not None
         ):

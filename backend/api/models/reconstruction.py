@@ -32,6 +32,7 @@ class ReconstructionStatus(StrEnum):
     PREPARING = "preparing"
     SCHEDULED = "scheduled"
     RUNNING = "running"
+    CANCELLING = "cancelling"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -105,7 +106,7 @@ class Reconstruction(SQLModel, table=True):  # type: ignore[call-arg]
         ),
         CheckConstraint(
             "status IN ("
-            "'waiting_for_upload', 'preparing', 'scheduled', 'running', 'completed', "
+            "'waiting_for_upload', 'preparing', 'scheduled', 'running', 'cancelling', 'completed', "
             "'failed', 'cancelled', 'crashed'"
             ")",
             name="ck_reconstructions_status",
@@ -180,9 +181,10 @@ class Reconstruction(SQLModel, table=True):  # type: ignore[call-arg]
             self.status = ReconstructionStatus.SCHEDULED
 
     def mark_running_in_memory(self, prefect_workflow_id: UUID) -> bool:
-        """Apply the running transition unless the row is already final."""
+        """Apply the running transition unless cancellation or completion won."""
 
         if self.status in {
+            ReconstructionStatus.CANCELLING,
             ReconstructionStatus.COMPLETED,
             ReconstructionStatus.CANCELLED,
             ReconstructionStatus.CRASHED,
@@ -205,6 +207,7 @@ class Reconstruction(SQLModel, table=True):  # type: ignore[call-arg]
         if not 0 <= progress <= 1:
             raise ValueError("progress must be between 0 and 1")
         if self.status in {
+            ReconstructionStatus.CANCELLING,
             ReconstructionStatus.COMPLETED,
             ReconstructionStatus.FAILED,
             ReconstructionStatus.CANCELLED,
@@ -227,6 +230,7 @@ class Reconstruction(SQLModel, table=True):  # type: ignore[call-arg]
         """Apply successful completion and its final artifacts."""
 
         if self.status in {
+            ReconstructionStatus.CANCELLING,
             ReconstructionStatus.CANCELLED,
             ReconstructionStatus.COMPLETED,
         }:
@@ -253,7 +257,10 @@ class Reconstruction(SQLModel, table=True):  # type: ignore[call-arg]
         if self.status in {
             ReconstructionStatus.COMPLETED,
             ReconstructionStatus.CANCELLED,
-        }:
+        } or (
+            self.status == ReconstructionStatus.CANCELLING
+            and status != ReconstructionStatus.CANCELLED
+        ):
             return False
 
         self.status = status

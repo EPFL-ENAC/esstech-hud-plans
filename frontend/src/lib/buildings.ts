@@ -87,7 +87,8 @@ export function isReconstructionProcessing(status: ReconstructionStatus | undefi
         status === 'waiting_for_upload' ||
         status === 'preparing' ||
         status === 'scheduled' ||
-        status === 'running'
+        status === 'running' ||
+        status === 'cancelling'
     );
 }
 

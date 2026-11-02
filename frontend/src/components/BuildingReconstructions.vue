@@ -304,11 +304,7 @@ function hasSplat(reconstruction: Reconstruction): boolean {
     return reconstruction.status === 'completed' && reconstruction.splat_path !== null;
 }
 function showProcessingDetails(reconstruction: Reconstruction): boolean {
-    return (
-        isReconstructionProcessing(reconstruction.status) ||
-        reconstruction.status === 'cancelling' ||
-        reconstruction.status === 'failed'
-    );
+    return isReconstructionProcessing(reconstruction.status) || reconstruction.status === 'failed';
 }
 watch(reconstructions, (rows) => {
     if (!rows.some(({ id }) => id === expandedId.value)) expandedId.value = null;

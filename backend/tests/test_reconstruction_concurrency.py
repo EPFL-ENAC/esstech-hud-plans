@@ -10,6 +10,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
@@ -205,12 +206,110 @@ def test_registration_serializes_other_operations(
                     assert (
                         row.status
                         == {
-                            "cancel": ReconstructionStatus.CANCELLED,
+                            "cancel": ReconstructionStatus.CANCELLING,
                             "running": ReconstructionStatus.RUNNING,
                             "complete": ReconstructionStatus.SCHEDULED,
                         }[action]
                     )
             assert cancel.await_count == int(action in {"cancel", "delete"})
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("outcome", ["pending", "hook", "failure"])
+def test_cancellation_is_committed_and_unlocks_before_external_work(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    outcome: str,
+) -> None:
+    async def run() -> None:
+        async with database(tmp_path, monkeypatch) as state:
+            async with AsyncSession(state.engine, expire_on_commit=False) as session:
+                row = await session.get(Reconstruction, state.reconstruction_id)
+                row.status = ReconstructionStatus.RUNNING
+                row.prefect_workflow_id = uuid4()
+                row.progress = 0.4
+                await session.commit()
+                entered = asyncio.Event()
+                release = asyncio.Event()
+
+                @asynccontextmanager
+                async def hook_service():
+                    async with AsyncSession(
+                        state.engine, expire_on_commit=False
+                    ) as hook_session:
+                        yield ReconstructionService(hook_session)
+
+                async def cancel_workflow(workflow_id: UUID) -> None:
+                    entered.set()
+                    await release.wait()
+                    if outcome == "failure":
+                        raise OSError("Prefect unavailable")
+                    if outcome == "hook":
+                        await splat_generation._reconstruction_cancelled_hook(
+                            None,
+                            SimpleNamespace(
+                                id=workflow_id,
+                                parameters={"reconstruction_id": str(row.id)},
+                            ),
+                            SimpleNamespace(message="Cancelled", name="Cancelling"),
+                        )
+
+                monkeypatch.setattr(common, "cancel_workflow", cancel_workflow)
+                monkeypatch.setattr(
+                    splat_generation, "_reconstruction_service", hook_service
+                )
+                cancelling = asyncio.create_task(
+                    ReconstructionService(session).cancel(row.id)
+                )
+                try:
+                    async with asyncio.timeout(5):
+                        await entered.wait()
+                        async with AsyncSession(
+                            state.engine, expire_on_commit=False
+                        ) as checking:
+                            visible = await checking.get(
+                                Reconstruction, row.id, with_for_update={"nowait": True}
+                            )
+                            assert visible.status == ReconstructionStatus.CANCELLING
+                            await checking.commit()
+                            other_service = ReconstructionService(checking)
+                            await other_service.mark_running(
+                                row.id, prefect_workflow_id=uuid4()
+                            )
+                            await other_service.record_progress(row.id, progress=0.9)
+                            await other_service.mark_completed(
+                                row.id,
+                                artifacts=ReconstructionArtifactUpdate(
+                                    splat_path="/late/splat.ply"
+                                ),
+                            )
+                            await other_service.mark_failed(
+                                row.id, error_message="Late failure"
+                            )
+                            await other_service.mark_crashed(row.id)
+                            assert visible.status == ReconstructionStatus.CANCELLING
+                            assert visible.progress == 0.4
+                            assert visible.splat_path is None
+                finally:
+                    release.set()
+                    if outcome == "failure":
+                        with pytest.raises(OSError, match="Prefect unavailable"):
+                            await asyncio.wait_for(cancelling, 5)
+                    else:
+                        result = await asyncio.wait_for(cancelling, 5)
+                        assert result.status == (
+                            ReconstructionStatus.CANCELLED
+                            if outcome == "hook"
+                            else ReconstructionStatus.CANCELLING
+                        )
+                async with AsyncSession(state.engine) as checking:
+                    saved = await checking.get(Reconstruction, row.id)
+                    assert saved.status == (
+                        ReconstructionStatus.CANCELLED
+                        if outcome == "hook"
+                        else ReconstructionStatus.CANCELLING
+                    )
 
     asyncio.run(run())
 

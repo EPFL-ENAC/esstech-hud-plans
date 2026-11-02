@@ -48,11 +48,7 @@ const statuses = computed(
         >,
 );
 
-const isProcessing = computed(
-    () =>
-        isReconstructionProcessing(props.reconstruction?.status) ||
-        props.reconstruction?.status === 'cancelling',
-);
+const isProcessing = computed(() => isReconstructionProcessing(props.reconstruction?.status));
 
 const presentation = computed(() =>
     props.reconstruction

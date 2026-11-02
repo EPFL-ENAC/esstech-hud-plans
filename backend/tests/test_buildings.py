@@ -561,6 +561,7 @@ def test_latest_attempt_ignores_status_and_older_updates(
                 ReconstructionStatus.PREPARING,
                 ReconstructionStatus.SCHEDULED,
                 ReconstructionStatus.RUNNING,
+                ReconstructionStatus.CANCELLING,
             }
             assert (
                 await buildings.list(
@@ -987,6 +988,7 @@ def test_building_routes_return_reconstruction_summary(
         ReconstructionStatus.PREPARING,
         ReconstructionStatus.SCHEDULED,
         ReconstructionStatus.RUNNING,
+        ReconstructionStatus.CANCELLING,
     }
     for filter_value, matches in (("processing", active), ("idle", not active)):
         filtered = api_client.get(

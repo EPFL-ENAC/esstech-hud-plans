@@ -13,7 +13,7 @@ from alembic.operations import Operations
 from alembic.script import ScriptDirectory
 from sqlalchemy import Column, Integer, MetaData, Table, create_engine, inspect, text
 from sqlalchemy.engine import Connection
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 MIGRATIONS_DIRECTORY = Path(__file__).parents[1] / "migrations" / "versions"
@@ -47,6 +47,98 @@ def test_pending_upload_migration_generates_reversible_postgres_constraints() ->
     assert "waiting_for_upload" in sql
     assert "DROP CONSTRAINT fk_reconstructions_upload_id" in sql
     assert "DROP COLUMN upload_id" in sql
+
+
+def test_cancelling_migration_generates_constraint_and_downgrade_guard() -> None:
+    revision = _load_revision(
+        "2026_11_02_1538-5e64de379695_persist_reconstruction_cancelling_status.py"
+    )
+    output = StringIO()
+    context = MigrationContext.configure(
+        dialect_name="postgresql", opts={"as_sql": True, "output_buffer": output}
+    )
+    with Operations.context(context):
+        revision.upgrade()
+        revision.downgrade()
+    sql = output.getvalue()
+    assert sql.count("DROP CONSTRAINT ck_reconstructions_status") == 2
+    assert sql.count("ADD CONSTRAINT ck_reconstructions_status") == 2
+    assert "'cancelling', 'completed'" in sql
+    assert "LOCK TABLE reconstructions IN ACCESS EXCLUSIVE MODE" in sql
+    assert "finish cancellation first" in sql
+
+
+def test_cancelling_migration_requires_completion_before_downgrade() -> None:
+    database_url = os.environ.get("HUD_TEST_MIGRATION_DB_URL")
+    if database_url is None:
+        pytest.skip("Set HUD_TEST_MIGRATION_DB_URL to a PostgreSQL asyncpg URL")
+    revision = _load_revision(
+        "2026_11_02_1538-5e64de379695_persist_reconstruction_cancelling_status.py"
+    )
+
+    def check(connection: Connection) -> None:
+        schema = f"migration_test_{uuid4().hex}"
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+        connection.execute(text(f'SET LOCAL search_path TO "{schema}"'))
+        connection.execute(
+            text(
+                "CREATE TABLE reconstructions (id INTEGER PRIMARY KEY, status VARCHAR NOT NULL, "
+                "CONSTRAINT ck_reconstructions_status CHECK (status IN "
+                "('waiting_for_upload', 'preparing', 'scheduled', 'running', "
+                "'completed', 'failed', 'cancelled', 'crashed')))"
+            )
+        )
+        connection.execute(text("INSERT INTO reconstructions VALUES (1, 'running')"))
+        context = MigrationContext.configure(connection)
+        with Operations.context(context):
+            revision.upgrade()
+            connection.execute(
+                text("INSERT INTO reconstructions VALUES (2, 'cancelling')")
+            )
+            with pytest.raises(DBAPIError, match="finish cancellation first"):
+                with connection.begin_nested():
+                    revision.downgrade()
+            assert list(
+                connection.execute(
+                    text("SELECT status FROM reconstructions ORDER BY id")
+                ).scalars()
+            ) == ["running", "cancelling"]
+            connection.execute(
+                text("UPDATE reconstructions SET status = 'cancelled' WHERE id = 2")
+            )
+            revision.downgrade()
+            with pytest.raises(IntegrityError, match="ck_reconstructions_status"):
+                with connection.begin_nested():
+                    connection.execute(
+                        text(
+                            "UPDATE reconstructions SET status = 'cancelling' WHERE id = 2"
+                        )
+                    )
+            revision.upgrade()
+            connection.execute(
+                text("UPDATE reconstructions SET status = 'cancelling' WHERE id = 2")
+            )
+            with pytest.raises(IntegrityError, match="ck_reconstructions_status"):
+                with connection.begin_nested():
+                    connection.execute(
+                        text(
+                            "UPDATE reconstructions SET status = 'invalid' WHERE id = 2"
+                        )
+                    )
+
+    async def run() -> None:
+        engine = create_async_engine(database_url)
+        try:
+            async with engine.connect() as connection:
+                transaction = await connection.begin()
+                try:
+                    await connection.run_sync(check)
+                finally:
+                    await transaction.rollback()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
 
 
 @pytest.mark.parametrize("has_upload", [True, False])

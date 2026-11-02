@@ -393,6 +393,7 @@ export default {
         cancelConfirmation:
             '¿Seguro que quieres cancelar el procesamiento de {name}? Se eliminará el vídeo subido.',
         cancelled: 'Procesamiento cancelado.',
+        cancelRequested: 'Cancelación solicitada.',
         cancelFailed: 'No se pudo cancelar el procesamiento. Inténtalo de nuevo.',
     },
     plans: {

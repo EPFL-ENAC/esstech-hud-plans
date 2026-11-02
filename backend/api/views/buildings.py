@@ -183,7 +183,7 @@ async def list_buildings(
     reconstruction_status: Annotated[
         ReconstructionStatusFilter | None,
         Query(
-            description="Filter by whether any attempt is preparing, scheduled, or running."
+            description="Filter by whether any attempt is waiting for upload, preparing, scheduled, running, or cancelling."
         ),
     ] = None,
     search: Annotated[

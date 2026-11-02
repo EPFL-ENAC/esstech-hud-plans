@@ -48,6 +48,7 @@ from api.models.workflows import FramePickerSettings, SplatGenerationWorkflowSet
 from api.services.auth import require_user
 from api.services.buildings import BuildingService
 from api.services.reconstructions import (
+    ReconstructionConflictError,
     ReconstructionService,
     SortOrder,
 )
@@ -309,9 +310,10 @@ def test_accepted_cancellation_ignores_late_lifecycle_updates(
             cancel = AsyncMock()
             monkeypatch.setattr(workflow_common, "cancel_workflow", cancel)
             monkeypatch.setattr(config, "USE_SCITAS", False)
-            cancelled = await service.cancel(row.id)
-            expected = ReconstructionRead.model_validate(cancelled).model_dump()
+            cancelling = await service.cancel(row.id)
+            assert cancelling.status == ReconstructionStatus.CANCELLING
             await service.cancel(row.id)
+            expected = ReconstructionRead.model_validate(cancelling).model_dump()
             await service.mark_running(row.id, prefect_workflow_id=WORKFLOW_ID)
             await service.record_progress(
                 row.id,
@@ -326,10 +328,47 @@ def test_accepted_cancellation_ignores_late_lifecycle_updates(
             )
             await service.mark_failed(row.id, error_message="Late failure")
             await service.mark_crashed(row.id, error_message="Late crash")
-            await service.mark_cancelled(row.id, error_message="Late hook")
             await session.refresh(row)
             assert ReconstructionRead.model_validate(row).model_dump() == expected
-            cancel.assert_awaited_once_with(WORKFLOW_ID)
+            assert cancel.await_count == 2
+            cancelled = await service.mark_cancelled(row.id, error_message="Cancelled")
+            assert cancelled.status == ReconstructionStatus.CANCELLED
+            await service.cancel(row.id)
+            assert cancel.await_count == 2
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        ReconstructionStatus.COMPLETED,
+        ReconstructionStatus.FAILED,
+        ReconstructionStatus.CRASHED,
+    ],
+)
+def test_cancellation_rejects_other_terminal_states(
+    monkeypatch: pytest.MonkeyPatch,
+    status: ReconstructionStatus,
+) -> None:
+    async def run() -> None:
+        async with reconstruction_service() as (service, session, _, building, _):
+            row = Reconstruction(
+                building_id=building.id,
+                settings={},
+                status=status,
+                prefect_workflow_id=WORKFLOW_ID,
+            )
+            session.add(row)
+            await session.commit()
+            reconstruction_id = row.id
+            cancel = AsyncMock()
+            monkeypatch.setattr(workflow_common, "cancel_workflow", cancel)
+            with pytest.raises(ReconstructionConflictError, match="not processing"):
+                await service.cancel(reconstruction_id)
+            await session.refresh(row)
+            assert row.status == status
+            cancel.assert_not_awaited()
 
     asyncio.run(run())
 
@@ -779,7 +818,7 @@ def test_cancel_refreshes_when_completion_claimed_the_waiting_row(
         f"/buildings/{building_id}/reconstructions/{row['id']}/cancel"
     )
     assert response.status_code == 202
-    assert response.json()["status"] == "cancelled"
+    assert response.json()["status"] == "cancelling"
     assert cancelled_workflows == [WORKFLOW_ID]
 
 
@@ -1714,11 +1753,67 @@ def test_nested_reconstruction_cancel_requests_slurm_job_cancellation(
     )
 
     assert response.status_code == 202
-    assert response.json()["status"] == "cancelled"
+    assert response.json()["status"] == "cancelling"
     if use_scitas:
         assert cancelled_workspaces == [reconstruction_id.hex]
     else:
         assert cancelled_workspaces == []
+
+
+def test_cancellation_failure_keeps_persisted_status_and_can_be_retried(
+    reconstruction_api: tuple[TestClient, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, building_id = reconstruction_api
+    reconstruction_id = _submit_reconstruction(client, building_id).json()["id"]
+    url = f"/buildings/{building_id}/reconstructions/{reconstruction_id}"
+    cancel = AsyncMock(side_effect=OSError("Prefect unavailable"))
+    monkeypatch.setattr(workflow_common, "cancel_workflow", cancel)
+
+    assert client.post(f"{url}/cancel").status_code == 503
+    assert client.get(url).json()["status"] == "cancelling"
+    cancel.side_effect = None
+    retried = client.post(f"{url}/cancel")
+    assert retried.status_code == 202
+    assert retried.json()["status"] == "cancelling"
+    assert cancel.await_count == 2
+
+
+def test_cancellation_returns_the_state_written_by_an_early_workflow_hook(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def run() -> None:
+        async with reconstruction_service() as (service, session, engine, building, _):
+            row = Reconstruction(
+                building_id=building.id,
+                settings={},
+                status=ReconstructionStatus.RUNNING,
+                prefect_workflow_id=WORKFLOW_ID,
+            )
+            session.add(row)
+            await session.commit()
+
+            @asynccontextmanager
+            async def hook_service():
+                async with AsyncSession(engine, expire_on_commit=False) as hook_session:
+                    yield ReconstructionService(hook_session)
+
+            async def cancel_workflow(workflow_id: UUID) -> None:
+                await splat_workflow._reconstruction_cancelled_hook(
+                    None,
+                    SimpleNamespace(
+                        id=workflow_id, parameters={"reconstruction_id": str(row.id)}
+                    ),
+                    SimpleNamespace(message="Cancelled", name="Cancelling"),
+                )
+
+            monkeypatch.setattr(splat_workflow, "_reconstruction_service", hook_service)
+            monkeypatch.setattr(workflow_common, "cancel_workflow", cancel_workflow)
+            monkeypatch.setattr(config, "USE_SCITAS", False)
+            result = await service.cancel(row.id)
+            assert result.status == ReconstructionStatus.CANCELLED
+
+    asyncio.run(run())
 
 
 def test_nested_reconstruction_routes_map_database_failures_to_503(
@@ -2013,10 +2108,14 @@ def test_delete_removes_files_and_row_for_completed_reconstruction(
 
 
 @pytest.mark.parametrize("use_scitas", [False, True])
+@pytest.mark.parametrize(
+    "status", [ReconstructionStatus.RUNNING, ReconstructionStatus.CANCELLING]
+)
 def test_delete_cancels_scitas_jobs_for_processing_reconstruction(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     use_scitas: bool,
+    status: ReconstructionStatus,
 ) -> None:
     monkeypatch.setattr(config, "USE_SCITAS", use_scitas)
     monkeypatch.setattr(workflow_common, "WORKFLOW_DATA_DIRECTORY", tmp_path)
@@ -2038,7 +2137,7 @@ def test_delete_cancels_scitas_jobs_for_processing_reconstruction(
             reconstruction, root = _stored_reconstruction(
                 tmp_path,
                 building.id,
-                status=ReconstructionStatus.RUNNING,
+                status=status,
                 workflow_id=WORKFLOW_ID,
             )
             service._session.add(reconstruction)

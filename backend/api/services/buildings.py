@@ -28,6 +28,7 @@ ACTIVE_RECONSTRUCTION_STATUSES = (
     ReconstructionStatus.PREPARING,
     ReconstructionStatus.SCHEDULED,
     ReconstructionStatus.RUNNING,
+    ReconstructionStatus.CANCELLING,
 )
 
 
