@@ -69,20 +69,41 @@ try {
                     }
                     if (path === '/uploads') {
                         return route.fulfill({
-                            json: expectedToken === token ? rows.toReversed() : [],
+                            json: {
+                                items: expectedToken === token ? rows.toReversed() : [],
+                                total: expectedToken === token ? rows.length : 0,
+                            },
                         });
+                    }
+                    if (path.startsWith('/buildings/')) {
+                        return path === '/buildings/existing'
+                            ? route.fulfill({
+                                  json: {
+                                      id: 'existing',
+                                      name: 'Existing building',
+                                      latitude: null,
+                                      longitude: null,
+                                  },
+                              })
+                            : route.fulfill({
+                                  status: 404,
+                                  json: { detail: 'Building not found' },
+                              });
                     }
                     if (path === '/buildings') {
                         return route.fulfill({
-                            json: [
-                                {
-                                    id: 'existing',
-                                    name: 'Existing building',
-                                    latitude: null,
-                                    longitude: null,
-                                    latest_reconstruction: null,
-                                },
-                            ],
+                            json: {
+                                items: [
+                                    {
+                                        id: 'existing',
+                                        name: 'Existing building',
+                                        latitude: null,
+                                        longitude: null,
+                                        latest_reconstruction: null,
+                                    },
+                                ],
+                                total: 1,
+                            },
                         });
                     }
                     assert.ok(path.startsWith('/tus/files/'), `Unexpected request: ${path}`);

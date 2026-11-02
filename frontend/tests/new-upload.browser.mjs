@@ -106,7 +106,10 @@ try {
                             return route.fulfill({ response });
                         }
                         return route.fulfill({
-                            json: rows.map(({ offset, ...row }) => row).toReversed(),
+                            json: {
+                                items: rows.map(({ offset, ...row }) => row).toReversed(),
+                                total: rows.length,
+                            },
                         });
                     }
                     assert.ok(path.startsWith('/tus/files/'));

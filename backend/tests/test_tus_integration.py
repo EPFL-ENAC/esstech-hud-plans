@@ -379,7 +379,7 @@ def test_real_tus_reports_progress_before_patch_finishes(
             assert not pending.done()
             assert record["status"] == "pending"
             assert record["uploaded_at"] is None
-            listed = client.get("/uploads").json()
+            listed = client.get("/uploads").json()["items"]
             assert (
                 next(row for row in listed if row["id"] == record["id"])[
                     "uploaded_bytes"
@@ -441,7 +441,7 @@ def test_real_tus_upload_is_reusable_for_both_reconstruction_routes(
     assert not (real_tus.upload_directory / upload_id).exists()
     assert client.delete(f"/uploads/{upload_id}").status_code == 204
     assert source.read_bytes() == b"video bytes"
-    rows = client.get(f"/buildings/{building_id}/reconstructions").json()
+    rows = client.get(f"/buildings/{building_id}/reconstructions").json()["items"]
     assert len(rows) == 2
     assert all(row["upload_id"] is None for row in rows)
     for row in rows:
@@ -596,7 +596,7 @@ def test_concurrent_hook_delivery_preserves_one_row_and_timestamp(
     assert all(
         response.status_code == 200 for response in asyncio.run(deliver([payload] * 5))
     )
-    assert len(real_tus.client.get("/uploads").json()) == 1
+    assert len(real_tus.client.get("/uploads").json()["items"]) == 1
     scheduled: list[dict[str, Any]] = []
 
     async def schedule(**kwargs: Any) -> UUID:

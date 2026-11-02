@@ -20,6 +20,7 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+import api.views.buildings as building_views
 from api.config import config
 from api.db import get_session
 from api.models.building import (
@@ -30,6 +31,7 @@ from api.models.building import (
     BuildingRead,
     BuildingUpdate,
 )
+from api.models.pagination import Page
 from api.models.reconstruction import (
     Reconstruction,
     ReconstructionStatus,
@@ -42,7 +44,6 @@ from api.services.buildings import (
     ReconstructionStatusFilter,
     SortOrder,
 )
-from api.views import buildings as building_views
 
 USER_ID = UUID("00000000-0000-0000-0000-000000000001")
 OTHER_USER_ID = UUID("00000000-0000-0000-0000-000000000002")
@@ -216,15 +217,17 @@ def test_building_service_crud_and_ownership() -> None:
 
             assert await buildings.get(first.id, user_id=USER_ID) == first
             assert await buildings.get(first.id, user_id=OTHER_USER_ID) is None
-            listed = await buildings.list(user_id=USER_ID)
+            listed = (await buildings.list(user_id=USER_ID)).items
             assert [item.id for item in listed] == [duplicate_name.id, first.id]
             assert all(item.latest_reconstruction is None for item in listed)
             assert [
-                item.id for item in await buildings.list(user_id=OTHER_USER_ID)
+                item.id for item in (await buildings.list(user_id=OTHER_USER_ID)).items
             ] == [other_user_building.id]
             assert [
                 item.id
-                for item in await buildings.list(user_id=USER_ID, offset=1, limit=1)
+                for item in (
+                    await buildings.list(user_id=USER_ID, offset=1, limit=1)
+                ).items
             ] == [first.id]
 
             original_updated_at = first.updated_at
@@ -301,20 +304,24 @@ def test_building_list_orders_before_pagination(sort_order: SortOrder) -> None:
             expected = [oldest, tied_first, tied_second]
             if sort_order == "desc":
                 expected.reverse()
-            listed = await buildings.list(
-                user_id=USER_ID,
-                sort_order=sort_order,
-            )
+            listed = (
+                await buildings.list(
+                    user_id=USER_ID,
+                    sort_order=sort_order,
+                )
+            ).items
             assert [item.id for item in listed] == [
                 building.id for building in expected
             ]
             pages = [
-                await buildings.list(
-                    user_id=USER_ID,
-                    sort_order=sort_order,
-                    offset=index,
-                    limit=1,
-                )
+                (
+                    await buildings.list(
+                        user_id=USER_ID,
+                        sort_order=sort_order,
+                        offset=index,
+                        limit=1,
+                    )
+                ).items
                 for index in range(3)
             ]
             assert [[item.id for item in page] for page in pages] == [
@@ -327,8 +334,7 @@ def test_building_list_orders_before_pagination(sort_order: SortOrder) -> None:
                     offset=3,
                     limit=1,
                 )
-                == []
-            )
+            ).items == []
 
     asyncio.run(run())
 
@@ -405,7 +411,8 @@ def test_building_list_filters_before_pagination(
                 reconstruction_status=reconstruction_status,
                 search=search,
             )
-            assert [item.id for item in actual] == [item.id for item in expected]
+            assert actual.total == len(expected)
+            assert [item.id for item in actual.items] == [item.id for item in expected]
             for offset in range(0, len(expected) + 1, 2):
                 page = await buildings.list(
                     user_id=USER_ID,
@@ -415,7 +422,8 @@ def test_building_list_filters_before_pagination(
                     offset=offset,
                     limit=2,
                 )
-                assert [item.id for item in page] == [
+                assert page.total == len(expected)
+                assert [item.id for item in page.items] == [
                     item.id for item in expected[offset : offset + 2]
                 ]
 
@@ -525,17 +533,18 @@ def test_latest_attempt_ignores_status_and_older_updates(
             await session.commit()
 
             expected = {"id": latest.id, "status": status, "progress": 0.456}
-            item = (await buildings.list(user_id=USER_ID))[0]
+            item = ((await buildings.list(user_id=USER_ID)).items)[0]
             assert item.latest_reconstruction is not None
             assert item.latest_reconstruction.model_dump() == expected
-            processing = await buildings.list(
-                user_id=USER_ID, reconstruction_status="processing", search="BUILD"
-            )
+            processing = (
+                await buildings.list(
+                    user_id=USER_ID, reconstruction_status="processing", search="BUILD"
+                )
+            ).items
             assert processing == [item]
             assert (
                 await buildings.list(user_id=USER_ID, reconstruction_status="idle")
-                == []
-            )
+            ).items == []
 
             # An older attempt finishing later cannot displace the newest attempt.
             older.status = ReconstructionStatus.COMPLETED
@@ -544,7 +553,7 @@ def test_latest_attempt_ignores_status_and_older_updates(
             tied.updated_at = timestamp + timedelta(days=2)
             session.add_all([older, tied])
             await session.commit()
-            item = (await buildings.list(user_id=USER_ID))[0]
+            item = ((await buildings.list(user_id=USER_ID)).items)[0]
             assert item.latest_reconstruction is not None
             assert item.latest_reconstruction.model_dump() == expected
             still_active = status in {
@@ -552,20 +561,23 @@ def test_latest_attempt_ignores_status_and_older_updates(
                 ReconstructionStatus.PREPARING,
                 ReconstructionStatus.SCHEDULED,
                 ReconstructionStatus.RUNNING,
+                ReconstructionStatus.CANCELLING,
             }
-            assert await buildings.list(
-                user_id=USER_ID, reconstruction_status="processing"
-            ) == ([item] if still_active else [])
-            assert await buildings.list(
-                user_id=USER_ID, reconstruction_status="idle"
-            ) == ([] if still_active else [item])
+            assert (
+                await buildings.list(
+                    user_id=USER_ID, reconstruction_status="processing"
+                )
+            ).items == ([item] if still_active else [])
+            assert (
+                await buildings.list(user_id=USER_ID, reconstruction_status="idle")
+            ).items == ([] if still_active else [item])
 
     asyncio.run(run())
 
 
 @pytest.mark.parametrize("reconstruction_status", [None, "processing", "idle"])
 @pytest.mark.parametrize("search", [None, "1"])
-def test_building_list_uses_one_query(
+def test_building_list_uses_two_queries(
     reconstruction_status: ReconstructionStatusFilter | None,
     search: str | None,
 ) -> None:
@@ -600,17 +612,19 @@ def test_building_list_uses_one_query(
             engine = session.bind.sync_engine
             event.listen(engine, "before_cursor_execute", record_statement)
             try:
-                items = await buildings.list(
-                    user_id=USER_ID,
-                    reconstruction_status=reconstruction_status,
-                    search=search,
-                )
+                items = (
+                    await buildings.list(
+                        user_id=USER_ID,
+                        reconstruction_status=reconstruction_status,
+                        search=search,
+                    )
+                ).items
                 expected_count = 3 if search is None else 1
                 assert len(items) == (
                     0 if reconstruction_status == "idle" else expected_count
                 )
                 assert all(item.latest_reconstruction is not None for item in items)
-                assert len(statements) == 1
+                assert len(statements) == 2
             finally:
                 event.remove(engine, "before_cursor_execute", record_statement)
 
@@ -689,12 +703,15 @@ def test_building_routes_cover_crud(api_client: TestClient) -> None:
 
     list_response = api_client.get("/buildings?offset=0&limit=10")
     assert list_response.status_code == 200
-    assert list_response.json() == [{**created, "latest_reconstruction": None}]
+    assert list_response.json()["items"] == [{**created, "latest_reconstruction": None}]
     assert (
-        api_client.get("/buildings?reconstruction_status=idle").json()
-        == list_response.json()
+        api_client.get("/buildings?reconstruction_status=idle").json()["items"]
+        == list_response.json()["items"]
     )
-    assert api_client.get("/buildings?reconstruction_status=processing").json() == []
+    assert (
+        api_client.get("/buildings?reconstruction_status=processing").json()["items"]
+        == []
+    )
     assert "latest_reconstruction" not in created
 
     get_response = api_client.get(f"/buildings/{building_id}")
@@ -729,14 +746,19 @@ def test_building_address_persists_and_can_be_cleared(
     path = f"/buildings/{building['id']}"
     assert building["address"] == metadata.get("address")
     assert api_client.get(path).json()["address"] == metadata.get("address")
-    assert api_client.get("/buildings").json()[0]["address"] == metadata.get("address")
+    assert api_client.get("/buildings").json()["items"][0]["address"] == metadata.get(
+        "address"
+    )
 
     updated = api_client.patch(path, json={"address": "Avenue Piccard 12"})
     assert updated.status_code == 200
     assert updated.json()["address"] == "Avenue Piccard 12"
     assert updated.json()["updated_at"] != building["updated_at"]
     assert api_client.get(path).json()["address"] == "Avenue Piccard 12"
-    assert api_client.get("/buildings").json()[0]["address"] == "Avenue Piccard 12"
+    assert (
+        api_client.get("/buildings").json()["items"][0]["address"]
+        == "Avenue Piccard 12"
+    )
 
     renamed = api_client.patch(path, json={"name": "New name"})
     assert renamed.status_code == 200
@@ -749,7 +771,7 @@ def test_building_address_persists_and_can_be_cleared(
     assert cleared.json()["address"] is None
     assert cleared.json()["name"] == "New name"
     assert api_client.get(path).json()["address"] is None
-    assert api_client.get("/buildings").json()[0]["address"] is None
+    assert api_client.get("/buildings").json()["items"][0]["address"] is None
 
 
 def test_building_locations_route_filters_and_serializes(
@@ -876,7 +898,8 @@ def test_building_routes_search_names(api_client: TestClient) -> None:
             params["search"] = search
         response = api_client.get("/buildings", params=params)
         assert response.status_code == 200
-        assert response.json() == [
+        assert response.json()["total"] == len(matching_names)
+        assert response.json()["items"] == [
             {**building, "latest_reconstruction": None}
             for building in created
             if building["name"] in matching_names
@@ -889,12 +912,40 @@ def test_building_routes_support_sort_order(api_client: TestClient) -> None:
     first = {**first, "latest_reconstruction": None}
     second = {**second, "latest_reconstruction": None}
 
-    assert api_client.get("/buildings").json() == [second, first]
-    assert api_client.get("/buildings?sort_order=desc").json() == [second, first]
-    assert api_client.get("/buildings?sort_order=asc").json() == [first, second]
-    assert api_client.get("/buildings?sort_order=desc&offset=1&limit=1").json() == [
-        first
+    assert api_client.get("/buildings").json()["items"] == [second, first]
+    assert api_client.get("/buildings?sort_order=desc").json()["items"] == [
+        second,
+        first,
     ]
+    assert api_client.get("/buildings?sort_order=asc").json()["items"] == [
+        first,
+        second,
+    ]
+    assert api_client.get("/buildings?sort_order=desc&offset=1&limit=1").json()[
+        "items"
+    ] == [first]
+
+
+@pytest.mark.parametrize("count", [0, 1, 20, 21, 40, 101])
+def test_building_pages_report_total(api_client: TestClient, count: int) -> None:
+    async def insert() -> None:
+        async for session in api_client.app.dependency_overrides[get_session]():
+            session.add_all(
+                [Building(user_id=USER_ID, name=str(index)) for index in range(count)]
+            )
+            await session.commit()
+
+    asyncio.run(insert())
+    for limit in (20, 100):
+        for offset in sorted({0, limit, count, count + 1}):
+            response = api_client.get(
+                "/buildings", params={"offset": offset, "limit": limit}
+            )
+            assert response.status_code == 200
+            page = response.json()
+            assert set(page) == {"items", "total"}
+            assert page["total"] == count
+            assert len(page["items"]) == min(limit, max(0, count - offset))
 
 
 @pytest.mark.parametrize("status", list(ReconstructionStatus))
@@ -921,7 +972,7 @@ def test_building_routes_return_reconstruction_summary(
     asyncio.run(insert_reconstruction())
     response = api_client.get("/buildings")
     assert response.status_code == 200
-    assert response.json() == [
+    assert response.json()["items"] == [
         {
             **created,
             "latest_reconstruction": {
@@ -937,13 +988,15 @@ def test_building_routes_return_reconstruction_summary(
         ReconstructionStatus.PREPARING,
         ReconstructionStatus.SCHEDULED,
         ReconstructionStatus.RUNNING,
+        ReconstructionStatus.CANCELLING,
     }
     for filter_value, matches in (("processing", active), ("idle", not active)):
         filtered = api_client.get(
             "/buildings", params={"reconstruction_status": filter_value}
         )
         assert filtered.status_code == 200
-        assert filtered.json() == (response.json() if matches else [])
+        assert filtered.json()["total"] == (1 if matches else 0)
+        assert filtered.json()["items"] == (response.json()["items"] if matches else [])
 
 
 def test_building_routes_hide_rows_owned_by_another_user(
@@ -961,8 +1014,8 @@ def test_building_routes_hide_rows_owned_by_another_user(
         terms_accepted_version=config.TERMS_VERSION,
     )
     try:
-        assert api_client.get("/buildings?sort_order=desc").json() == []
-        assert api_client.get("/buildings?sort_order=asc").json() == []
+        assert api_client.get("/buildings?sort_order=desc").json()["items"] == []
+        assert api_client.get("/buildings?sort_order=asc").json()["items"] == []
         assert api_client.get(f"/buildings/{created['id']}").status_code == 404
         assert (
             api_client.patch(
@@ -982,7 +1035,7 @@ def test_building_routes_map_database_failures_to_503(
         def __init__(self) -> None:
             pass
 
-        async def list(self, **kwargs: object) -> list[BuildingListItemRead]:
+        async def list(self, **kwargs: object) -> Page[BuildingListItemRead]:
             raise OperationalError("SELECT", {}, RuntimeError("offline"))
 
     api_client.app.dependency_overrides[building_views.get_building_service] = (

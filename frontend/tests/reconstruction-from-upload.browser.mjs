@@ -97,13 +97,16 @@ try {
                             json: { id: 'reconstruction-owner', terms_accepted: true },
                         });
                     if (path === '/uploads') {
-                        assert.equal(url.searchParams.get('limit'), '21');
+                        assert.equal(url.searchParams.get('limit'), '20');
                         assert.equal(url.searchParams.get('sort_order'), 'desc');
                         if (listMode === 'error')
                             return route.fulfill({ status: 503, json: { detail: 'Unavailable' } });
                         const offset = Number(url.searchParams.get('offset'));
                         return route.fulfill({
-                            json: listMode === 'empty' ? [] : rows.slice(offset, offset + 21),
+                            json: {
+                                items: listMode === 'empty' ? [] : rows.slice(offset, offset + 20),
+                                total: listMode === 'empty' ? 0 : rows.length,
+                            },
                         });
                     }
                     if (path.startsWith('/uploads/')) {
@@ -165,19 +168,38 @@ try {
                     }
                     if (path === '/buildings')
                         return route.fulfill({
-                            json: [
-                                building('existing'),
-                                ...(destination?.id === 'created'
-                                    ? [building('created', destination.name)]
-                                    : []),
-                            ],
+                            json: {
+                                items: [
+                                    building('existing'),
+                                    ...(destination?.id === 'created'
+                                        ? [building('created', destination.name)]
+                                        : []),
+                                ],
+                                total: destination?.id === 'created' ? 2 : 1,
+                            },
                         });
-                    if (/^\/buildings\/[^/]+$/.test(path))
+                    if (/^\/buildings\/[^/]+$/.test(path)) {
+                        const id = path.split('/').pop();
+                        if (
+                            id !== 'existing' &&
+                            !(id === 'created' && destination?.id === 'created')
+                        ) {
+                            return route.fulfill({
+                                status: 404,
+                                json: { detail: 'Building not found' },
+                            });
+                        }
                         return route.fulfill({
-                            json: building(path.split('/').pop(), destination?.name),
+                            json: building(id, id === 'created' ? destination.name : undefined),
                         });
+                    }
                     if (path.endsWith('/reconstructions'))
-                        return route.fulfill({ json: reconstruction ? [reconstruction] : [] });
+                        return route.fulfill({
+                            json: {
+                                items: reconstruction ? [reconstruction] : [],
+                                total: reconstruction ? 1 : 0,
+                            },
+                        });
                     return route.fulfill({ json: [] });
                 });
                 const page = await context.newPage();

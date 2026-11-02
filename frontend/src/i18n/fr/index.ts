@@ -400,6 +400,7 @@ export default {
         cancelConfirmation:
             'Voulez-vous vraiment annuler le traitement de {name} ? La vidéo envoyée sera supprimée.',
         cancelled: 'Traitement annulé.',
+        cancelRequested: 'Annulation demandée.',
         cancelFailed: 'Impossible d’annuler le traitement. Veuillez réessayer.',
     },
     plans: {

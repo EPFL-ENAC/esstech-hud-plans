@@ -542,7 +542,7 @@ def test_reconstruction_rejects_unavailable_upload_before_creating_records(
             }.get(case, UploadStatus.UPLOADED),
             user_id=uuid4() if case == "unowned" else USER_ID,
         )
-    before = client.get("/buildings").json()
+    before = client.get("/buildings").json()["items"]
     url = (
         "/buildings/from-reconstruction/from-upload"
         if new_building
@@ -557,8 +557,8 @@ def test_reconstruction_rejects_unavailable_upload_before_creating_records(
         "missing": 503,
     }
     assert response.status_code == expected[case]
-    assert client.get("/buildings").json() == before
-    assert client.get(f"/buildings/{building_id}/reconstructions").json() == []
+    assert client.get("/buildings").json()["items"] == before
+    assert client.get(f"/buildings/{building_id}/reconstructions").json()["items"] == []
 
 
 @pytest.mark.parametrize("upload_id", ["../escape", "a/b", "a" * 65, "", "not-a-uuid"])
@@ -615,7 +615,7 @@ def test_from_upload_submission_waits_for_incomplete_upload(
     assert response.status_code == 202
     assert response.json()["status"] == "waiting_for_upload"
     assert response.json()["prefect_workflow_id"] is None
-    assert client.get(f"/buildings/{building_id}/reconstructions").json() == [
+    assert client.get(f"/buildings/{building_id}/reconstructions").json()["items"] == [
         response.json()
     ]
 
@@ -643,7 +643,7 @@ def test_from_upload_submission_maps_scheduling_failure_to_503(
 
     assert response.status_code == 503
     reconstruction_id = response.json()["detail"]["reconstruction_id"]
-    listed = client.get(f"/buildings/{building_id}/reconstructions").json()
+    listed = client.get(f"/buildings/{building_id}/reconstructions").json()["items"]
     assert listed[0]["id"] == reconstruction_id
     assert listed[0]["status"] == "failed"
     assert listed[0]["error_message"] == "RuntimeError: Prefect unavailable"

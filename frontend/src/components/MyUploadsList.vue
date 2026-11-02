@@ -89,22 +89,14 @@
             </template>
         </QueryStateSwitcher>
 
-        <nav
-            v-if="(data && data.length > 0) || offset > 0"
-            :aria-label="t('uploads.pagination')"
-            class="row justify-center q-pa-md"
-        >
-            <q-pagination
-                v-model="page"
-                :max="page + Number(hasNext)"
-                :max-pages="5"
-                :boundary-numbers="false"
-                :ellipses="false"
-                direction-links
-                color="primary"
-                :disable="isLoading"
-            />
-        </nav>
+        <ListPaginator
+            v-model:offset="offset"
+            :query="query"
+            :page-size="MY_UPLOADS_PAGE_SIZE"
+            :disabled="isLoading"
+            :ariaLabel="t('uploads.pagination')"
+            class="q-pa-md"
+        />
     </section>
 </template>
 
@@ -112,6 +104,7 @@
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import QueryStateSwitcher from 'src/components/QueryStateSwitcher.vue';
+import ListPaginator from 'src/components/ListPaginator.vue';
 import type { UploadStatus, UserUpload } from 'src/lib/uploads';
 import { formatFileSize } from 'src/lib/utils/formatFileSize';
 import { MY_UPLOADS_PAGE_SIZE, useMyUploadsQuery } from 'src/queries/uploads';
@@ -125,19 +118,9 @@ const props = defineProps<{
 }>();
 const { t, locale } = useI18n();
 const offset = ref(0);
-const { data, state, isLoading: queryIsLoading, refetch: refetchQuery } = useMyUploadsQuery(offset);
-const manualRefreshing = ref(false);
-const isLoading = computed(
-    () => queryIsLoading.value && (data.value === undefined || manualRefreshing.value),
-);
-const uploads = computed(() => data.value?.slice(0, MY_UPLOADS_PAGE_SIZE) ?? []);
-const hasNext = computed(() => (data.value?.length ?? 0) > MY_UPLOADS_PAGE_SIZE);
-const page = computed({
-    get: () => offset.value / MY_UPLOADS_PAGE_SIZE + 1,
-    set: (value: number) => {
-        offset.value = (value - 1) * MY_UPLOADS_PAGE_SIZE;
-    },
-});
+const query = useMyUploadsQuery(offset);
+const { data, state, refetch, isForegroundLoading: isLoading } = query;
+const uploads = computed(() => data.value?.items ?? []);
 const statusColors: Record<UploadStatus, string> = {
     pending: 'grey-7',
     uploaded: 'positive',
@@ -183,15 +166,6 @@ function uploadStatusLabel(upload: UserUpload): string {
             ? Math.min(1, Math.max(0, upload.uploaded_bytes / upload.size_bytes))
             : 0;
     return percentFormatter.value.format(ratio);
-}
-
-async function refetch() {
-    manualRefreshing.value = true;
-    try {
-        return await refetchQuery();
-    } finally {
-        manualRefreshing.value = false;
-    }
 }
 
 defineExpose({ refetch, isLoading });

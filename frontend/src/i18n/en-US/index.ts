@@ -378,6 +378,7 @@ export default {
         cancelConfirmation:
             'Are you sure you want to cancel processing for {name}? The uploaded video will be deleted.',
         cancelled: 'Processing cancelled.',
+        cancelRequested: 'Cancellation requested.',
         cancelFailed: 'Could not cancel processing. Please try again.',
     },
     plans: {

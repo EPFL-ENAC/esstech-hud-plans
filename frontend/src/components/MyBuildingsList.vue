@@ -75,27 +75,20 @@
                 </p>
             </template>
         </QueryStateSwitcher>
-        <nav
-            v-if="(data && data.length > 0) || offset > 0"
-            :aria-label="t('buildings.list.pagination')"
-            class="row justify-center q-pa-md"
-        >
-            <q-pagination
-                v-model="page"
-                :max="page + Number(hasNext)"
-                :max-pages="5"
-                :boundary-numbers="false"
-                :ellipses="false"
-                direction-links
-                color="primary"
-                :disable="isLoading"
-            />
-        </nav>
+        <ListPaginator
+            v-model:offset="offset"
+            :query="query"
+            :page-size="MY_BUILDINGS_PAGE_SIZE"
+            :disabled="isLoading"
+            :ariaLabel="t('buildings.list.pagination')"
+            class="q-pa-md"
+        />
     </section>
 </template>
 
 <script setup lang="ts">
 import QueryStateSwitcher from 'src/components/QueryStateSwitcher.vue';
+import ListPaginator from 'src/components/ListPaginator.vue';
 import { computed, ref, watch } from 'vue';
 import FloorPlanThumb from 'src/components/FloorPlanThumb.vue';
 import ReconstructionStatusChip from 'src/components/ReconstructionStatusChip.vue';
@@ -118,24 +111,13 @@ watch(
     },
     { flush: 'sync' },
 );
-const {
-    data,
-    state,
-    refetch,
-    isForegroundLoading: isLoading,
-} = useMyBuildingsQuery(offset, () => props.reconstructionStatus, normalizedSearch);
+const query = useMyBuildingsQuery(offset, () => props.reconstructionStatus, normalizedSearch);
+const { data, state, refetch, isForegroundLoading: isLoading } = query;
 const emptyMessage = computed(() => {
     if (offset.value > 0) return t('buildings.list.emptyPage');
     return normalizedSearch.value ? t('buildings.list.noMatches') : t('buildings.list.empty');
 });
-const buildings = computed(() => data.value?.slice(0, MY_BUILDINGS_PAGE_SIZE) ?? []);
-const hasNext = computed(() => (data.value?.length ?? 0) > MY_BUILDINGS_PAGE_SIZE);
-const page = computed({
-    get: () => offset.value / MY_BUILDINGS_PAGE_SIZE + 1,
-    set: (value: number) => {
-        offset.value = (value - 1) * MY_BUILDINGS_PAGE_SIZE;
-    },
-});
+const buildings = computed(() => data.value?.items ?? []);
 const dateFormatter = computed(
     () =>
         new Intl.DateTimeFormat(locale.value, {

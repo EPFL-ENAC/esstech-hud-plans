@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from api.db import get_session
+from api.models.pagination import Page
 from api.models.uploads import (
     UploadStatus,
     UserUploadRead,
@@ -65,7 +66,7 @@ async def get_current_upload(
     return upload
 
 
-@router.get("", response_model=list[UserUploadRead])
+@router.get("", response_model=Page[UserUploadRead])
 async def list_uploads(
     current_user: Annotated[User, Depends(require_user)],
     uploads: Annotated[UserUploadsService, Depends(get_uploads_service)],
@@ -73,7 +74,7 @@ async def list_uploads(
     limit: Annotated[int, Query(ge=1, le=100)] = 100,
     sort_order: SortOrder = "desc",
     upload_status: Annotated[UploadStatus | None, Query(alias="status")] = None,
-) -> list[UserUploads]:
+) -> Page[UserUploads]:
     try:
         return await uploads.list(
             user_id=current_user.id,

@@ -1,3 +1,4 @@
+import type { Page } from 'src/lib/pagination';
 import { useQuery } from '@pinia/colada';
 import { computed, onActivated, onDeactivated, ref, watch, type Ref } from 'vue';
 import { useDocumentVisibility } from 'src/composables/useDocumentVisibility';
@@ -11,11 +12,8 @@ function isPermanentErrorCode(statusCode: number): boolean {
     return [401, 403, 404, 422].includes(statusCode);
 }
 
-function hasPendingUploadsOnPage(uploads: UserUpload[] | undefined): boolean {
-    return (
-        uploads?.slice(0, MY_UPLOADS_PAGE_SIZE).some((upload) => upload.status === 'pending') ===
-        true
-    );
+function hasPendingUploadsOnPage(uploads: Page<UserUpload> | undefined): boolean {
+    return uploads?.items.some((upload) => upload.status === 'pending') === true;
 }
 
 export function useUploadQuery(uploadId: Ref<string>) {
@@ -62,7 +60,7 @@ export function useMyUploadsQuery(offset: Ref<number>) {
         subject !== null && getAuthSubject() === subject && active.value && visible.value;
     const options = computed(() => ({
         offset: offset.value,
-        limit: MY_UPLOADS_PAGE_SIZE + 1,
+        limit: MY_UPLOADS_PAGE_SIZE,
         sort_order: 'desc' as const,
     }));
 
@@ -87,6 +85,19 @@ export function useMyUploadsQuery(offset: Ref<number>) {
         },
     });
 
+    const manualRefreshing = ref(false);
+    const isForegroundLoading = computed(
+        () => query.isLoading.value && (query.data.value === undefined || manualRefreshing.value),
+    );
+    const refetch: typeof query.refetch = async (throwOnError) => {
+        manualRefreshing.value = true;
+        try {
+            return await query.refetch(throwOnError);
+        } finally {
+            manualRefreshing.value = false;
+        }
+    };
+
     watch(
         [options, enabled],
         () => {
@@ -98,5 +109,5 @@ export function useMyUploadsQuery(offset: Ref<number>) {
         { immediate: true, flush: 'post' },
     );
 
-    return query;
+    return { ...query, isForegroundLoading, refetch };
 }

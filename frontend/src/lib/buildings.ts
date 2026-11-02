@@ -1,3 +1,4 @@
+import type { Page } from 'src/lib/pagination';
 import { i18n } from 'src/i18n/instance';
 import { baseUrl } from 'boot/api';
 import { ApiError, requestJson } from 'src/lib/api';
@@ -80,6 +81,16 @@ export type ReconstructionStatus =
     | 'failed'
     | 'cancelled'
     | 'crashed';
+
+export function isReconstructionProcessing(status: ReconstructionStatus | undefined): boolean {
+    return (
+        status === 'waiting_for_upload' ||
+        status === 'preparing' ||
+        status === 'scheduled' ||
+        status === 'running' ||
+        status === 'cancelling'
+    );
+}
 
 export interface ReconstructionSummary {
     id: string;
@@ -180,7 +191,7 @@ export function listBuildings({
     sort_order = 'desc',
     reconstruction_status,
     search,
-}: ListBuildingsOptions = {}): Promise<BuildingListItem[]> {
+}: ListBuildingsOptions = {}): Promise<Page<BuildingListItem>> {
     const params = new URLSearchParams({
         offset: String(offset),
         limit: String(limit),
@@ -225,7 +236,7 @@ export interface ListReconstructionsOptions {
 export function listReconstructions(
     buildingId: string,
     { offset = 0, limit = 100, sort_order = 'desc' }: ListReconstructionsOptions = {},
-): Promise<Reconstruction[]> {
+): Promise<Page<Reconstruction>> {
     const params = new URLSearchParams({
         offset: String(offset),
         limit: String(limit),

@@ -73,7 +73,7 @@ function respond(submission, body, status = 202) {
 function expectedInvalidations(buildingId) {
     const root = ['buildings', 'test-user'];
     return [
-        { key: [...root, 'all'] },
+        { key: [...root, 'picker'] },
         { key: [...root, 'list'] },
         { key: [...root, 'locations'] },
         { key: [...root, 'detail', buildingId], exact: true },

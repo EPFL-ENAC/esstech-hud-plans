@@ -8,11 +8,12 @@
             :disable="disable"
             :error="!hasResolvedBuilding || null"
             :error-message="
-                isLoading
+                selectedBuildingQuery.isLoading.value
                     ? t('buildings.picker.loadingSelected')
                     : t('buildings.picker.unavailable')
             "
             :label="t('buildings.title')"
+            @virtual-scroll="onVirtualScroll"
         >
             <template #option="scope">
                 <q-item v-bind="scope.itemProps">
@@ -27,14 +28,23 @@
             </template>
         </q-select>
 
-        <q-banner v-if="state.error" class="bg-red-1 text-negative" role="alert">
+        <q-btn
+            v-if="selectedBuildingQuery.error.value"
+            flat
+            color="primary"
+            :label="t('common.retry')"
+            :disable="isLoading || disable"
+            @click="selectedBuildingQuery.refetch()"
+        />
+
+        <q-banner v-if="query.error.value" class="bg-red-1 text-negative" role="alert">
             {{ t('buildings.list.loadFailed') }}
             <template #action>
                 <q-btn
                     flat
                     :label="t('common.retry')"
                     :disable="isLoading || disable"
-                    @click="refetch()"
+                    @click="retry()"
                 />
             </template>
         </q-banner>
@@ -55,7 +65,7 @@ import {
     type BuildingSelection,
     isValidBuildingCreate,
 } from 'src/lib/buildings';
-import { useAllBuildingsQuery } from 'src/queries/buildings';
+import { useBuildingPickerQuery, useBuildingQuery } from 'src/queries/buildings';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
@@ -68,15 +78,40 @@ interface SelectOption {
 withDefaults(defineProps<{ disable?: boolean }>(), { disable: false });
 const selection = defineModel<BuildingSelection>({ required: true });
 const emit = defineEmits<{ valid: [value: boolean] }>();
-const { data: buildings, state, asyncStatus, refetch } = useAllBuildingsQuery();
-const isLoading = computed(() => asyncStatus.value === 'loading');
+const query = useBuildingPickerQuery();
+const selectedBuildingId = computed(() => selection.value.buildingId ?? '');
+const selectedBuildingQuery = useBuildingQuery(selectedBuildingId);
+const isLoading = computed(() => query.isLoading.value || selectedBuildingQuery.isLoading.value);
+const buildings = computed(() => {
+    const pages = query.data.value?.pages ?? [];
+    return [
+        ...new Map(
+            pages.flatMap((page) => page.items).map((building) => [building.id, building]),
+        ).values(),
+    ];
+});
 const options = computed<SelectOption[]>(() => [
     { label: t('buildings.picker.createNew'), value: null },
-    ...(buildings.value ?? []).map((building) => ({
+    ...buildings.value.map((building) => ({
         label: building.name.trim() || t('buildings.untitled'),
         value: building.id,
     })),
 ]);
+const nextPageError = ref<Error | null>(null);
+
+async function loadNextPage() {
+    await query.loadNextPage({ cancelRefetch: false });
+    nextPageError.value = query.error.value;
+}
+
+function onVirtualScroll({ to }: { to: number }) {
+    if (!query.error.value && to >= options.value.length - 5) void loadNextPage();
+}
+
+function retry() {
+    if (query.error.value === nextPageError.value) void loadNextPage();
+    else void query.refetch();
+}
 
 // Retain unsaved details when switching between a new and an existing building.
 const draft = ref<BuildingCreate>({ name: '', latitude: null, longitude: null });
@@ -94,11 +129,16 @@ const newBuilding = computed({
     },
 });
 const selectedOption = computed<SelectOption>({
-    get: () =>
-        options.value.find((option) => option.value === selection.value.buildingId) ?? {
-            label: t('buildings.picker.select'),
+    get: () => {
+        if (selection.value.buildingId === null) return options.value[0]!;
+        const building = selectedBuildingQuery.data.value;
+        return {
+            label: building
+                ? building.name.trim() || t('buildings.untitled')
+                : t('buildings.picker.select'),
             value: selection.value.buildingId,
-        },
+        };
+    },
     set: (option) => {
         selection.value =
             option.value === null
@@ -109,7 +149,8 @@ const selectedOption = computed<SelectOption>({
 const hasResolvedBuilding = computed(
     () =>
         selection.value.buildingId === null ||
-        options.value.some((option) => option.value === selection.value.buildingId),
+        (selectedBuildingQuery.state.value.status === 'success' &&
+            selectedBuildingQuery.data.value?.id === selection.value.buildingId),
 );
 const isValid = computed(() =>
     selection.value.buildingId === null

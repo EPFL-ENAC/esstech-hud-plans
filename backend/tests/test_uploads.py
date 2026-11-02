@@ -198,7 +198,7 @@ def test_upload_service_crud_preserves_file(
             upload_id = upload.id
             assert await uploads.get(upload_id, user_id=OTHER_USER_ID) is None
             assert await uploads.get(uuid4(), user_id=USER_ID) is None
-            assert await uploads.list(user_id=OTHER_USER_ID) == []
+            assert (await uploads.list(user_id=OTHER_USER_ID)).items == []
 
             session.expunge_all()
             persisted = await uploads.get(upload_id, user_id=USER_ID)
@@ -271,7 +271,8 @@ def test_upload_list_orders_and_scopes_before_pagination(
                     limit=2,
                     sort_order=sort_order,
                 )
-                assert [upload.id for upload in page] == [
+                assert page.total == len(expected)
+                assert [upload.id for upload in page.items] == [
                     upload.id for upload in expected[offset : offset + 2]
                 ]
 
@@ -310,7 +311,7 @@ def test_failed_creation_rolls_back(database: AsyncEngine) -> None:
                     size_bytes=0,
                     file_path="TODO",
                 )
-            assert await uploads.list(user_id=USER_ID) == []
+            assert (await uploads.list(user_id=USER_ID)).items == []
             created = await uploads.create(
                 user_id=USER_ID,
                 payload=UserUploadCreate(),
@@ -378,7 +379,7 @@ def test_upload_routes_cover_crud(api_client: TestClient) -> None:
         "created_at": created["created_at"],
         "uploaded_at": created["uploaded_at"],
     }
-    assert api_client.get("/uploads").json() == [created]
+    assert api_client.get("/uploads").json()["items"] == [created]
     assert api_client.get(f"/uploads/{upload_id}").json() == created
     updated = api_client.patch(
         f"/uploads/{upload_id}",
@@ -401,7 +402,7 @@ def test_upload_routes_cover_crud(api_client: TestClient) -> None:
     assert deleted.status_code == 204
     assert deleted.content == b""
     assert api_client.get(f"/uploads/{upload_id}").status_code == 404
-    assert api_client.get("/uploads").json() == []
+    assert api_client.get("/uploads").json()["items"] == []
 
 
 def test_upload_creation_accepts_user_metadata(api_client: TestClient) -> None:
@@ -455,7 +456,7 @@ def test_upload_routes_hide_other_users_rows(api_client: TestClient) -> None:
         id=OTHER_USER_ID,
         keycloak_sub="subject-2",
     )
-    assert api_client.get("/uploads").json() == []
+    assert api_client.get("/uploads").json()["items"] == []
     for upload_id in [created["id"], str(uuid4())]:
         for method in ["get", "patch", "delete"]:
             response = api_client.request(method, f"/uploads/{upload_id}", json={})
@@ -719,16 +720,52 @@ def test_upload_status_filter_precedes_pagination(
             f"/uploads?status=uploaded&offset={offset}&limit=1&sort_order={sort_order}"
         )
         assert response.status_code == 200
-        assert [upload["filename"] for upload in response.json()] == expected[
+        assert response.json()["total"] == len(expected)
+        assert [upload["filename"] for upload in response.json()["items"]] == expected[
             offset : offset + 1
         ]
-    assert len(api_client.get("/uploads").json()) == 5
+    assert len(api_client.get("/uploads").json()["items"]) == 5
     assert api_client.get("/uploads?status=invalid").status_code == 422
 
 
 def test_upload_post_is_removed(api_client: TestClient) -> None:
     assert api_client.post("/uploads", json={}).status_code == 405
-    assert api_client.get("/uploads").json() == []
+    assert api_client.get("/uploads").json()["items"] == []
+
+
+@pytest.mark.parametrize("count", [0, 1, 20, 21, 40, 101])
+def test_upload_pages_report_total(
+    api_client: TestClient,
+    database: AsyncEngine,
+    count: int,
+) -> None:
+    async def insert() -> None:
+        async with AsyncSession(database) as session:
+            session.add_all(
+                [
+                    UserUploads(
+                        user_id=USER_ID,
+                        filename=f"video-{index}.mp4",
+                        size_bytes=0,
+                        file_path="internal-storage-path",
+                    )
+                    for index in range(count)
+                ]
+            )
+            await session.commit()
+
+    asyncio.run(insert())
+    for limit in (20, 100):
+        for offset in sorted({0, limit, count, count + 1}):
+            response = api_client.get(
+                "/uploads", params={"offset": offset, "limit": limit}
+            )
+            assert response.status_code == 200
+            page = response.json()
+            assert set(page) == {"items", "total"}
+            assert page["total"] == count
+            assert len(page["items"]) == min(limit, max(0, count - offset))
+            assert all("file_path" not in item for item in page["items"])
 
 
 def test_pending_upload_cannot_be_deleted(api_client: TestClient) -> None:
@@ -776,7 +813,7 @@ def test_upload_registration_and_completion_are_idempotent(
             session.expunge_all()
             repeated = await uploads.complete(upload_id)
             assert repeated.uploaded_at == timestamp
-            assert len(await uploads.list(user_id=USER_ID)) == 1
+            assert len((await uploads.list(user_id=USER_ID)).items) == 1
 
     asyncio.run(run())
 
@@ -808,7 +845,7 @@ def test_upload_registration_rejects_conflicting_ids(
                 await uploads.create(**{**values, **changes})
             assert first.status == UploadStatus.PENDING
             assert first.filename == "video.mp4"
-            assert len(await uploads.list(user_id=USER_ID)) == 1
+            assert len((await uploads.list(user_id=USER_ID)).items) == 1
 
     asyncio.run(run())
 
@@ -843,7 +880,7 @@ def test_upload_registration_recovers_from_duplicate_insert(
             repeated = await uploads.create(**values)
             assert repeated.id == values["upload_id"]
             assert calls == 2
-            assert len(await uploads.list(user_id=USER_ID)) == 1
+            assert len((await uploads.list(user_id=USER_ID)).items) == 1
 
     asyncio.run(run())
 
@@ -1056,7 +1093,7 @@ def test_progress_is_monotonic_and_exposed_in_upload_responses(
         assert detail["uploaded_bytes"] == expected
         assert detail["status"] == "pending"
         assert detail["uploaded_at"] is None
-        assert api_client.get("/uploads").json() == [detail]
+        assert api_client.get("/uploads").json()["items"] == [detail]
 
     response = api_client.patch(
         f"/uploads/{upload_id}",

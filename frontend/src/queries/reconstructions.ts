@@ -1,14 +1,6 @@
 import { useQuery, useQueryCache } from '@pinia/colada';
-import {
-    computed,
-    onActivated,
-    onDeactivated,
-    onMounted,
-    onScopeDispose,
-    ref,
-    watch,
-    type Ref,
-} from 'vue';
+import { computed, onActivated, onDeactivated, ref, watch, type Ref } from 'vue';
+import { useDocumentVisibility } from 'src/composables/useDocumentVisibility';
 import { getAuthSubject } from 'src/lib/auth';
 import type { FetchProgress } from 'src/lib/utils/fetchProgress';
 import { useSplatDownloadStore } from 'src/stores/splatDownload';
@@ -19,6 +11,7 @@ import {
     getReconstructionSplat,
     getReconstructionStep,
     getReconstructionVideo,
+    isReconstructionProcessing,
     listReconstructions,
     type ReconstructionPointCloudMeta,
 } from 'src/lib/buildings';
@@ -32,111 +25,72 @@ function reconstructionKey(subject: string | null, buildingId: string) {
 export function useReconstructionsQuery(buildingId: Ref<string>, offset: Ref<number>) {
     const subject = getAuthSubject();
     const active = ref(true);
-    const visible = ref(document.visibilityState === 'visible');
-    const enabled = computed(
-        () => subject !== null && buildingId.value !== '' && active.value && visible.value,
-    );
+    const visible = useDocumentVisibility();
+    const enabled = () =>
+        subject !== null &&
+        getAuthSubject() === subject &&
+        buildingId.value !== '' &&
+        active.value &&
+        visible.value;
     const options = computed(() => ({
         offset: offset.value,
-        limit: RECONSTRUCTIONS_PAGE_SIZE + 1,
+        limit: RECONSTRUCTIONS_PAGE_SIZE,
         sort_order: 'desc' as const,
     }));
+
+    onActivated(() => {
+        active.value = true;
+    });
+    onDeactivated(() => {
+        active.value = false;
+    });
+
     const query = useQuery({
         key: () => [...reconstructionKey(subject, buildingId.value), 'list', options.value],
         enabled,
         query: () => listReconstructions(buildingId.value, options.value),
         staleTime: 30_000,
         refetchOnWindowFocus: true,
+        autoRefetch: (state) =>
+            state.data?.items.some((item) => isReconstructionProcessing(item.status))
+                ? 5_000
+                : false,
     });
 
-    const isPolling = ref(false);
-    let pollingGeneration = 0;
-    const isForegroundLoading = computed(() => query.isLoading.value && !isPolling.value);
-
-    function resetPolling() {
-        pollingGeneration++;
-        isPolling.value = false;
-    }
-
-    watch([buildingId, options], resetPolling, { flush: 'sync' });
-
-    const refetch: typeof query.refetch = (throwOnError) => {
-        resetPolling();
-        return query.refetch(throwOnError);
-    };
-    const refresh: typeof query.refresh = (throwOnError) => {
-        resetPolling();
-        return query.refresh(throwOnError);
-    };
-
-    async function poll() {
-        if (query.isLoading.value) return;
-
-        const generation = ++pollingGeneration;
-        isPolling.value = true;
-        try {
-            await query.refetch();
-        } finally {
-            // A previous page's poll must not clear a newer poll's marker.
-            if (generation === pollingGeneration) isPolling.value = false;
-        }
-    }
-
-    const shouldPoll = computed(
-        () =>
-            enabled.value &&
-            query.data.value
-                ?.slice(0, RECONSTRUCTIONS_PAGE_SIZE)
-                .some(
-                    ({ status }) =>
-                        status === 'waiting_for_upload' ||
-                        status === 'preparing' ||
-                        status === 'scheduled' ||
-                        status === 'running',
-                ) === true,
+    const manualRefreshing = ref(false);
+    const isForegroundLoading = computed(
+        () => query.isLoading.value && (query.data.value === undefined || manualRefreshing.value),
     );
-    let pollingTimer: ReturnType<typeof setInterval> | undefined;
-    function stopPolling() {
-        clearInterval(pollingTimer);
-        pollingTimer = undefined;
-    }
+    const refetch: typeof query.refetch = async (throwOnError) => {
+        manualRefreshing.value = true;
+        try {
+            return await query.refetch(throwOnError);
+        } finally {
+            manualRefreshing.value = false;
+        }
+    };
+
     watch(
-        shouldPoll,
-        (shouldStartPolling) => {
-            stopPolling();
-            if (shouldStartPolling) {
-                pollingTimer = setInterval(() => {
-                    if (shouldPoll.value && query.asyncStatus.value !== 'loading') {
-                        void poll();
-                    }
-                }, 5_000);
+        [buildingId, options, enabled],
+        () => {
+            // A poll that finishes off-page leaves no timer for a fresh cached entry.
+            if (
+                enabled() &&
+                !query.isLoading.value &&
+                query.data.value?.items.some((item) => isReconstructionProcessing(item.status))
+            ) {
+                void query.refetch();
             }
         },
-        { immediate: true },
+        { immediate: true, flush: 'post' },
     );
 
-    function updateVisibility() {
-        visible.value = document.visibilityState === 'visible';
-    }
-    onMounted(() => document.addEventListener('visibilitychange', updateVisibility));
-    onActivated(() => {
-        active.value = true;
-        if (enabled.value) void refresh();
-    });
-    onDeactivated(() => {
-        active.value = false;
-        stopPolling();
-    });
-    onScopeDispose(() => {
-        stopPolling();
-        document.removeEventListener('visibilitychange', updateVisibility);
-    });
-    return { ...query, isForegroundLoading, refetch, refresh };
+    return { ...query, isForegroundLoading, refetch };
 }
 
 export function useReconstructionStepQuery(buildingId: Ref<string>, reconstructionId: Ref<string>) {
     const enabled = computed(() => buildingId.value !== '' && reconstructionId.value !== '');
-    const query = useQuery({
+    return useQuery({
         key: () => [
             ...reconstructionKey(getAuthSubject(), buildingId.value),
             'splat',
@@ -147,30 +101,8 @@ export function useReconstructionStepQuery(buildingId: Ref<string>, reconstructi
         query: ({ signal }) =>
             getReconstructionStep(buildingId.value, reconstructionId.value, signal),
         staleTime: 0,
+        autoRefetch: 5_000,
     });
-
-    let pollingTimer: ReturnType<typeof setInterval> | undefined;
-    function stopPolling() {
-        clearInterval(pollingTimer);
-        pollingTimer = undefined;
-    }
-    watch(
-        enabled,
-        (shouldStartPolling) => {
-            stopPolling();
-            if (shouldStartPolling) {
-                pollingTimer = setInterval(() => {
-                    if (enabled.value && query.asyncStatus.value !== 'loading') {
-                        void query.refetch();
-                    }
-                }, 5_000);
-            }
-        },
-        { immediate: true },
-    );
-    onScopeDispose(stopPolling);
-
-    return query;
 }
 
 export function useReconstructionVideoQuery(

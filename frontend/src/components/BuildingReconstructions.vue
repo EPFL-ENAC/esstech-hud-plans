@@ -59,7 +59,7 @@
                                 </q-item-label>
                                 <q-item-label>
                                     <reconstruction-status-chip
-                                        :reconstruction="chipReconstruction(reconstruction)"
+                                        :reconstruction="reconstruction"
                                         :tooltip="t('reconstructions.attempt')"
                                     />
                                 </q-item-label>
@@ -208,34 +208,30 @@
                 </p>
             </template>
         </QueryStateSwitcher>
-        <nav
-            v-if="data || offset > 0"
-            :aria-label="t('reconstructions.pagination')"
-            class="row justify-center q-pt-md"
-        >
-            <q-pagination
-                v-model="page"
-                :max="page + Number(hasNext)"
-                :max-pages="5"
-                :boundary-numbers="false"
-                :ellipses="false"
-                direction-links
-                color="primary"
-                :disable="isLoading"
-            />
-        </nav>
+        <ListPaginator
+            v-model:offset="offset"
+            :query="query"
+            :page-size="RECONSTRUCTIONS_PAGE_SIZE"
+            :disabled="isLoading"
+            :ariaLabel="t('reconstructions.pagination')"
+            class="q-pt-md"
+        />
     </section>
 </template>
 
 <script setup lang="ts">
 import QueryStateSwitcher from 'src/components/QueryStateSwitcher.vue';
+import ListPaginator from 'src/components/ListPaginator.vue';
 import { computed, ref, toRef, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import ReconstructionStatusChip from 'src/components/ReconstructionStatusChip.vue';
 import ReconstructionVideo from 'src/components/ReconstructionVideo.vue';
-import { deleteReconstruction, type Reconstruction } from 'src/lib/buildings';
+import {
+    deleteReconstruction,
+    isReconstructionProcessing,
+    type Reconstruction,
+} from 'src/lib/buildings';
 import { RECONSTRUCTIONS_PAGE_SIZE, useReconstructionsQuery } from 'src/queries/reconstructions';
-import { useReconstructionProcessingStore } from 'src/stores/reconstructions';
 import { useI18n } from 'vue-i18n';
 
 const { t, locale } = useI18n();
@@ -244,22 +240,12 @@ const $q = useQuasar();
 const props = defineProps<{ buildingId: string }>();
 const offset = ref(0);
 const expandedId = ref<string | null>(null);
-const {
-    data,
-    state,
-    refetch,
-    isForegroundLoading: isLoading,
-} = useReconstructionsQuery(toRef(props, 'buildingId'), offset);
-const reconstructions = computed(() => data.value?.slice(0, RECONSTRUCTIONS_PAGE_SIZE) ?? []);
-const reconstructionProcessingStore = useReconstructionProcessingStore();
-const hasNext = computed(() => (data.value?.length ?? 0) > RECONSTRUCTIONS_PAGE_SIZE);
-const page = computed({
-    get: () => offset.value / RECONSTRUCTIONS_PAGE_SIZE + 1,
-    set: (value: number) => {
-        expandedId.value = null;
-        offset.value = (value - 1) * RECONSTRUCTIONS_PAGE_SIZE;
-    },
+watch(offset, () => {
+    expandedId.value = null;
 });
+const query = useReconstructionsQuery(toRef(props, 'buildingId'), offset);
+const { data, state, refetch, isForegroundLoading: isLoading } = query;
+const reconstructions = computed(() => data.value?.items ?? []);
 const dateFormatter = computed(
     () =>
         new Intl.DateTimeFormat(locale.value, {
@@ -317,24 +303,8 @@ async function deleteCapture(reconstruction: Reconstruction) {
 function hasSplat(reconstruction: Reconstruction): boolean {
     return reconstruction.status === 'completed' && reconstruction.splat_path !== null;
 }
-function isProcessing(reconstruction: Reconstruction): boolean {
-    return ['waiting_for_upload', 'preparing', 'scheduled', 'running'].includes(
-        reconstruction.status,
-    );
-}
-function chipReconstruction(reconstruction: Reconstruction): Reconstruction {
-    // The optimistic state only applies while the backend still reports
-    // a processing status.
-    if (
-        reconstructionProcessingStore.isCancelling(reconstruction.id) &&
-        isProcessing(reconstruction)
-    ) {
-        return { ...reconstruction, status: 'cancelling' };
-    }
-    return reconstruction;
-}
 function showProcessingDetails(reconstruction: Reconstruction): boolean {
-    return isProcessing(reconstruction) || reconstruction.status === 'failed';
+    return isReconstructionProcessing(reconstruction.status) || reconstruction.status === 'failed';
 }
 watch(reconstructions, (rows) => {
     if (!rows.some(({ id }) => id === expandedId.value)) expandedId.value = null;

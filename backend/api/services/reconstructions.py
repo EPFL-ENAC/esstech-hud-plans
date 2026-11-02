@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import builtins
 import logging
 from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
-from sqlmodel import col, select
+from sqlmodel import col, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
@@ -16,6 +15,7 @@ from api.lib.compute import scitas as scitas_compute
 from api.lib.upload_storage import validate_completed_file
 from api.lib.workflows import common as workflow_common
 from api.models.building import Building
+from api.models.pagination import Page
 from api.models.reconstruction import (
     Reconstruction,
     ReconstructionArtifactUpdate,
@@ -81,7 +81,7 @@ class ReconstructionService:
         offset: int = 0,
         limit: int = 100,
         sort_order: SortOrder = "desc",
-    ) -> builtins.list[Reconstruction]:
+    ) -> Page[Reconstruction]:
         if offset < 0:
             raise ValueError("offset must be non-negative")
         if not 1 <= limit <= 100:
@@ -95,14 +95,14 @@ class ReconstructionService:
             else (col(Reconstruction.created_at).desc(), col(Reconstruction.id).desc())
         )
 
+        query = select(Reconstruction).where(Reconstruction.building_id == building_id)
+        total = (
+            await self._session.exec(select(func.count()).select_from(query.subquery()))
+        ).one()
         result = await self._session.exec(
-            select(Reconstruction)
-            .where(Reconstruction.building_id == building_id)
-            .order_by(*ordering)
-            .offset(offset)
-            .limit(limit)
+            query.order_by(*ordering).offset(offset).limit(limit)
         )
-        return list(result.all())
+        return Page(items=list(result.all()), total=total)
 
     async def create_from_upload(
         self,
@@ -261,7 +261,7 @@ class ReconstructionService:
             )
 
     async def cancel(self, reconstruction_id: UUID) -> Reconstruction:
-        """Serialize cancellation with registration and worker lifecycle updates."""
+        """Publish cancellation before contacting external workers."""
 
         try:
             reconstruction = await self._get_for_update(reconstruction_id)
@@ -273,22 +273,33 @@ class ReconstructionService:
                 ReconstructionStatus.PREPARING,
                 ReconstructionStatus.SCHEDULED,
                 ReconstructionStatus.RUNNING,
+                ReconstructionStatus.CANCELLING,
             }:
                 raise ReconstructionConflictError(
                     "Reconstruction is not processing "
                     f"(current status: {reconstruction.status})"
                 )
 
-            await self._cancel_external_work(reconstruction)
-            reconstruction.mark_terminal_in_memory(
-                ReconstructionStatus.CANCELLED,
-                "Cancellation requested",
-            )
+            if (
+                reconstruction.status == ReconstructionStatus.WAITING_FOR_UPLOAD
+                and reconstruction.prefect_workflow_id is None
+            ):
+                reconstruction.mark_terminal_in_memory(
+                    ReconstructionStatus.CANCELLED,
+                    "Cancellation requested",
+                )
+            elif reconstruction.status != ReconstructionStatus.CANCELLING:
+                reconstruction.status = ReconstructionStatus.CANCELLING
+                reconstruction.error_message = "Cancellation requested"
             reconstruction.updated_at = utc_now()
             self._session.add(reconstruction)
-            await self._session.flush()
-            await self._session.refresh(reconstruction)
             await self._session.commit()
+
+            # Release the row lock so reads see the request and the workflow's
+            # cancellation hook can persist its final state independently.
+            if reconstruction.status == ReconstructionStatus.CANCELLING:
+                await self._cancel_external_work(reconstruction)
+            await self._session.refresh(reconstruction)
             return reconstruction
         except BaseException:
             await self._session.rollback()
@@ -303,6 +314,7 @@ class ReconstructionService:
                 ReconstructionStatus.PREPARING,
                 ReconstructionStatus.SCHEDULED,
                 ReconstructionStatus.RUNNING,
+                ReconstructionStatus.CANCELLING,
             }
             and reconstruction.prefect_workflow_id is not None
         ):
