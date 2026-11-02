@@ -27,6 +27,7 @@ from api.lib.workflows.common import (
     stream_workflow_logs,
 )
 from api.models.building import Building
+from api.models.pagination import Page
 from api.models.reconstruction import (
     Reconstruction,
     ReconstructionRead,
@@ -269,7 +270,7 @@ async def create_reconstruction_from_upload(
         raise _database_unavailable(exc) from exc
 
 
-@router.get("", response_model=list[ReconstructionRead])
+@router.get("", response_model=Page[ReconstructionRead])
 async def list_reconstructions(
     building: Annotated[Building, Depends(get_current_building)],
     reconstructions: Annotated[
@@ -279,7 +280,7 @@ async def list_reconstructions(
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 100,
     sort_order: SortOrder = "desc",
-) -> list[Reconstruction]:
+) -> Page[Reconstruction]:
     try:
         return await reconstructions.list(
             building_id=building.id,

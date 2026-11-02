@@ -19,6 +19,7 @@ from api.models.building import (
     BuildingRead,
     BuildingUpdate,
 )
+from api.models.pagination import Page
 from api.models.reconstruction import ReconstructionRead
 from api.models.user import User
 from api.services.auth import require_user
@@ -172,7 +173,7 @@ async def create_building_from_reconstruction_upload(
     )
 
 
-@router.get("", response_model=list[BuildingListItemRead])
+@router.get("", response_model=Page[BuildingListItemRead])
 async def list_buildings(
     current_user: Annotated[User, Depends(require_user)],
     buildings: Annotated[BuildingService, Depends(get_building_service)],
@@ -191,7 +192,7 @@ async def list_buildings(
             description="Case-insensitive substring of the building name; blank means all names."
         ),
     ] = None,
-) -> list[BuildingListItemRead]:
+) -> Page[BuildingListItemRead]:
     try:
         return await buildings.list(
             user_id=current_user.id,

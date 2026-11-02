@@ -71,7 +71,10 @@ try {
                         return route.fulfill({
                             json: { id: 'sources-owner', terms_accepted: true },
                         });
-                    if (path === '/uploads') return route.fulfill({ json: rows.toReversed() });
+                    if (path === '/uploads')
+                        return route.fulfill({
+                            json: { items: rows.toReversed(), total: rows.length },
+                        });
                     if (path.startsWith('/uploads/')) {
                         const row = rows.find((row) => row.id === path.split('/').pop());
                         assert.ok(row, 'Detail must only open after its row exists');
@@ -79,14 +82,17 @@ try {
                     }
                     if (path === '/buildings')
                         return route.fulfill({
-                            json: [
-                                {
-                                    id: 'existing',
-                                    name: 'Existing building',
-                                    latitude: null,
-                                    longitude: null,
-                                },
-                            ],
+                            json: {
+                                items: [
+                                    {
+                                        id: 'existing',
+                                        name: 'Existing building',
+                                        latitude: null,
+                                        longitude: null,
+                                    },
+                                ],
+                                total: 1,
+                            },
                         });
                     assert.ok(path.startsWith('/tus/files/'), `Unexpected request: ${path}`);
                     const headers = { 'Tus-Resumable': '1.0.0' };

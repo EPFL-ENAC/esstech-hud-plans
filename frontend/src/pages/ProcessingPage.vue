@@ -60,11 +60,7 @@ import { useQuasar } from 'quasar';
 import PageHeader from 'src/components/PageHeader.vue';
 import type { ReconstructionSummary } from 'src/lib/buildings';
 import { cancelReconstruction } from 'src/lib/buildings';
-import {
-    RECONSTRUCTIONS_PAGE_SIZE,
-    useReconstructionsQuery,
-    useReconstructionStepQuery,
-} from 'src/queries/reconstructions';
+import { useReconstructionsQuery, useReconstructionStepQuery } from 'src/queries/reconstructions';
 import { useI18n } from 'vue-i18n';
 import { useReconstructionProcessingStore } from 'src/stores/reconstructions';
 
@@ -80,7 +76,7 @@ const offset = ref(0);
 const { data, refetch } = useReconstructionsQuery(buildingId, offset);
 
 // Same source as the status chips in the reconstruction list.
-const reconstructions = computed(() => data.value?.slice(0, RECONSTRUCTIONS_PAGE_SIZE) ?? []);
+const reconstructions = computed(() => data.value?.items ?? []);
 // Server statuses only. 'cancelling' is a frontend-only optimistic state
 // (see confirmCancelProcessing) that the backend never returns.
 function isProcessing(reconstruction: ReconstructionSummary): boolean {

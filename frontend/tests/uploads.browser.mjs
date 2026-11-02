@@ -137,7 +137,7 @@ try {
                         });
                     }
                     assert.equal(url.pathname, '/uploads-smoke-api/uploads');
-                    assert.equal(url.searchParams.get('limit'), '21');
+                    assert.equal(url.searchParams.get('limit'), '20');
                     assert.equal(url.searchParams.get('sort_order'), 'desc');
                     const offset = Number(url.searchParams.get('offset'));
                     requests.push(offset);
@@ -147,11 +147,11 @@ try {
                         });
                     if (mode === 'error')
                         return route.fulfill({ status: 503, json: { detail: 'Unavailable' } });
-                    const body =
-                        mode === 'empty' || (mode === 'empty-page' && offset > 0)
-                            ? []
-                            : rows.slice(offset, offset + 21);
-                    return route.fulfill({ json: body });
+                    if (mode === 'empty-page' && offset > 0) mode = 'shrunk';
+                    const total = mode === 'empty' ? 0 : mode === 'shrunk' ? 20 : rows.length;
+                    return route.fulfill({
+                        json: { items: rows.slice(0, total).slice(offset, offset + 20), total },
+                    });
                 });
                 const page = await context.newPage();
                 page.setDefaultTimeout(15_000);
@@ -345,14 +345,59 @@ try {
                     .getByRole('navigation', { name: text.pagination })
                     .getByRole('button', { name: '2', exact: true })
                     .click();
-                await page.getByText(text.emptyPage, { exact: true }).waitFor();
-                await capture('empty-page');
-                await page
-                    .getByRole('navigation', { name: text.pagination })
-                    .getByRole('button', { name: '1', exact: true })
-                    .click();
+                await waitFor(() => requests.at(-1) === 0);
                 await items.first().waitFor();
                 assert.equal(await items.count(), 20);
+                assert.equal(
+                    await pagination
+                        .getByRole('button', { name: '1', exact: true })
+                        .getAttribute('aria-current'),
+                    'true',
+                );
+                await page.waitForFunction(
+                    () => document.querySelector('.uploads-query')?.ariaBusy === 'false',
+                );
+                assert.equal(
+                    await pagination.getByRole('button', { name: '2', exact: true }).count(),
+                    0,
+                );
+                assert.deepEqual(requests.slice(-2), [20, 0]);
+                await capture('shrinking-total');
+
+                // Exact totals expose pages beyond the next one immediately.
+                mode = 'data';
+                rows.push(
+                    ...Array.from({ length: 40 }, (_, index) => ({
+                        ...rows[1],
+                        id: `extra-${index}`,
+                        filename: `extra-${index}.mp4`,
+                    })),
+                );
+                await page.getByRole('button', { name: text.refresh, exact: true }).click();
+                await pagination.getByRole('button', { name: '4', exact: true }).click();
+                await page.getByText('extra-35.mp4', { exact: true }).waitFor();
+                assert.equal(requests.at(-1), 60);
+                assert.equal(await items.count(), 5);
+
+                // A shrinking total can move back more than one page.
+                rows.splice(40);
+                await page.getByRole('button', { name: text.refresh, exact: true }).click();
+                await waitFor(() => requests.at(-1) === 20);
+                await page.getByText('video-21.mp4', { exact: true }).waitFor();
+                await page.waitForFunction(
+                    () => document.querySelector('.uploads-query')?.ariaBusy === 'false',
+                );
+                assert.equal(await items.count(), 20);
+                assert.equal(
+                    await pagination.getByRole('button', { name: '3', exact: true }).count(),
+                    0,
+                );
+
+                rows.splice(0);
+                await page.getByRole('button', { name: text.refresh, exact: true }).click();
+                await page.getByText(text.empty, { exact: true }).waitFor();
+                assert.equal(requests.at(-1), 0);
+                assert.equal(await pagination.count(), 0);
                 assert.deepEqual(errors, []);
                 console.log(
                     `${locale} ${viewportName}: percentages, quiet polling, pagination, completion, manual refresh/retry, and empty states passed`,

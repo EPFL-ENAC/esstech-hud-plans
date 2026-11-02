@@ -76,7 +76,8 @@ try {
                 assert.equal(request.headers().authorization, `Bearer ${token}`);
                 if (path === '/user/me')
                     return route.fulfill({ json: { id: 'card-user', terms_accepted: true } });
-                if (path === '/uploads') return route.fulfill({ json: rows });
+                if (path === '/uploads')
+                    return route.fulfill({ json: { items: rows, total: rows.length } });
                 if (path.startsWith('/uploads/')) {
                     const row = rows.find((row) => row.id === path.split('/').pop());
                     return route.fulfill(row ? { json: row } : { status: 404, json: {} });

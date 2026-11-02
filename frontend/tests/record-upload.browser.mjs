@@ -69,20 +69,26 @@ try {
                     }
                     if (path === '/uploads') {
                         return route.fulfill({
-                            json: expectedToken === token ? rows.toReversed() : [],
+                            json: {
+                                items: expectedToken === token ? rows.toReversed() : [],
+                                total: expectedToken === token ? rows.length : 0,
+                            },
                         });
                     }
                     if (path === '/buildings') {
                         return route.fulfill({
-                            json: [
-                                {
-                                    id: 'existing',
-                                    name: 'Existing building',
-                                    latitude: null,
-                                    longitude: null,
-                                    latest_reconstruction: null,
-                                },
-                            ],
+                            json: {
+                                items: [
+                                    {
+                                        id: 'existing',
+                                        name: 'Existing building',
+                                        latitude: null,
+                                        longitude: null,
+                                        latest_reconstruction: null,
+                                    },
+                                ],
+                                total: 1,
+                            },
                         });
                     }
                     assert.ok(path.startsWith('/tus/files/'), `Unexpected request: ${path}`);

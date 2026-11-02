@@ -4,7 +4,7 @@ import builtins
 from typing import Literal
 from uuid import UUID
 
-from sqlmodel import col, select
+from sqlmodel import col, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from api.models.building import (
@@ -15,6 +15,7 @@ from api.models.building import (
     BuildingRead,
     BuildingUpdate,
 )
+from api.models.pagination import Page
 from api.models.reconstruction import Reconstruction, ReconstructionStatus
 from api.models.user import utc_now
 from api.services.reconstructions import ReconstructionService
@@ -54,7 +55,7 @@ class BuildingService:
         sort_order: SortOrder = "desc",
         reconstruction_status: ReconstructionStatusFilter | None = None,
         search: str | None = None,
-    ) -> builtins.list[BuildingListItemRead]:
+    ) -> Page[BuildingListItemRead]:
         if offset < 0:
             raise ValueError("offset must be non-negative")
         if not 1 <= limit <= 100:
@@ -110,13 +111,21 @@ class BuildingService:
                 col(Building.name).icontains(term, autoescape=True)
             )
 
+        total = (
+            await self._session.exec(
+                select(func.count()).select_from(statement.subquery())
+            )
+        ).one()
         result = await self._session.exec(
             statement.order_by(*ordering).offset(offset).limit(limit)
         )
-        return [
-            BuildingRead.model_validate(building).to_list_item(reconstruction)
-            for building, reconstruction in result.all()
-        ]
+        return Page(
+            items=[
+                BuildingRead.model_validate(building).to_list_item(reconstruction)
+                for building, reconstruction in result.all()
+            ],
+            total=total,
+        )
 
     async def list_locations(
         self, *, user_id: UUID

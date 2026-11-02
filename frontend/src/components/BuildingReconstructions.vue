@@ -215,7 +215,7 @@
         >
             <q-pagination
                 v-model="page"
-                :max="page + Number(hasNext)"
+                :max="totalPages"
                 :max-pages="5"
                 :boundary-numbers="false"
                 :ellipses="false"
@@ -247,12 +247,26 @@ const expandedId = ref<string | null>(null);
 const {
     data,
     state,
+    asyncStatus,
     refetch,
     isForegroundLoading: isLoading,
 } = useReconstructionsQuery(toRef(props, 'buildingId'), offset);
-const reconstructions = computed(() => data.value?.slice(0, RECONSTRUCTIONS_PAGE_SIZE) ?? []);
+const reconstructions = computed(() => data.value?.items ?? []);
 const reconstructionProcessingStore = useReconstructionProcessingStore();
-const hasNext = computed(() => (data.value?.length ?? 0) > RECONSTRUCTIONS_PAGE_SIZE);
+// Keep the paginator's bounds while a different page is loading.
+const totalPages = computed<number>((previous = 1) =>
+    data.value === undefined || asyncStatus.value === 'loading'
+        ? previous
+        : Math.max(1, Math.ceil(data.value.total / RECONSTRUCTIONS_PAGE_SIZE)),
+);
+watch([state, asyncStatus], ([result, status]) => {
+    if (result.status !== 'success' || status === 'loading') return;
+    const lastOffset = (totalPages.value - 1) * RECONSTRUCTIONS_PAGE_SIZE;
+    if (offset.value > lastOffset) {
+        offset.value = lastOffset;
+        void refetch();
+    }
+});
 const page = computed({
     get: () => offset.value / RECONSTRUCTIONS_PAGE_SIZE + 1,
     set: (value: number) => {

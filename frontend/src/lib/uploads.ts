@@ -1,3 +1,4 @@
+import type { Page } from 'src/lib/pagination';
 import { requestJson } from 'src/lib/api';
 
 export type UploadStatus = 'pending' | 'uploaded' | 'failed';
@@ -29,7 +30,7 @@ export function listUploads({
     offset = 0,
     limit = 100,
     sort_order = 'desc',
-}: ListUploadsOptions = {}): Promise<UserUpload[]> {
+}: ListUploadsOptions = {}): Promise<Page<UserUpload>> {
     const params = new URLSearchParams({
         offset: String(offset),
         limit: String(limit),

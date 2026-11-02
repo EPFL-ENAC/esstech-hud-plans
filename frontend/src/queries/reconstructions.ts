@@ -38,7 +38,7 @@ export function useReconstructionsQuery(buildingId: Ref<string>, offset: Ref<num
     );
     const options = computed(() => ({
         offset: offset.value,
-        limit: RECONSTRUCTIONS_PAGE_SIZE + 1,
+        limit: RECONSTRUCTIONS_PAGE_SIZE,
         sort_order: 'desc' as const,
     }));
     const query = useQuery({
@@ -85,15 +85,13 @@ export function useReconstructionsQuery(buildingId: Ref<string>, offset: Ref<num
     const shouldPoll = computed(
         () =>
             enabled.value &&
-            query.data.value
-                ?.slice(0, RECONSTRUCTIONS_PAGE_SIZE)
-                .some(
-                    ({ status }) =>
-                        status === 'waiting_for_upload' ||
-                        status === 'preparing' ||
-                        status === 'scheduled' ||
-                        status === 'running',
-                ) === true,
+            query.data.value?.items.some(
+                ({ status }) =>
+                    status === 'waiting_for_upload' ||
+                    status === 'preparing' ||
+                    status === 'scheduled' ||
+                    status === 'running',
+            ) === true,
     );
     let pollingTimer: ReturnType<typeof setInterval> | undefined;
     function stopPolling() {

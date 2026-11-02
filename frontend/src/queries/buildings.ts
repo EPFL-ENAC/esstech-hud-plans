@@ -1,3 +1,4 @@
+import type { Page } from 'src/lib/pagination';
 import { useQuery } from '@pinia/colada';
 import {
     computed,
@@ -31,11 +32,11 @@ export function useAllBuildingsQuery() {
         query: async () => {
             const buildings: BuildingListItem[] = [];
             const limit = 100;
-            let page: BuildingListItem[];
+            let page: Page<BuildingListItem>;
             do {
                 page = await listBuildings({ offset: buildings.length, limit });
-                buildings.push(...page);
-            } while (page.length === limit);
+                buildings.push(...page.items);
+            } while (page.items.length > 0 && buildings.length < page.total);
             return buildings;
         },
         staleTime: 30_000,
@@ -96,7 +97,7 @@ export function useMyBuildingsQuery(
     const enabled = computed(() => subject !== null && active.value && visible.value);
     const options = computed(() => ({
         offset: offset.value,
-        limit: MY_BUILDINGS_PAGE_SIZE + 1,
+        limit: MY_BUILDINGS_PAGE_SIZE,
         sort_order: 'desc' as const,
         reconstruction_status: toValue(reconstructionStatus) ?? null,
         search: toValue(search)?.trim() || null,
@@ -146,7 +147,7 @@ export function useMyBuildingsQuery(
     const shouldPoll = computed(
         () =>
             enabled.value &&
-            query.data.value?.slice(0, MY_BUILDINGS_PAGE_SIZE).some((building) => {
+            query.data.value?.items.some((building) => {
                 const status = building.latest_reconstruction?.status;
                 return (
                     status === 'waiting_for_upload' ||

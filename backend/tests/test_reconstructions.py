@@ -35,6 +35,7 @@ from api.lib.workflows import common as workflow_common
 from api.lib.workflows import splat_generation as splat_workflow
 from api.lib.workflows.common import WorkflowNotFoundError
 from api.models.building import Building
+from api.models.pagination import Page
 from api.models.reconstruction import (
     Reconstruction,
     ReconstructionArtifactUpdate,
@@ -403,22 +404,24 @@ def test_reconstruction_list_sorting_and_pagination(sort_order: SortOrder) -> No
             session.add_all([second_tie, foreign, oldest, first_tie])
             await session.commit()
             expected = [oldest, first_tie, second_tie]
-            assert await service.list(building_id=building.id) == list(
+            assert (await service.list(building_id=building.id)).items == list(
                 reversed(expected)
             )
             if sort_order == "desc":
                 expected.reverse()
             assert (
                 await service.list(building_id=building.id, sort_order=sort_order)
-                == expected
-            )
+            ).items == expected
             pages = [
                 await service.list(
                     building_id=building.id, sort_order=sort_order, offset=i, limit=1
                 )
                 for i in range(4)
             ]
-            assert pages == [[item] for item in expected] + [[]]
+            assert all(page.total == len(expected) for page in pages)
+            assert [page.items for page in pages] == [[item] for item in expected] + [
+                []
+            ]
 
     asyncio.run(run())
 
@@ -648,7 +651,9 @@ def test_pending_upload_submission_persists_without_scheduling(
     for field in ("prefect_workflow_id", "workspace_directory", "input_video_path"):
         assert row[field] is None
     destination = row["building_id"]
-    assert client.get(f"/buildings/{destination}/reconstructions").json() == [row]
+    assert client.get(f"/buildings/{destination}/reconstructions").json()["items"] == [
+        row
+    ]
     assert (
         client.get(
             f"/buildings/{destination}/reconstructions/{row['id']}/current-step"
@@ -1057,7 +1062,7 @@ def test_nested_reconstruction_routes_create_list_and_get(
 
     listed = client.get(f"/buildings/{building_id}/reconstructions")
     assert listed.status_code == 200
-    assert listed.json() == [created]
+    assert listed.json()["items"] == [created]
 
     fetched = client.get(
         f"/buildings/{building_id}/reconstructions/{reconstruction_id}"
@@ -1102,10 +1107,42 @@ def test_nested_reconstruction_routes_sorting(
     ]:
         response = client.get(url + suffix)
         assert response.status_code == 200
-        assert [row["id"] for row in response.json()] == expected
+        assert [row["id"] for row in response.json()["items"]] == expected
     page = client.get(url + "?sort_order=asc&offset=1&limit=1")
-    assert [row["id"] for row in page.json()] == [ascending[1]]
+    assert [row["id"] for row in page.json()["items"]] == [ascending[1]]
     assert client.get(url + "?sort_order=invalid").status_code == 422
+
+
+@pytest.mark.parametrize("count", [0, 1, 20, 21, 40, 101])
+def test_reconstruction_pages_report_total(
+    reconstruction_api: tuple[TestClient, UUID],
+    count: int,
+) -> None:
+    client, building_id = reconstruction_api
+
+    async def insert() -> None:
+        async for session in client.app.dependency_overrides[get_session]():
+            settings = SplatGenerationWorkflowSettings().model_dump(mode="json")
+            session.add_all(
+                [
+                    Reconstruction(building_id=building_id, settings=settings)
+                    for _ in range(count)
+                ]
+            )
+            await session.commit()
+
+    asyncio.run(insert())
+    for limit in (20, 100):
+        for offset in sorted({0, limit, count, count + 1}):
+            response = client.get(
+                f"/buildings/{building_id}/reconstructions",
+                params={"offset": offset, "limit": limit},
+            )
+            assert response.status_code == 200
+            page = response.json()
+            assert set(page) == {"items", "total"}
+            assert page["total"] == count
+            assert len(page["items"]) == min(limit, max(0, count - offset))
 
 
 def _set_artifact_path(
@@ -1693,7 +1730,7 @@ def test_nested_reconstruction_routes_map_database_failures_to_503(
         def __init__(self) -> None:
             pass
 
-        async def list(self, **kwargs: object) -> list[Reconstruction]:
+        async def list(self, **kwargs: object) -> Page[Reconstruction]:
             raise OperationalError("SELECT", {}, RuntimeError("offline"))
 
     client.app.dependency_overrides[reconstruction_views.get_reconstruction_service] = (
@@ -1891,13 +1928,13 @@ def test_building_from_reconstruction_requires_authentication(
     reconstruction_api: tuple[TestClient, UUID],
 ) -> None:
     client, _ = reconstruction_api
-    before = client.get("/buildings").json()
+    before = client.get("/buildings").json()["items"]
     original = client.app.dependency_overrides.pop(require_user)
     try:
         assert _submit_building_from_reconstruction(client).status_code == 401
     finally:
         client.app.dependency_overrides[require_user] = original
-    assert client.get("/buildings").json() == before
+    assert client.get("/buildings").json()["items"] == before
 
 
 @pytest.mark.parametrize("failed_model", [Building, Reconstruction])
@@ -1909,7 +1946,7 @@ def test_building_from_reconstruction_handles_database_insert_failure(
     from sqlalchemy import event
 
     client, _ = reconstruction_api
-    before = client.get("/buildings").json()
+    before = client.get("/buildings").json()["items"]
 
     def fail_insert(*args: object) -> None:
         raise OperationalError("INSERT", {}, RuntimeError("offline"))
@@ -1922,15 +1959,17 @@ def test_building_from_reconstruction_handles_database_insert_failure(
     assert response.status_code == 503
     if failed_model is Building:
         assert response.json() == {"detail": "Building database is unavailable"}
-        assert client.get("/buildings").json() == before
+        assert client.get("/buildings").json()["items"] == before
     else:
         detail = response.json()["detail"]
         assert detail["message"] == "Reconstruction database is unavailable"
         assert "reconstruction_id" not in detail
-        assert len(client.get("/buildings").json()) == len(before) + 1
+        assert len(client.get("/buildings").json()["items"]) == len(before) + 1
         assert client.get(f"/buildings/{detail['building_id']}").status_code == 200
         assert (
-            client.get(f"/buildings/{detail['building_id']}/reconstructions").json()
+            client.get(f"/buildings/{detail['building_id']}/reconstructions").json()[
+                "items"
+            ]
             == []
         )
     # The completed upload survives; no reconstruction artifacts were created.
@@ -1967,7 +2006,7 @@ def test_delete_removes_files_and_row_for_completed_reconstruction(
             assert reconstruction.input_video_path is not None
             assert Path(reconstruction.input_video_path).read_bytes() == b"video bytes"
             assert await service.get(reconstruction.id, building_id=building.id) is None
-            assert await service.list(building_id=building.id) == []
+            assert (await service.list(building_id=building.id)).items == []
             assert cancel_calls == []
 
     asyncio.run(run())
@@ -2153,7 +2192,7 @@ def test_nested_reconstruction_delete_route(
         ).status_code
         == 404
     )
-    assert client.get(f"/buildings/{building_id}/reconstructions").json() == []
+    assert client.get(f"/buildings/{building_id}/reconstructions").json()["items"] == []
     assert (
         client.delete(f"/buildings/{building_id}/reconstructions/{uuid4()}").status_code
         == 404

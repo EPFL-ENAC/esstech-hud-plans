@@ -76,13 +76,13 @@
             </template>
         </QueryStateSwitcher>
         <nav
-            v-if="(data && data.length > 0) || offset > 0"
+            v-if="(data && data.items.length > 0) || offset > 0"
             :aria-label="t('buildings.list.pagination')"
             class="row justify-center q-pa-md"
         >
             <q-pagination
                 v-model="page"
-                :max="page + Number(hasNext)"
+                :max="totalPages"
                 :max-pages="5"
                 :boundary-numbers="false"
                 :ellipses="false"
@@ -121,6 +121,7 @@ watch(
 const {
     data,
     state,
+    asyncStatus,
     refetch,
     isForegroundLoading: isLoading,
 } = useMyBuildingsQuery(offset, () => props.reconstructionStatus, normalizedSearch);
@@ -128,8 +129,21 @@ const emptyMessage = computed(() => {
     if (offset.value > 0) return t('buildings.list.emptyPage');
     return normalizedSearch.value ? t('buildings.list.noMatches') : t('buildings.list.empty');
 });
-const buildings = computed(() => data.value?.slice(0, MY_BUILDINGS_PAGE_SIZE) ?? []);
-const hasNext = computed(() => (data.value?.length ?? 0) > MY_BUILDINGS_PAGE_SIZE);
+const buildings = computed(() => data.value?.items ?? []);
+// Keep the paginator's bounds while a different page is loading.
+const totalPages = computed<number>((previous = 1) =>
+    data.value === undefined || asyncStatus.value === 'loading'
+        ? previous
+        : Math.max(1, Math.ceil(data.value.total / MY_BUILDINGS_PAGE_SIZE)),
+);
+watch([state, asyncStatus], ([result, status]) => {
+    if (result.status !== 'success' || status === 'loading') return;
+    const lastOffset = (totalPages.value - 1) * MY_BUILDINGS_PAGE_SIZE;
+    if (offset.value > lastOffset) {
+        offset.value = lastOffset;
+        void refetch();
+    }
+});
 const page = computed({
     get: () => offset.value / MY_BUILDINGS_PAGE_SIZE + 1,
     set: (value: number) => {

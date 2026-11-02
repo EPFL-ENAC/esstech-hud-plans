@@ -8,7 +8,7 @@ from typing import Literal
 from uuid import UUID, uuid4
 
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import col, select, update
+from sqlmodel import col, func, select, update
 from sqlmodel.ext.asyncio.session import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
@@ -20,6 +20,7 @@ from api.lib.upload_storage import (
     upload_file_path,
     validate_completed_file,
 )
+from api.models.pagination import Page
 from api.models.reconstruction import Reconstruction, ReconstructionStatus
 from api.models.uploads import (
     UploadStatus,
@@ -119,7 +120,7 @@ class UserUploadsService:
         limit: int = 100,
         sort_order: SortOrder = "desc",
         status: UploadStatus | None = None,
-    ) -> builtins.list[UserUploads]:
+    ) -> Page[UserUploads]:
         if offset < 0:
             raise ValueError("offset must be non-negative")
         if not 1 <= limit <= 100:
@@ -135,10 +136,13 @@ class UserUploadsService:
         query = select(UserUploads).where(UserUploads.user_id == user_id)
         if status is not None:
             query = query.where(UserUploads.status == status)
+        total = (
+            await self._session.exec(select(func.count()).select_from(query.subquery()))
+        ).one()
         result = await self._session.exec(
             query.order_by(*ordering).offset(offset).limit(limit)
         )
-        return list(result.all())
+        return Page(items=list(result.all()), total=total)
 
     async def update(
         self,

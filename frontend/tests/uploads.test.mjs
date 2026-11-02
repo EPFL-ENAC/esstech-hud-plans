@@ -97,6 +97,10 @@ function respond(request, body, status = 200) {
     request.gate.resolve(new Response(JSON.stringify(body), { status }));
 }
 
+function respondPage(request, items, total = items.length) {
+    respond(request, { items, total });
+}
+
 function rows(prefix, count = 1) {
     return Array.from({ length: count }, (_, index) => ({
         id: `${prefix}-${index}`,
@@ -115,19 +119,19 @@ test('listUploads uses the authenticated HTTP boundary with default pagination',
         'https://hud.test/api/uploads?offset=0&limit=100&sort_order=desc',
     );
     const data = rows('default');
-    respond(f.requests[0], data);
-    assert.deepEqual(await promise, data);
+    respondPage(f.requests[0], data);
+    assert.deepEqual(await promise, { items: data, total: data.length });
 });
 
 test('listUploads preserves explicit offset, limit, and ordering', async (t) => {
     const f = await fixture(t);
-    const promise = f.uploads.listUploads({ offset: 40, limit: 21, sort_order: 'asc' });
+    const promise = f.uploads.listUploads({ offset: 40, limit: 20, sort_order: 'asc' });
     assert.equal(
         f.requests[0].url,
-        'https://hud.test/api/uploads?offset=40&limit=21&sort_order=asc',
+        'https://hud.test/api/uploads?offset=40&limit=20&sort_order=asc',
     );
-    respond(f.requests[0], []);
-    assert.deepEqual(await promise, []);
+    respondPage(f.requests[0], []);
+    assert.deepEqual(await promise, { items: [], total: 0 });
 });
 
 test('getUpload encodes the ID and uses the authenticated detail endpoint', async (t) => {
@@ -220,34 +224,34 @@ test('shared requestJson preserves plain text errors and empty success responses
     assert.equal(await success, null);
 });
 
-test('pagination fetches 21 rows per page and reuses cached previous pages', async (t) => {
+test('pagination fetches 20 rows per page and reuses cached previous pages', async (t) => {
     const f = await fixture(t);
     const offset = ref(0);
     const query = f.query(offset);
     assert.equal(
         f.requests[0].url,
-        'https://hud.test/api/uploads?offset=0&limit=21&sort_order=desc',
+        'https://hud.test/api/uploads?offset=0&limit=20&sort_order=desc',
     );
-    const firstPage = rows('first', 21);
-    respond(f.requests[0], firstPage);
+    const firstPage = rows('first', 20);
+    respondPage(f.requests[0], firstPage, 25);
     await nextTurn();
-    assert.deepEqual(query.data.value, firstPage);
+    assert.deepEqual(query.data.value, { items: firstPage, total: 25 });
 
     offset.value = 20;
     await nextTick();
     assert.equal(
         f.requests[1].url,
-        'https://hud.test/api/uploads?offset=20&limit=21&sort_order=desc',
+        'https://hud.test/api/uploads?offset=20&limit=20&sort_order=desc',
     );
     const secondPage = rows('second', 5);
-    respond(f.requests[1], secondPage);
+    respondPage(f.requests[1], secondPage, 25);
     await nextTurn();
-    assert.deepEqual(query.data.value, secondPage);
+    assert.deepEqual(query.data.value, { items: secondPage, total: 25 });
 
     offset.value = 0;
     await nextTick();
     await nextTurn();
-    assert.deepEqual(query.data.value, firstPage);
+    assert.deepEqual(query.data.value, { items: firstPage, total: 25 });
     assert.equal(f.requests.length, 2);
 });
 
@@ -255,21 +259,21 @@ test('Colada caches upload lists separately for each authenticated subject', asy
     const f = await fixture(t);
     const first = f.query();
     const firstData = rows('private-a');
-    respond(f.requests[0], firstData);
+    respondPage(f.requests[0], firstData);
     await nextTurn();
     f.setSubject('user-b');
     const second = f.query();
     assert.equal(second.data.value, undefined);
     const secondData = rows('private-b');
-    respond(f.requests[1], secondData);
+    respondPage(f.requests[1], secondData);
     await nextTurn();
-    assert.deepEqual(first.data.value, firstData);
-    assert.deepEqual(second.data.value, secondData);
+    assert.deepEqual(first.data.value, { items: firstData, total: firstData.length });
+    assert.deepEqual(second.data.value, { items: secondData, total: secondData.length });
 
     f.setSubject('user-a');
     const restored = f.query();
     await nextTurn();
-    assert.deepEqual(restored.data.value, firstData);
+    assert.deepEqual(restored.data.value, { items: firstData, total: firstData.length });
     assert.equal(f.requests.length, 2);
 });
 
@@ -285,23 +289,23 @@ test('refresh failures preserve cached rows and retry can recover', async (t) =>
     const f = await fixture(t);
     const query = f.query();
     const original = rows('cached');
-    respond(f.requests[0], original);
+    respondPage(f.requests[0], original);
     await nextTurn();
 
     const refresh = query.refetch();
     assert.equal(query.isLoading.value, true);
-    assert.deepEqual(query.data.value, original);
+    assert.deepEqual(query.data.value, { items: original, total: original.length });
     respond(f.requests[1], { detail: 'Unavailable' }, 503);
     await refresh;
     assert.equal(query.state.value.status, 'error');
-    assert.deepEqual(query.data.value, original);
+    assert.deepEqual(query.data.value, { items: original, total: original.length });
 
     const retry = query.refetch();
     const recovered = rows('recovered');
-    respond(f.requests[2], recovered);
+    respondPage(f.requests[2], recovered);
     await retry;
     assert.equal(query.state.value.status, 'success');
-    assert.deepEqual(query.data.value, recovered);
+    assert.deepEqual(query.data.value, { items: recovered, total: recovered.length });
 });
 
 for (const terminalStatus of ['uploaded', 'failed']) {
@@ -383,7 +387,7 @@ test('initial failures and completed upload lists do not opt into polling', asyn
     respond(f.requests[0], { detail: 'Unavailable' }, 503);
     await nextTurn();
     f.query();
-    respond(f.requests[1], rows('list'));
+    respondPage(f.requests[1], rows('list'));
     await nextTurn();
     await f.advance(20_000);
     assert.equal(f.requests.length, 2);
@@ -447,10 +451,9 @@ test('an account change stops the previous account from polling', async (t) => {
 test('upload lists poll once per page and stop when visible pending uploads finish', async (t) => {
     const f = await fixture(t);
     const query = f.query();
-    const page = rows('page', 21);
+    const page = rows('page', 20);
     page[0] = { ...page[0], status: 'pending', uploaded_bytes: 10 };
-    page[20] = { ...page[20], status: 'pending', uploaded_bytes: 0 };
-    respond(f.requests[0], page);
+    respondPage(f.requests[0], page);
     await nextTurn();
     await f.advance(4_999);
     assert.equal(f.requests.length, 1);
@@ -458,42 +461,46 @@ test('upload lists poll once per page and stop when visible pending uploads fini
     assert.equal(f.requests.length, 2);
     assert.equal(
         f.requests[1].url,
-        'https://hud.test/api/uploads?offset=0&limit=21&sort_order=desc',
+        'https://hud.test/api/uploads?offset=0&limit=20&sort_order=desc',
     );
     await f.advance(10_000);
     assert.equal(f.requests.length, 2, 'Slow polls must not overlap');
     page[0] = { ...page[0], uploaded_bytes: 60 };
-    respond(f.requests[1], page);
+    respondPage(f.requests[1], page);
     await nextTurn();
-    assert.equal(query.data.value[0].uploaded_bytes, 60);
+    assert.equal(query.data.value.items[0].uploaded_bytes, 60);
     await f.advance(5_000);
     page[0] = { ...page[0], status: 'uploaded', uploaded_bytes: 100 };
-    respond(f.requests[2], page);
+    respondPage(f.requests[2], page);
     await nextTurn();
     await f.advance(20_000);
-    assert.equal(f.requests.length, 3, 'The extra pagination row must not keep polling alive');
+    assert.equal(
+        f.requests.length,
+        3,
+        'Only pending uploads on the requested page keep polling alive',
+    );
 });
 
 test('upload list polling follows pagination and scope disposal', async (t) => {
     const f = await fixture(t);
     const offset = ref(0);
     const query = f.query(offset);
-    respond(f.requests[0], [{ ...rows('first')[0], status: 'pending' }]);
+    respondPage(f.requests[0], [{ ...rows('first')[0], status: 'pending' }]);
     await nextTurn();
     await f.advance(5_000);
     offset.value = 20;
     await nextTick();
     assert.equal(f.requests.length, 3);
     assert.equal(new URL(f.requests[2].url).searchParams.get('offset'), '20');
-    respond(f.requests[2], [{ ...rows('second')[0], status: 'pending' }]);
-    respond(f.requests[1], rows('first'));
+    respondPage(f.requests[2], [{ ...rows('second')[0], status: 'pending' }]);
+    respondPage(f.requests[1], rows('first'));
     await nextTurn();
-    assert.equal(query.data.value[0].id, 'second-0');
+    assert.equal(query.data.value.items[0].id, 'second-0');
     await f.advance(5_000);
     assert.equal(f.requests.length, 4);
     assert.equal(new URL(f.requests[3].url).searchParams.get('offset'), '20');
     f.stop();
-    respond(f.requests[3], [{ ...rows('second')[0], status: 'pending' }]);
+    respondPage(f.requests[3], [{ ...rows('second')[0], status: 'pending' }]);
     await nextTurn();
     await f.advance(10_000);
     assert.equal(f.requests.length, 4);
@@ -504,7 +511,7 @@ for (const pause of ['visibility', 'activation']) {
         const f = await fixture(t);
         f.query();
         const pending = [{ ...rows('list')[0], status: 'pending' }];
-        respond(f.requests[0], pending);
+        respondPage(f.requests[0], pending);
         await nextTurn();
         const setEnabled = pause === 'visibility' ? f.setVisible : f.setActive;
         await setEnabled(false);
@@ -512,11 +519,11 @@ for (const pause of ['visibility', 'activation']) {
         assert.equal(f.requests.length, 1);
         await setEnabled(true);
         assert.equal(f.requests.length, 2);
-        respond(f.requests[1], pending);
+        respondPage(f.requests[1], pending);
         await nextTurn();
         await f.advance(5_000);
         assert.equal(f.requests.length, 3);
-        respond(f.requests[2], rows('list'));
+        respondPage(f.requests[2], rows('list'));
     });
 }
 
@@ -526,16 +533,16 @@ for (const status of [401, 403, 404, 422, 503]) {
         const f = await fixture(t);
         const query = f.query();
         const pending = [{ ...rows('list')[0], status: 'pending', uploaded_bytes: 25 }];
-        respond(f.requests[0], pending);
+        respondPage(f.requests[0], pending);
         await nextTurn();
         await f.advance(5_000);
         respond(f.requests[1], { detail: 'Unavailable' }, status);
         await nextTurn();
-        assert.equal(query.data.value[0].uploaded_bytes, 25);
+        assert.equal(query.data.value.items[0].uploaded_bytes, 25);
         await f.advance(5_000);
         if (status === 503) {
             assert.equal(f.requests.length, 3);
-            respond(f.requests[2], rows('list'));
+            respondPage(f.requests[2], rows('list'));
             await nextTurn();
             assert.equal(query.state.value.status, 'success');
         } else {
@@ -547,7 +554,7 @@ for (const status of [401, 403, 404, 422, 503]) {
 test('an account change stops upload list polling', async (t) => {
     const f = await fixture(t);
     f.query();
-    respond(f.requests[0], [{ ...rows('private')[0], status: 'pending' }]);
+    respondPage(f.requests[0], [{ ...rows('private')[0], status: 'pending' }]);
     await nextTurn();
     f.setSubject('user-b');
     await f.advance(10_000);
@@ -559,21 +566,21 @@ test('returning to a pending cached page restarts polling after an off-page resp
     const offset = ref(0);
     const query = f.query(offset);
     const pending = [{ ...rows('first')[0], status: 'pending', uploaded_bytes: 25 }];
-    respond(f.requests[0], pending);
+    respondPage(f.requests[0], pending);
     await nextTurn();
     await f.advance(5_000);
     offset.value = 20;
     await nextTick();
-    respond(f.requests[2], rows('second'));
-    respond(f.requests[1], pending);
+    respondPage(f.requests[2], rows('second'));
+    respondPage(f.requests[1], pending);
     await nextTurn();
     offset.value = 0;
     await nextTick();
-    assert.equal(query.data.value[0].uploaded_bytes, 25);
+    assert.equal(query.data.value.items[0].uploaded_bytes, 25);
     assert.equal(f.requests.length, 4);
-    respond(f.requests[3], pending);
+    respondPage(f.requests[3], pending);
     await nextTurn();
     await f.advance(5_000);
     assert.equal(f.requests.length, 5);
-    respond(f.requests[4], rows('first'));
+    respondPage(f.requests[4], rows('first'));
 });
