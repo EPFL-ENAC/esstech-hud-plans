@@ -48,6 +48,29 @@ local workflow deployment process:
 make run-workflows
 ```
 
+In Kubernetes, the API and workflow runner use the same backend image in
+separate Deployments. The image entrypoint prepares SSH access and executes its
+arguments. Its default command runs `start-api.sh`, which applies migrations
+before starting Uvicorn. The runner overrides the command arguments with
+`python -m api.lib.workflows`; an init container checks
+`alembic current --check-heads` before allowing it to start.
+
+Both pods use `USE_SCITAS=true` and `DATA_DIR=/mnt/scitas`, mounting the existing
+SCITAS PVC at `/mnt/scitas`. They also mount the tus upload PVC at
+`/mnt/tus-uploads` with `TUSD_UPLOAD_DIR=/mnt/tus-uploads`, so the runner can clean
+up abandoned uploads. The runner enables Prefect's monitoring server through
+`PREFECT_RUNNER_SERVER_ENABLE=true`, `PREFECT_RUNNER_SERVER_HOST=0.0.0.0`, and
+`PREFECT_RUNNER_SERVER_PORT=8080`. Kubernetes restarts the runner on exit or
+prolonged polling failure. Runner shutdown leaves deployment schedules active.
+
+For the first rollout, keep the runner at zero replicas in every environment.
+Drain active reconstructions, deploy the new backend image, and wait for API
+startup and migrations to complete. Then set the runner to one replica, starting
+with staging. Verify that a queued reconstruction starts and that terminating
+the runner causes an automatic restart while the API stays available. Repeat
+for the remaining environments. Replacing a runner can interrupt active runs;
+this change does not add retries for interrupted reconstructions.
+
 The Prefect container enables live log publishing and websocket streaming for
 workflow log subscribers. Recreate or restart the Prefect container after
 changing these settings.

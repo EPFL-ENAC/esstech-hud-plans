@@ -20,6 +20,7 @@ def serve_workflows() -> None:
     serve(
         reconstruction,
         cleanup,
+        pause_on_shutdown=False,
         limit=config.PREFECT_SPLAT_GENERATION_CONCURRENCY
         + config.PREFECT_TUS_CLEANUP_CONCURRENCY,
     )
