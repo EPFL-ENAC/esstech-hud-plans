@@ -16,16 +16,17 @@ from api.lib.utils.commands import (
 )
 
 
-def test_build_frame_extraction_command_uses_workspace_relative_paths(
+def test_build_frame_extraction_command_reads_external_source_and_writes_in_workspace(
     tmp_path: Path,
 ) -> None:
     video_path = tmp_path / "source videos" / "input video.mp4"
-    frames_directory = tmp_path / "output frames"
+    workspace_directory = tmp_path / "workflow"
+    frames_directory = workspace_directory / "output frames"
 
     command = ffmpeg.build_frame_extraction_command(
         video_path,
         frames_directory,
-        workspace_directory=tmp_path,
+        workspace_directory=workspace_directory,
         fps=2.5,
         fit_in_width=1920,
         fit_in_height=1080,
@@ -37,7 +38,7 @@ def test_build_frame_extraction_command_uses_workspace_relative_paths(
             "-nostdin",
             "-y",
             "-i",
-            "source videos/input video.mp4",
+            str(video_path.resolve()),
             "-vf",
             "scale=1920:1080:force_original_aspect_ratio=decrease,fps=2.5",
             "-q:v",
@@ -66,13 +67,13 @@ def test_build_frame_extraction_command_can_extract_every_frame(
     )
 
 
-def test_build_frame_extraction_command_rejects_paths_outside_workspace(
+def test_build_frame_extraction_command_rejects_output_outside_workspace(
     tmp_path: Path,
 ) -> None:
     with pytest.raises(ValueError, match="must be inside workspace"):
         ffmpeg.build_frame_extraction_command(
-            tmp_path.parent / "input.mp4",
-            tmp_path / "frames",
+            tmp_path / "input.mp4",
+            tmp_path.parent / "frames",
             workspace_directory=tmp_path,
             fps=2,
             fit_in_width=100,
@@ -153,6 +154,23 @@ def test_run_frame_extraction_requires_at_least_one_frame(
         )
 
 
+def test_run_frame_extraction_rejects_missing_source_before_creating_outputs(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workflow"
+    with pytest.raises(FileNotFoundError, match="Input video does not exist"):
+        ffmpeg.run_frame_extraction(
+            tmp_path / "uploads" / "missing.mp4",
+            workspace / "frames",
+            workspace_directory=workspace,
+            execution_environment=LocalCommandExecutionEnvironment(),
+            fps=2,
+            fit_in_width=100,
+            fit_in_height=100,
+        )
+    assert not workspace.exists()
+
+
 def _ffmpeg_is_available() -> bool:
     return (LOCAL_EXECUTABLES_DIRECTORY / "ffmpeg").is_file() or shutil.which(
         "ffmpeg"
@@ -163,7 +181,9 @@ def _ffmpeg_is_available() -> bool:
 def test_run_frame_extraction_with_real_ffmpeg(tmp_path: Path) -> None:
     working_directory = tmp_path / "directory with spaces"
     working_directory.mkdir()
-    video_path = working_directory / "input video.mp4"
+    upload_directory = tmp_path / "permanent uploads"
+    upload_directory.mkdir()
+    video_path = upload_directory / "input video.mp4"
     frames_directory = working_directory / "output frames"
     environment = LocalCommandExecutionEnvironment()
     ffmpeg_command = environment._resolve_tool("ffmpeg")
@@ -204,3 +224,5 @@ def test_run_frame_extraction_with_real_ffmpeg(tmp_path: Path) -> None:
     assert image is not None
     assert image.shape[:2] == (24, 32)
     assert any(record.startswith("frame=") for record in records)
+    assert video_path.is_file()
+    assert not (working_directory / "video").exists()

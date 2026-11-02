@@ -1,3 +1,6 @@
+import os
+import shlex
+import subprocess
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -53,7 +56,7 @@ def _stub_registry(
     return registered, forgotten
 
 
-def test_scitas_environment_stages_runs_streams_and_retrieves_workspace(
+def test_scitas_environment_submits_and_streams_workspace_job(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     workspace = tmp_path / "workspace with spaces"
@@ -62,9 +65,6 @@ def test_scitas_environment_stages_runs_streams_and_retrieves_workspace(
     calls: list[tuple] = []
     status_checks = 0
     registered, forgotten = _stub_registry(monkeypatch)
-
-    def copy_to(source_path: str, dest_path: str) -> None:
-        calls.append(("copy-to", source_path, dest_path))
 
     def submit_job(**kwargs) -> str:
         calls.append(("submit", kwargs))
@@ -81,24 +81,18 @@ def test_scitas_environment_stages_runs_streams_and_retrieves_workspace(
             stream.write(b"\x98\x83 record\nlast")
         return "COMPLETED"
 
-    def copy_from(source_path: str, dest_path: str) -> None:
-        calls.append(("copy-from", source_path, dest_path))
-
-    monkeypatch.setattr(scitas_commands.Scitas, "copy_data_to_scratch", copy_to)
-    monkeypatch.setattr(scitas_commands.Scitas, "submit_job", submit_job)
+    monkeypatch.setattr(scitas_compute.Scitas, "submit_job", submit_job)
     monkeypatch.setattr(
-        scitas_commands.Scitas,
+        scitas_compute.Scitas,
         "get_log_file_path",
         lambda job_name: str(log_path),
     )
-    monkeypatch.setattr(scitas_commands.Scitas, "refresh_logs", lambda: None)
-    monkeypatch.setattr(scitas_commands.Scitas, "get_job_status", get_status)
+    monkeypatch.setattr(scitas_compute.Scitas, "get_job_status", get_status)
     monkeypatch.setattr(
-        scitas_commands.Scitas,
+        scitas_compute.Scitas,
         "get_job_result",
         lambda job_name: scitas_compute.ScitasJobResult("COMPLETED", 0),
     )
-    monkeypatch.setattr(scitas_commands.Scitas, "copy_data_from_scratch", copy_from)
     sleeps: list[float] = []
     monkeypatch.setattr(scitas_commands.time, "sleep", sleeps.append)
 
@@ -121,8 +115,6 @@ def test_scitas_environment_stages_runs_streams_and_retrieves_workspace(
     assert sleeps == [0.25]
     assert registered == [("job-1", "workspace with spaces")]
     assert forgotten == [("job-1", "workspace with spaces")]
-    # The executor submits the job and waits for it. The data copies of the
-    # workspace belong to the pipeline, not to the executor.
     assert calls == [
         (
             "submit",
@@ -136,47 +128,36 @@ def test_scitas_environment_stages_runs_streams_and_retrieves_workspace(
                     "frames directory",
                 ],
                 "workspace_rel_path": remote_workspace,
-                "working_directory_rel_path": remote_workspace,
                 "capture": "combined",
             },
         ),
     ]
 
 
-def test_scitas_environment_retrieves_outputs_before_reporting_failure(
+def test_scitas_environment_reports_failure_and_forgets_finished_job(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    copied_from: list[tuple[str, str]] = []
     cancelled: list[str] = []
 
     monkeypatch.setattr(
-        scitas_commands.Scitas, "copy_data_to_scratch", lambda *args: None
+        scitas_compute.Scitas, "submit_job", lambda **kwargs: "failed-job"
     )
     monkeypatch.setattr(
-        scitas_commands.Scitas, "submit_job", lambda **kwargs: "failed-job"
-    )
-    monkeypatch.setattr(
-        scitas_commands.Scitas,
+        scitas_compute.Scitas,
         "get_log_file_path",
         lambda job_name: str(tmp_path / "missing.log"),
     )
-    monkeypatch.setattr(scitas_commands.Scitas, "refresh_logs", lambda: None)
     monkeypatch.setattr(
-        scitas_commands.Scitas, "get_job_status", lambda job_name: "FAILED"
+        scitas_compute.Scitas, "get_job_status", lambda job_name: "FAILED"
     )
     monkeypatch.setattr(
-        scitas_commands.Scitas,
+        scitas_compute.Scitas,
         "get_job_result",
         lambda job_name: scitas_compute.ScitasJobResult("FAILED", 42),
     )
-    monkeypatch.setattr(
-        scitas_commands.Scitas,
-        "copy_data_from_scratch",
-        lambda source, destination: copied_from.append((source, destination)),
-    )
-    monkeypatch.setattr(scitas_commands.Scitas, "cancel_job", cancelled.append)
+    monkeypatch.setattr(scitas_compute.Scitas, "cancel_job", cancelled.append)
     registered, forgotten = _stub_registry(monkeypatch)
 
     command = commands.Command(tool="colmap", arguments=(), capture="combined")
@@ -187,8 +168,6 @@ def test_scitas_environment_retrieves_outputs_before_reporting_failure(
 
     assert error.value.command == command
     assert error.value.return_code == 42
-    # The executor does not copy the workspace data. The pipeline does.
-    assert copied_from == []
     assert cancelled == []
     assert registered == [("failed-job", "workspace")]
     # A job that reports failure in a normal way is dropped from the registry.
@@ -205,18 +184,14 @@ def test_scitas_environment_cancels_job_when_log_callback_fails(
     cancelled: list[str] = []
 
     monkeypatch.setattr(
-        scitas_commands.Scitas, "copy_data_to_scratch", lambda *args: None
+        scitas_compute.Scitas, "submit_job", lambda **kwargs: "running-job"
     )
     monkeypatch.setattr(
-        scitas_commands.Scitas, "submit_job", lambda **kwargs: "running-job"
-    )
-    monkeypatch.setattr(
-        scitas_commands.Scitas,
+        scitas_compute.Scitas,
         "get_log_file_path",
         lambda job_name: str(log_path),
     )
-    monkeypatch.setattr(scitas_commands.Scitas, "refresh_logs", lambda: None)
-    monkeypatch.setattr(scitas_commands.Scitas, "cancel_job", cancelled.append)
+    monkeypatch.setattr(scitas_compute.Scitas, "cancel_job", cancelled.append)
     registered, forgotten = _stub_registry(monkeypatch)
 
     def fail_to_log(record: str) -> None:
@@ -245,19 +220,15 @@ def test_scitas_environment_stops_after_unavailable_status_limit(
     cancelled: list[str] = []
 
     monkeypatch.setattr(
-        scitas_commands.Scitas, "copy_data_to_scratch", lambda *args: None
+        scitas_compute.Scitas, "submit_job", lambda **kwargs: "unknown-job"
     )
     monkeypatch.setattr(
-        scitas_commands.Scitas, "submit_job", lambda **kwargs: "unknown-job"
-    )
-    monkeypatch.setattr(
-        scitas_commands.Scitas,
+        scitas_compute.Scitas,
         "get_log_file_path",
         lambda job_name: str(tmp_path / "missing.log"),
     )
-    monkeypatch.setattr(scitas_commands.Scitas, "refresh_logs", lambda: None)
-    monkeypatch.setattr(scitas_commands.Scitas, "get_job_status", lambda job_name: None)
-    monkeypatch.setattr(scitas_commands.Scitas, "cancel_job", cancelled.append)
+    monkeypatch.setattr(scitas_compute.Scitas, "get_job_status", lambda job_name: None)
+    monkeypatch.setattr(scitas_compute.Scitas, "cancel_job", cancelled.append)
     registered, forgotten = _stub_registry(monkeypatch)
     monkeypatch.setattr(scitas_commands.time, "sleep", lambda seconds: None)
 
@@ -303,8 +274,18 @@ def test_scitas_job_result_parses_slurm_state_and_exit_code(
     assert scitas_compute.Scitas.get_job_result("job-1") == expected_result
 
 
+@pytest.mark.parametrize("capture", ["stdout", "stderr", "combined"])
+@pytest.mark.parametrize(
+    ("command_status", "stage_out_status", "expected_status"),
+    [(0, 0, 0), (42, 0, 42), (0, 23, 23), (42, 23, 42)],
+)
 def test_scitas_submit_job_uses_workspace_cwd_capture_and_failure_safe_stage_out(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capture: commands.CommandLogCapture,
+    command_status: int,
+    stage_out_status: int,
+    expected_status: int,
 ) -> None:
     written_scripts: list[str] = []
 
@@ -342,26 +323,112 @@ def test_scitas_submit_job_uses_workspace_cwd_capture_and_failure_safe_stage_out
     monkeypatch.setattr(scitas_compute, "_exec_ssh_command", execute)
     monkeypatch.setattr(scitas_compute.secrets, "token_hex", lambda size: "abcd1234")
 
-    scitas_compute.Scitas.submit_job(
+    export_root = tmp_path / "export's directory"
+    scratch_root = tmp_path / "scratch's directory"
+    images_root = tmp_path / "image's directory"
+    workspace = "workflows/job's directory"
+    export_workspace = export_root / workspace
+    export_workspace.mkdir(parents=True)
+    (export_workspace / "input.txt").write_text("input")
+    monkeypatch.setattr(
+        scitas_compute.config, "SCITAS_REMOTE_EXPORT_PATH", str(export_root)
+    )
+    monkeypatch.setattr(
+        scitas_compute.config, "SCITAS_REMOTE_SCRATCH_PATH", str(scratch_root)
+    )
+    monkeypatch.setattr(
+        scitas_compute.config, "SCITAS_REMOTE_IMAGES_PATH", str(images_root)
+    )
+    job_name = scitas_compute.Scitas.submit_job(
         tool="colmap",
         command=["colmap", "--image_path", "frames directory"],
-        workspace_rel_path="workflows/job",
-        working_directory_rel_path="workflows/job",
-        capture="stderr",
+        workspace_rel_path=workspace,
+        capture=capture,
     )
 
     assert len(written_scripts) == 1
     script = written_scripts[0]
-    expected_log = f"{scitas_compute.config.SCITAS_REMOTE_EXPORT_PATH}/log/"
-    assert "#SBATCH --output=/dev/null" in script
-    assert f"#SBATCH --error={expected_log}" in script
-    assert "WORKING_DIRECTORY_REL=workflows/job" in script
-    assert 'cd "$WORKING_DIR"' in script
-    assert "colmap --image_path 'frames directory'" in script
-    assert "COMMAND_EXIT_CODE=$?" in script
-    assert 'rsync -avL --ignore-existing "$SCRATCH_DIR/" "$EXPORT_DIR/"' in script
-    assert 'if [ "$COMMAND_EXIT_CODE" -ne 0 ]; then' in script
-    assert 'exit "$STAGE_OUT_EXIT_CODE"' in script
+    expected_log = str(export_root / "log" / f"{job_name}.log")
+    stdout_path = "/dev/null" if capture == "stderr" else expected_log
+    stderr_path = "/dev/null" if capture == "stdout" else expected_log
+    for stream, path in (("output", stdout_path), ("error", stderr_path)):
+        directive = next(
+            line.removeprefix("#SBATCH ")
+            for line in script.splitlines()
+            if line.startswith(f"#SBATCH --{stream}=")
+        )
+        assert shlex.split(directive) == [f"--{stream}={path}"]
+
+    # Execute the generated script against local tools to verify staging order,
+    # argument quoting, the working directory, and both failure exit codes.
+    tools_directory = tmp_path / "bin"
+    tools_directory.mkdir()
+    rsync = tools_directory / "rsync"
+    rsync.write_text(
+        "#!/bin/bash\n"
+        "set -eu\n"
+        'if [[ "$3" == "$HUD_TEST_SCRATCH/"* ]]; then\n'
+        '    echo stage-out >> "$HUD_TEST_EVENTS"\n'
+        '    if [ "$HUD_TEST_STAGE_OUT_STATUS" -ne 0 ]; then\n'
+        '        exit "$HUD_TEST_STAGE_OUT_STATUS"\n'
+        "    fi\n"
+        "else\n"
+        '    echo stage-in >> "$HUD_TEST_EVENTS"\n'
+        "fi\n"
+        'cp -R "$3." "$4"\n'
+    )
+    apptainer = tools_directory / "apptainer"
+    apptainer.write_text(
+        "#!/bin/bash\n"
+        "set -eu\n"
+        'echo run >> "$HUD_TEST_EVENTS"\n'
+        'pwd > "$HUD_TEST_CWD"\n'
+        'printf "%s\\0" "$@" > "$HUD_TEST_ARGUMENTS"\n'
+        'test "$(cat input.txt)" = input\n'
+        "echo output > result.txt\n"
+        'exit "$HUD_TEST_COMMAND_STATUS"\n'
+    )
+    rsync.chmod(0o755)
+    apptainer.chmod(0o755)
+    events_path = tmp_path / "events"
+    cwd_path = tmp_path / "cwd"
+    arguments_path = tmp_path / "arguments"
+    result = subprocess.run(
+        ["bash"],
+        input=script,
+        text=True,
+        capture_output=True,
+        env={
+            **os.environ,
+            "PATH": f"{tools_directory}{os.pathsep}{os.environ['PATH']}",
+            "HUD_TEST_SCRATCH": str(scratch_root),
+            "HUD_TEST_EVENTS": str(events_path),
+            "HUD_TEST_CWD": str(cwd_path),
+            "HUD_TEST_ARGUMENTS": str(arguments_path),
+            "HUD_TEST_COMMAND_STATUS": str(command_status),
+            "HUD_TEST_STAGE_OUT_STATUS": str(stage_out_status),
+        },
+    )
+
+    assert result.returncode == expected_status, result.stderr
+    assert events_path.read_text().splitlines() == ["stage-in", "run", "stage-out"]
+    assert (
+        Path(cwd_path.read_text().strip()).resolve()
+        == (scratch_root / workspace).resolve()
+    )
+    assert arguments_path.read_bytes().split(b"\0")[:-1] == [
+        argument.encode()
+        for argument in (
+            "exec",
+            "--nv",
+            str(images_root / "hud-colmap_latest.sif"),
+            "colmap",
+            "--image_path",
+            "frames directory",
+        )
+    ]
+    if stage_out_status == 0:
+        assert (export_workspace / "result.txt").read_text().strip() == "output"
 
 
 @pytest.fixture

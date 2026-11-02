@@ -242,19 +242,17 @@ class ReconstructionService:
             schedule_splat_generation_from_upload,
         )
 
-        video_format = Path(upload.filename).suffix.removeprefix(".").lower() or "mp4"
         artifact = SplatGenerationArtifact(
-            reconstruction.id,
-            workflow_common.WORKFLOW_DATA_DIRECTORY,
-            video_format,
+            artifact_id=reconstruction.id,
+            storage_root=workflow_common.WORKFLOW_DATA_DIRECTORY,
         )
+        video_path = Path(upload.file_path).resolve()
         reconstruction.workspace_directory = str(artifact.root_directory.resolve())
-        reconstruction.input_video_path = str(artifact.video_path.resolve())
+        reconstruction.input_video_path = str(video_path)
         async with asyncio.timeout(config.PREFECT_SUBMISSION_TIMEOUT_SECONDS):
             return await schedule_splat_generation_from_upload(
                 artifact=artifact,
-                upload_path=upload.file_path,
-                upload_filename=upload.filename,
+                video_path=video_path,
                 settings=SplatGenerationWorkflowSettings.model_validate(
                     reconstruction.settings
                 ),

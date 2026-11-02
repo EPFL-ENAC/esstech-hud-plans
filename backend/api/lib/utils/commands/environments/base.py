@@ -3,10 +3,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Literal
 
-from ..common import CommandTool
+from ..common import CommandLogCapture, CommandTool
 
 type LogCallback = Callable[[str], None]
-type CommandLogCapture = Literal["stdout", "stderr", "combined"]
 type CommandLogStream = Literal["stdout", "stderr"]
 
 

@@ -435,10 +435,8 @@ def test_real_tus_upload_is_reusable_for_both_reconstruction_routes(
     source = upload_file_path(UUID(upload_id), "scan.mp4")
     assert len(scheduled) == 2
     for parameters in scheduled:
-        assert parameters["upload_path"] == str(source)
-        artifact = parameters["artifact"]
-        splat_workflow._copy_uploaded_video(str(source), str(artifact.video_path))
-        assert artifact.video_path.read_bytes() == b"video bytes"
+        assert parameters["video_path"] == source.resolve()
+        assert not parameters["artifact"].root_directory.exists()
         assert source.read_bytes() == b"video bytes"
     assert not (real_tus.upload_directory / upload_id).exists()
     assert client.delete(f"/uploads/{upload_id}").status_code == 204
@@ -446,6 +444,12 @@ def test_real_tus_upload_is_reusable_for_both_reconstruction_routes(
     rows = client.get(f"/buildings/{building_id}/reconstructions").json()
     assert len(rows) == 2
     assert all(row["upload_id"] is None for row in rows)
+    for row in rows:
+        response = client.get(
+            f"/buildings/{building_id}/reconstructions/{row['id']}/video"
+        )
+        assert response.status_code == 200
+        assert response.content == b"video bytes"
 
 
 @pytest.mark.parametrize("pause_after_commit", [False, True])

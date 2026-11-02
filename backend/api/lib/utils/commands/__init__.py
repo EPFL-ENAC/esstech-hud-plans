@@ -1,5 +1,6 @@
 from .common import (
     BinaryReadStream,
+    CommandLogCapture,
     CommandTool,
     iter_command_log_records,
     workspace_relative_path,
@@ -9,7 +10,6 @@ from .environments import (
     Command,
     CommandExecutionEnvironment,
     CommandExecutionError,
-    CommandLogCapture,
     CommandLogStream,
     CommandResult,
     LocalCommandExecutionEnvironment,

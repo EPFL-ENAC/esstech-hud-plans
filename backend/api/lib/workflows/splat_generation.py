@@ -33,7 +33,6 @@ from api.lib.compute.progress import (
     FfmpegProgressEstimator,
     ReportProgress,
 )
-from api.lib.upload_storage import copy_completed_file
 from api.lib.utils.commands import (
     CommandExecutionEnvironment,
     LocalCommandExecutionEnvironment,
@@ -278,17 +277,10 @@ def _progress_callback(
 class SplatGenerationArtifact:
     artifact_id: UUID
     storage_root: Path
-    video_format: str = "mp4"
 
     @property
     def root_directory(self) -> Path:
         return self.storage_root / self.artifact_id.hex
-
-    @property
-    def video_path(self) -> Path:
-        return (self.root_directory / "video" / "input").with_suffix(
-            f".{self.video_format}"
-        )
 
     @property
     def frames_directory(self) -> Path:
@@ -314,12 +306,11 @@ class SplatGenerationArtifact:
     def create(
         cls,
         storage_root: Path,
-        video_format: str = "mp4",
         *,
         artifact_id: UUID | None = None,
     ) -> Self:
-        artifact = cls(artifact_id or uuid4(), storage_root, video_format)
-        artifact.video_path.parent.mkdir(parents=True)
+        artifact = cls(artifact_id or uuid4(), storage_root)
+        artifact.root_directory.mkdir(parents=True)
         return artifact
 
     @classmethod
@@ -341,25 +332,6 @@ class SplatGenerationArtifact:
 
     def remove(self) -> None:
         shutil.rmtree(self.root_directory, ignore_errors=True)
-
-
-@task(name="copy-uploaded-video", cache_policy=DEFAULT - "report_progress")
-async def copy_video_from_upload(
-    upload_path: str,
-    upload_filename: str,
-    video_path: str,
-) -> str:
-    """Copy a permanent user upload into the reconstruction's artifact layout."""
-
-    run_logger = get_run_logger()
-    await run_in_threadpool(_copy_uploaded_video, upload_path, video_path)
-    run_logger.info("Copied uploaded video %s to %s", upload_filename, video_path)
-    return video_path
-
-
-def _copy_uploaded_video(upload_path: str, video_path: str) -> None:
-    source = Path(upload_path)
-    copy_completed_file(source, Path(video_path), expected_size=source.stat().st_size)
 
 
 # Reporting is an execution detail, not an input to the cached computation.
@@ -526,8 +498,6 @@ async def splat_generation_flow(
     settings: SplatGenerationWorkflowSettings,
     owner_id: UUID,
     reconstruction_id: UUID | None = None,
-    upload_path: str | None = None,
-    upload_filename: str | None = None,
 ) -> str:
     run_logger = get_run_logger()
     run_logger.info("Starting splat generation for artifact %s", artifact_id)
@@ -537,17 +507,6 @@ async def splat_generation_flow(
         if config.USE_SCITAS
         else LOCAL_EXECUTION_ENVIRONMENT
     )
-
-    if upload_path is not None:
-        if upload_filename is None:
-            raise ValueError("An upload requires its path and filename")
-        # The permanent upload remains reusable; the pipeline copies its
-        # video into this reconstruction's artifact layout.
-        await copy_video_from_upload(
-            upload_path=upload_path,
-            upload_filename=upload_filename,
-            video_path=video_path,
-        )
 
     frame_picker_settings = settings.frame_picker
     extraction_directory = (
@@ -634,14 +593,16 @@ async def splat_generation_flow(
 
 
 def _splat_generation_parameters(
+    *,
     artifact: SplatGenerationArtifact,
+    video_path: Path,
     settings: SplatGenerationWorkflowSettings,
     owner_id: UUID,
 ) -> dict[str, object]:
     return {
         "artifact_id": str(artifact.artifact_id),
         "workspace_directory": str(artifact.root_directory.resolve()),
-        "video_path": str(artifact.video_path.resolve()),
+        "video_path": str(video_path.resolve()),
         "raw_frames_directory": str(artifact.raw_frames_directory.resolve()),
         "frames_directory": str(artifact.frames_directory.resolve()),
         "colmap_directory": str(artifact.colmap_directory.resolve()),
@@ -671,26 +632,19 @@ async def _submit_splat_generation_run(
 
 
 async def schedule_splat_generation_from_upload(
+    *,
     artifact: SplatGenerationArtifact,
-    upload_path: str,
-    upload_filename: str,
+    video_path: Path,
     settings: SplatGenerationWorkflowSettings,
     owner_id: UUID,
     reconstruction_id: UUID | None = None,
 ) -> UUID:
-    """Schedule splat generation from a permanent user upload.
-
-    The flow's first task copies the permanent upload into the artifact
-    layout before frame extraction, preserving the original upload.
-    """
+    """Schedule splat generation reading the permanent upload directly."""
 
     parameters: dict[str, object] = _splat_generation_parameters(
-        artifact, settings, owner_id
-    )
-    parameters.update(
-        {
-            "upload_path": upload_path,
-            "upload_filename": upload_filename,
-        }
+        artifact=artifact,
+        video_path=video_path,
+        settings=settings,
+        owner_id=owner_id,
     )
     return await _submit_splat_generation_run(parameters, reconstruction_id)

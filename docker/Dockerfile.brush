@@ -1,18 +1,6 @@
 FROM nvcr.io/nvidia/cuda:13.1.1-runtime-ubuntu24.04
 
 ########################################
-# RCP CaaS requirement
-########################################
-# Mapping needed to access files from the external storage
-ARG LDAP_USERNAME
-ARG LDAP_UID
-ARG LDAP_GROUPNAME
-ARG LDAP_GID
-RUN groupadd ${LDAP_GROUPNAME} --gid ${LDAP_GID}
-RUN useradd -m -s /bin/bash -g ${LDAP_GROUPNAME} -u ${LDAP_UID} ${LDAP_USERNAME}
-RUN mkdir -p /home/${LDAP_USERNAME}
-
-########################################
 # Setup
 ########################################
 RUN apt update && \
@@ -21,16 +9,14 @@ RUN apt update && \
     ca-certificates \
     git \
     build-essential \
-	cmake \
+    cmake \
     libvulkan1 \
     vulkan-tools \
     mesa-vulkan-drivers \
     nvidia-driver-570
 
-COPY backend/scripts/linux/install_brush.sh /home/${LDAP_USERNAME}/install_brush.sh
-RUN /home/${LDAP_USERNAME}/install_brush.sh
+COPY backend/scripts/linux/install_brush.sh /tmp/install_brush.sh
+RUN bash /tmp/install_brush.sh /external
 RUN apt clean && rm -rf /var/lib/apt/lists/*
-COPY docker/brush_unbuferred.sh /external/bin/brush_unbuffered.sh
+COPY --chmod=755 docker/brush_unbuffered.sh /external/bin/brush_unbuffered.sh
 RUN ln -s /external/bin/brush_unbuffered.sh /usr/local/bin/brush
-
-USER ${LDAP_USERNAME}

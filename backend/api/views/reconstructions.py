@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.routing import APIRouter
 from sqlalchemy.exc import SQLAlchemyError
 
+from api.config import config
 from api.lib.compute.colmap_geometric_data import colmap_compute_geometric_data
 from api.lib.compute.point_cloud import (
     POINT_CLOUD_BINARY_FILENAME,
@@ -105,9 +106,7 @@ def get_reconstruction_video(
 
     return inline_file_response(
         path,
-        root_directory=(
-            workflow_common.WORKFLOW_DATA_DIRECTORY.resolve() / reconstruction.id.hex
-        ),
+        root_directory=config.DATA_PATH.resolve() / "uploads",
         media_type=media_type,
     )
 

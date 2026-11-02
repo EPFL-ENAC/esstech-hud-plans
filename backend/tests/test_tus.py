@@ -413,13 +413,22 @@ def _register_tus_upload(
     asyncio.run(register())
 
 
-def test_from_upload_reconstruction_submission_schedules_copy(
+def test_from_upload_reconstruction_submission_uses_permanent_source(
     tus_api: tuple[TestClient, UUID, Path],
 ) -> None:
     client, building_id, tus_dir = tus_api
     upload_id = uuid4().hex
     _make_tus_upload(tus_dir, upload_id)
     _register_tus_upload(client, upload_id)
+
+    async def complete() -> None:
+        assert isinstance(client.app, FastAPI)
+        async with AsyncSession(
+            client.app.state.upload_database, expire_on_commit=False
+        ) as session:
+            await UserUploadsService(session).complete(UUID(upload_id))
+
+    asyncio.run(complete())
 
     response = client.post(
         f"/buildings/{building_id}/reconstructions/from-upload",
@@ -430,7 +439,9 @@ def test_from_upload_reconstruction_submission_schedules_copy(
     created = response.json()
     assert created["status"] == "scheduled"
     assert created["prefect_workflow_id"] == str(WORKFLOW_ID)
-    assert created["input_video_path"].endswith("video/input.mp4")
+    assert created["input_video_path"] == str(
+        upload_file_path(UUID(upload_id), "scan.mp4").resolve()
+    )
 
 
 def test_from_upload_reconstruction_submission_passes_upload_parameters(
@@ -466,15 +477,16 @@ def test_from_upload_reconstruction_submission_passes_upload_parameters(
 
     assert response.status_code == 202
     created = response.json()
-    assert captured["upload_path"] == str(
-        upload_file_path(UUID(upload_id), "recording.mov")
+    assert (
+        captured["video_path"]
+        == (upload_file_path(UUID(upload_id), "recording.mov")).resolve()
     )
-    assert captured["upload_filename"] == "recording.mov"
     assert captured["owner_id"] == USER_ID
     assert captured["reconstruction_id"] == UUID(created["id"])
     parameters = captured["artifact"]
     assert isinstance(parameters, splat_workflow.SplatGenerationArtifact)
-    assert str(parameters.video_path).endswith("video/input.mov")
+    assert parameters.artifact_id == UUID(created["id"])
+    assert created["input_video_path"] == str(captured["video_path"])
 
 
 def test_permanent_upload_can_be_submitted_twice(
@@ -637,59 +649,6 @@ def test_from_upload_submission_maps_scheduling_failure_to_503(
     assert listed[0]["error_message"] == "RuntimeError: Prefect unavailable"
 
 
-def _fake_flow_logger(monkeypatch: pytest.MonkeyPatch, module: object) -> None:
-    class FakeRunLogger:
-        def info(self, *args: object) -> None:
-            pass
-
-    monkeypatch.setattr(module, "get_run_logger", lambda: FakeRunLogger())
-
-
-def test_copy_video_from_upload_preserves_original(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _fake_flow_logger(monkeypatch, splat_workflow)
-    upload_id = uuid4().hex
-    source = upload_file_path(UUID(upload_id), "scan.mp4")
-    source.parent.mkdir(parents=True)
-    source.write_bytes(b"video bytes")
-    video_path = tmp_path / "workflows" / upload_id / "video" / "input.mp4"
-
-    result = asyncio.run(
-        splat_workflow.copy_video_from_upload.fn(
-            upload_path=str(source),
-            upload_filename="scan.mp4",
-            video_path=str(video_path),
-        )
-    )
-
-    assert result == str(video_path)
-    assert video_path.read_bytes() == b"video bytes"
-    assert source.read_bytes() == b"video bytes"
-    assert not video_path.with_name("input.mp4.tmp").exists()
-
-
-def test_copy_video_from_upload_fails_on_missing_source(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _fake_flow_logger(monkeypatch, splat_workflow)
-    destination = tmp_path / "video" / "input.mp4"
-
-    with pytest.raises(FileNotFoundError):
-        asyncio.run(
-            splat_workflow.copy_video_from_upload.fn(
-                upload_path=str(tmp_path / "missing"),
-                upload_filename="scan.mp4",
-                video_path=str(destination),
-            )
-        )
-
-    assert not destination.exists()
-    assert not destination.with_name("input.mp4.tmp").exists()
-
-
 def test_remove_expired_uploads_deletes_old_pairs_and_orphans(
     tmp_path: Path,
 ) -> None:
@@ -743,6 +702,14 @@ def test_remove_expired_uploads_keeps_recently_touched_binaries(
     assert removed == []
     assert copied_binary.exists()
     assert (upload_dir / "copiedupload.info").exists()
+
+
+def _fake_flow_logger(monkeypatch: pytest.MonkeyPatch, module: object) -> None:
+    class FakeRunLogger:
+        def info(self, *args: object) -> None:
+            pass
+
+    monkeypatch.setattr(module, "get_run_logger", lambda: FakeRunLogger())
 
 
 def test_tus_cleanup_flow_uses_configured_directory(

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Literal, Protocol
 
 type CommandTool = Literal["ffmpeg", "colmap", "brush"]
+type CommandLogCapture = Literal["stdout", "stderr", "combined"]
 
 
 class BinaryReadStream(Protocol):

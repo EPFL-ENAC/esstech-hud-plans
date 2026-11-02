@@ -3,18 +3,16 @@ import os
 import posixpath
 import secrets
 import shlex
-import subprocess
 import threading
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
 
 import paramiko
 from prefect.blocks.core import Block
 from prefect.utilities.asyncutils import run_coro_as_sync
 
 from api.config import config
-from api.lib.compute.remote import RemoteCompute, StepName
+from api.lib.utils.commands.common import CommandLogCapture, CommandTool
 
 
 class ScitasJobNamesBlock(Block):
@@ -29,7 +27,6 @@ class ScitasJobNamesBlock(Block):
 logger = logging.getLogger("uvicorn.error")
 
 LOGS_DIR_PATH = "log"
-type ScitasLogCapture = Literal["stdout", "stderr", "combined"]
 
 
 @dataclass(frozen=True)
@@ -46,16 +43,6 @@ _ssh_lock = threading.Lock()
 _job_id_cache: dict[str, str] = {}
 
 # SLURM job-state groups --------------------------------------------------
-SLURM_STATES_PENDING = {
-    "PENDING",
-    "CONFIGURING",
-    "REQUEUE_FED",
-    "REQUEUE_HOLD",
-    "REQUEUED",
-    "SPECIAL_EXIT",
-    "STAGE_IN",
-}
-SLURM_STATES_RUNNING = {"RUNNING", "COMPLETING", "STAGE_OUT", "RESIZING", "SUSPENDED"}
 SLURM_STATES_COMPLETED = {
     "COMPLETED",
     "CANCELLED",
@@ -154,7 +141,7 @@ def _get_slurm_job_id(job_name: str) -> str | None:
     return None
 
 
-def _get_partition_for_tool(tool: StepName) -> str:
+def _get_partition_for_tool(tool: CommandTool) -> str:
     """Return the Slurm partition to use for a given tool."""
     if tool == "brush":
         return config.SCITAS_PARTITION_BRUSH
@@ -212,7 +199,7 @@ async def _read_registered_jobs_async(workspace_name: str) -> list[str]:
     """
     name = _block_name(workspace_name)  # Check the workspace name first.
     try:
-        block = await ScitasJobNamesBlock.aload(name)
+        block: ScitasJobNamesBlock = await ScitasJobNamesBlock.aload(name)
     except ValueError:
         # The block document is missing. Report an empty registry.
         return []
@@ -309,7 +296,7 @@ def cancel_registered_jobs(workspace_name: str) -> list[str]:
     return cancelled
 
 
-class Scitas(RemoteCompute):
+class Scitas:
     @staticmethod
     def get_log_file_path(job_name: str) -> str:
         """Return the local path to the log file for a given job.
@@ -322,77 +309,15 @@ class Scitas(RemoteCompute):
         )
 
     @staticmethod
-    def copy_data_to_scratch(source_path: str, dest_path: str) -> None:
-        """Copy data from a local absolute path to the Scitas export (mount).
-
-        The export path is locally mounted on the backend, so ``rsync`` is
-        used directly.  The compute job will later rsync the data from the
-        remote export path to scratch before execution.
-        """
-        full_dest = os.path.join(config.SCITAS_MOUNT_EXPORT_PATH, dest_path.lstrip("/"))
-        os.makedirs(full_dest, exist_ok=True)
-        logger.info(f"Copying data from {source_path} to {full_dest} using rsync")
-        subprocess.run(
-            [
-                "rsync",
-                "-aL",
-                "--no-owner",
-                "--no-group",
-                "--ignore-existing",
-                f"{source_path}/",
-                f"{full_dest}/",
-            ],
-            check=True,
-            capture_output=True,
-            timeout=3600,
-        )
-
-    @staticmethod
-    def copy_data_from_scratch(source_path: str, dest_path: str) -> None:
-        """Copy data from the Scitas export (mount) to a local absolute path.
-
-        The export path is locally mounted on the backend, so ``rsync`` is
-        used directly.  The compute job copies results back to export before
-        this method is called.
-        """
-        full_source = os.path.join(
-            config.SCITAS_MOUNT_EXPORT_PATH, source_path.lstrip("/")
-        )
-        os.makedirs(dest_path, exist_ok=True)
-        logger.info(f"Copying data from {full_source} to {dest_path} using rsync")
-        subprocess.run(
-            [
-                "rsync",
-                "-aL",
-                "--no-owner",
-                "--no-group",
-                "--ignore-existing",
-                f"{full_source}/",
-                f"{dest_path}/",
-            ],
-            check=True,
-            capture_output=True,
-            timeout=3600,
-        )
-
-    @staticmethod
-    def refresh_logs() -> None:
-        """No-op: logs live on the locally-mounted export path."""
-        pass
-
-    @staticmethod
     def submit_job(
-        tool: StepName,
+        *,
+        tool: CommandTool,
         command: list[str],
+        workspace_rel_path: str,
         n_gpu: int = 1,
-        workspace_rel_path: str | None = None,
-        working_directory_rel_path: str | None = None,
-        capture: ScitasLogCapture = "combined",
+        capture: CommandLogCapture = "combined",
     ) -> str:
         """Submit a Slurm batch job via SSH and return our internal job name."""
-        if working_directory_rel_path is not None and workspace_rel_path is None:
-            raise ValueError("working_directory_rel_path requires workspace_rel_path")
-
         hex_suffix = secrets.token_hex(4)
         job_name = f"{tool}-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{hex_suffix}"
 
@@ -428,32 +353,14 @@ class Scitas(RemoteCompute):
 #SBATCH --cpus-per-task=5
 #SBATCH --mem=28G
 #SBATCH --time=12:00:00
-#SBATCH --output={stdout_path}
-#SBATCH --error={stderr_path}
+#SBATCH --output={shlex.quote(stdout_path)}
+#SBATCH --error={shlex.quote(stderr_path)}
 {config.SCITAS_SBATCH_ARGS_BRUSH if tool == "brush" else config.SCITAS_SBATCH_ARGS_COLMAP}
-"""
 
-        if workspace_rel_path:
-            workspace_rel = workspace_rel_path.lstrip("/")
-            working_directory_rel = (
-                working_directory_rel_path.lstrip("/")
-                if working_directory_rel_path is not None
-                else None
-            )
-            working_directory_assignment = (
-                (
-                    "WORKING_DIRECTORY_REL="
-                    f"{shlex.quote(working_directory_rel)}\n"
-                    'WORKING_DIR="$SCRATCH_ROOT/$WORKING_DIRECTORY_REL"'
-                )
-                if working_directory_rel is not None
-                else 'WORKING_DIR="$SCRATCH_ROOT"'
-            )
-            batch_script += f"""
 set -e
 EXPORT_ROOT={shlex.quote(export_root)}
 SCRATCH_ROOT={shlex.quote(scratch_root)}
-WORKSPACE_REL={shlex.quote(workspace_rel)}
+WORKSPACE_REL={shlex.quote(workspace_rel_path)}
 EXPORT_DIR="$EXPORT_ROOT/$WORKSPACE_REL"
 SCRATCH_DIR="$SCRATCH_ROOT/$WORKSPACE_REL"
 mkdir -p "$SCRATCH_DIR"
@@ -462,8 +369,7 @@ mkdir -p "$(dirname {shlex.quote(log_file_abs)})"
 # Stage-in: copy data from export to scratch
 rsync -avL --ignore-existing "$EXPORT_DIR/" "$SCRATCH_DIR/"
 
-{working_directory_assignment}
-cd "$WORKING_DIR"
+cd "$SCRATCH_DIR"
 
 # Run inside apptainer with GPU support
 set +e
@@ -477,11 +383,6 @@ if [ "$COMMAND_EXIT_CODE" -ne 0 ]; then
     exit "$COMMAND_EXIT_CODE"
 fi
 exit "$STAGE_OUT_EXIT_CODE"
-"""
-        else:
-            batch_script += f"""
-cd "$SCRATCH_ROOT" || cd "$HOME"
-apptainer exec --nv {shlex.quote(image_name)} {shell_cmd}
 """
 
         remote_script = posixpath.join("/tmp", f"scitas_{job_name}.sh")
@@ -582,16 +483,3 @@ apptainer exec --nv {shlex.quote(image_name)} {shell_cmd}
         _, error, return_code = _exec_ssh_command(f"scancel {shlex.quote(job_id)}")
         if return_code != 0:
             raise RuntimeError(f"Failed to cancel Scitas job {job_name}: {error}")
-
-    @staticmethod
-    def check_job_started(job_name: str) -> bool:
-        """Return True once the job has been submitted and is known to Slurm."""
-        return Scitas.get_job_status(job_name) is not None
-
-    @staticmethod
-    def check_job_terminated(job_name: str) -> bool | None:
-        """Return True if the job has finished, False if still running, None if unknown."""
-        status = Scitas.get_job_status(job_name)
-        if status is None:
-            return None
-        return status in SLURM_STATES_COMPLETED

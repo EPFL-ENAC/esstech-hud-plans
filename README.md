@@ -78,19 +78,44 @@ staging files are already missing also become failed. Permanent uploads are kept
 If staging deletion fails, the next run retries it; database failures prevent
 deletion. A missing staging directory causes the run to skip cleanup.
 
-The API and workflow process must share the `backend/data/workflows` directory.
+The API and workflow process must share the permanent `DATA_DIR/uploads` files
+and the generated `DATA_DIR/workflows` artifacts (`DATA_DIR` defaults to
+`backend/data`). Each permanent video is stored once under
+`uploads/<upload_id>/input.<extension>` and can be reused by multiple reconstructions.
 The `splat-generation/default` deployment runs FFmpeg, optionally selects frames
 locally with the frame picker, then runs COLMAP and Brush. Submit a user upload
 through `POST /buildings/{building_id}/reconstructions/from-upload`, or create a
 building and its first reconstruction through
 `POST /buildings/from-reconstruction/from-upload`. Both endpoints accept an
-`upload_id` and workflow settings. Submitted videos, extracted frames (including
-raw frames when selection is enabled), sparse COLMAP reconstructions, and generated
-`splat.ply` files are retained there until removed manually.
+`upload_id` and workflow settings. FFmpeg and frame selection read the permanent
+video directly. Each `workflows/<reconstruction_id>` directory contains only
+generated artifacts: extracted frames (including raw frames when selection is
+enabled), sparse COLMAP reconstructions, and `splat.ply` files. The source video
+is never copied into the reconstruction directory or staged to SCITAS scratch.
 
-Keep `USE_SCITAS=false` for local execution. The retired RunAI backend and
-`/splats/*` API are no longer available, along with the `/advanced`, `/splat/:id`,
-and historical `/admin` export pages. Existing generation files are left on disk.
+Deleting a reconstruction removes its generated artifacts and preserves the
+source video. Deleting an upload removes its metadata while retaining the
+permanent file, so existing reconstructions can still read and serve their source.
+Existing reconstruction paths and files are not migrated to this layout.
+
+Keep `USE_SCITAS=false` for local execution. Set `USE_SCITAS=true` to run COLMAP
+and Brush on SCITAS through SSH, Slurm, and Apptainer. FFmpeg and frame selection
+run locally in both modes.
+
+SCITAS execution requires:
+
+- SSH access to `SCITAS_HOST` using `SCITAS_SSH_USERNAME` and
+  `SCITAS_SSH_KEY_PATH`, with Slurm and Apptainer available on the cluster.
+- The cluster export directory (`SCITAS_REMOTE_EXPORT_PATH`) mounted on the
+  backend and workflow host at `SCITAS_MOUNT_EXPORT_PATH`. Set `DATA_DIR` to this
+  same local mount path so both processes share their workflow data with SCITAS.
+- Writable remote export and scratch directories, a valid `SCITAS_ACCOUNT`, and
+  access to the configured COLMAP and Brush partitions.
+- `hud-colmap_latest.sif` and `hud-brush_latest.sif` installed under
+  `SCITAS_REMOTE_IMAGES_PATH` (see the image instructions below).
+
+Jobs copy their workspace from export to scratch, execute there, and copy results
+back even when the command fails. Logs are written directly to the mounted export.
 
 The interactive API documentation will be available at [http://localhost:8000/docs](http://localhost:8000/docs).
 
@@ -126,11 +151,9 @@ Every user is asked to accept the new version at their next request.
 
 From the project root, run:
 ```bash
-docker build -t registry.rcp.epfl.ch/enac-it-poh/hud-<TOOL>:latest -f docker/Dockerfile.<TOOL> . \
-    --build-arg LDAP_GROUPNAME=<GROUP-NAME> \
-    --build-arg LDAP_GID=<GROUP-ID> \
-    --build-arg LDAP_USERNAME=<USERNAME> \
-    --build-arg LDAP_UID=<USER-ID>
+docker build \
+    -t registry.rcp.epfl.ch/enac-it-poh/hud-<TOOL>:latest \
+    -f docker/Dockerfile.<TOOL> .
 ```
 
 where `<TOOL>` is:
@@ -138,10 +161,10 @@ where `<TOOL>` is:
 - `colmap` for the COLMAP image
 - `brush` for the Brush image
 
-To get the user and group information, run the following command:
-```bash
-ssh <username>@jumphost.rcp.epfl.ch -o StrictHostKeychecking=no 'echo -e "-> uid: $(id -u)\n-> gid: $(id -g)\n-> groups $(id)"'
-```
+The RCP registry continues to host the tool images used by SCITAS. Image builds
+use fixed installation paths and require no LDAP identity arguments. Apptainer
+runs the tools as the submitting user. The COLMAP launcher seeds its packaged
+vocabulary into that user's `~/.cache/colmap` when absent, avoiding runtime downloads.
 
 Then, push the image to the registry:
 ```bash
@@ -162,3 +185,7 @@ Alternatively, you can build the SIF image locally:
 ```bash
 apptainer build hud-<TOOL>_latest.sif docker://registry.rcp.epfl.ch/enac-it-poh/hud-<TOOL>:latest
 ```
+
+Place the resulting SIF files in `SCITAS_REMOTE_IMAGES_PATH` on the cluster.
+The reconstruction workflow needs the COLMAP and Brush images; FFmpeg runs
+locally and does not require a SCITAS image.
