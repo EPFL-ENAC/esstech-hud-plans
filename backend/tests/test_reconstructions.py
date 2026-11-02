@@ -1809,9 +1809,10 @@ def test_reconstruction_flow_records_milestones_and_artifacts(
         *,
         progress: float,
         artifacts: ReconstructionArtifactUpdate | None = None,
-    ) -> None:
+    ) -> splat_workflow.ProgressWriteOutcome:
         assert received_id == reconstruction_id
         updates.append((progress, artifacts))
+        return "recorded"
 
     async def fake_extract_frames(**kwargs):
         return kwargs["frames_directory"]

@@ -1,12 +1,16 @@
 import asyncio
+import logging
 import threading
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.exc import OperationalError
 from starlette.concurrency import run_in_threadpool
 
 from api.lib.workflows import splat_generation as workflow
+from api.models.reconstruction import ReconstructionArtifactUpdate
 from api.models.workflows import (
     BrushSettings,
     ColmapSettings,
@@ -32,6 +36,7 @@ def test_progress_callback_scales_throttles_and_writes_on_flow_event_loop(
             assert asyncio.get_running_loop() is loop
             assert threading.get_ident() == flow_thread
             updates.append(progress)
+            return "recorded"
 
         monkeypatch.setattr(workflow, "_record_reconstruction_progress", record)
         report = workflow._progress_callback(reconstruction_id, 0.4, 0.6)
@@ -69,14 +74,18 @@ def test_progress_write_errors_do_not_interrupt_compute(
     clock = SimpleNamespace(now=0.0)
     monkeypatch.setattr(workflow, "time", SimpleNamespace(monotonic=lambda: clock.now))
 
-    async def record(received_id, *, progress):
+    async def record(received_id, *, progress, artifact_changes):
         attempts.append(progress)
         if len(attempts) == 1:
             if deleted:
                 raise workflow.ReconstructionNotFoundError()
             raise OSError("Database temporarily unavailable")
 
-    monkeypatch.setattr(workflow, "_record_reconstruction_progress", record)
+    @asynccontextmanager
+    async def service():
+        yield SimpleNamespace(record_progress=record)
+
+    monkeypatch.setattr(workflow, "_reconstruction_service", service)
     report = workflow._progress_callback(uuid4(), 0.4, 0.6)
     assert report is not None
 
@@ -86,13 +95,137 @@ def test_progress_write_errors_do_not_interrupt_compute(
         report(0.5)
         clock.now = 2
         report(0.5)
+        clock.now = 4
+        report(0.5)  # A successful retry must not publish the same value again.
 
     asyncio.run(run_in_threadpool(compute))
     assert attempts == pytest.approx([0.5] if deleted else [0.5, 0.5])
 
 
-def test_progress_without_reconstruction_does_not_need_database() -> None:
+def test_progress_without_reconstruction_does_not_need_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected_service():
+        pytest.fail("Progress without a reconstruction must not open a session")
+
+    monkeypatch.setattr(workflow, "_reconstruction_service", unexpected_service)
     assert workflow._progress_callback(None, 0.4, 0.6) is None
+    assert (
+        asyncio.run(workflow._record_reconstruction_progress(None, progress=0.5))
+        == "disabled"
+    )
+
+
+@pytest.mark.parametrize("failure_stage", ["entry", "write", "cleanup"])
+@pytest.mark.parametrize(
+    "error",
+    [
+        ConnectionRefusedError("Connection refused"),
+        OperationalError("UPDATE", {}, RuntimeError("Database unavailable")),
+        RuntimeError("Unexpected publishing error"),
+    ],
+)
+def test_progress_publishing_failures_are_logged_and_non_fatal(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    failure_stage: str,
+    error: Exception,
+) -> None:
+    reconstruction_id = uuid4()
+
+    async def record(*args, **kwargs):
+        if failure_stage == "write":
+            raise error
+
+    @asynccontextmanager
+    async def service():
+        if failure_stage == "entry":
+            raise error
+        try:
+            yield SimpleNamespace(record_progress=record)
+        finally:
+            if failure_stage == "cleanup":
+                raise error
+
+    monkeypatch.setattr(workflow, "_reconstruction_service", service)
+    with caplog.at_level(logging.WARNING, logger=workflow.__name__):
+        outcome = asyncio.run(
+            workflow._record_reconstruction_progress(reconstruction_id, progress=0.25)
+        )
+
+    assert outcome == "failed"
+    warning = caplog.records[-1]
+    assert str(reconstruction_id) in warning.getMessage()
+    assert "0.25" in warning.getMessage()
+    assert warning.exc_info is not None
+    assert warning.exc_info[1] is error
+
+
+def test_progress_persists_artifacts_and_closes_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reconstruction_id = uuid4()
+    artifacts = ReconstructionArtifactUpdate(frames_directory="/data/frames")
+    closed = False
+
+    async def record(received_id, *, progress, artifact_changes):
+        assert received_id == reconstruction_id
+        assert progress == 0.25
+        assert artifact_changes == artifacts
+
+    @asynccontextmanager
+    async def service():
+        nonlocal closed
+        try:
+            yield SimpleNamespace(record_progress=record)
+        finally:
+            closed = True
+
+    monkeypatch.setattr(workflow, "_reconstruction_service", service)
+    assert (
+        asyncio.run(
+            workflow._record_reconstruction_progress(
+                reconstruction_id,
+                progress=0.25,
+                artifacts=artifacts,
+            )
+        )
+        == "recorded"
+    )
+    assert closed
+
+
+@pytest.mark.parametrize("error_type", [asyncio.CancelledError, KeyboardInterrupt])
+def test_progress_does_not_swallow_control_exceptions(
+    monkeypatch: pytest.MonkeyPatch,
+    error_type: type[BaseException],
+) -> None:
+    async def record(*args, **kwargs):
+        raise error_type()
+
+    @asynccontextmanager
+    async def service():
+        yield SimpleNamespace(record_progress=record)
+
+    monkeypatch.setattr(workflow, "_reconstruction_service", service)
+    with pytest.raises(error_type):
+        asyncio.run(workflow._record_reconstruction_progress(uuid4(), progress=0.25))
+
+
+def test_progress_callback_survives_thread_bridge_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def unavailable_bridge(*args):
+        raise RuntimeError("Thread bridge unavailable")
+
+    monkeypatch.setattr(
+        workflow, "from_thread", SimpleNamespace(run=unavailable_bridge)
+    )
+    report = workflow._progress_callback(uuid4(), 0.4, 0.6)
+    assert report is not None
+    report(0.5)
+    assert "Could not publish progress" in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -135,6 +268,7 @@ def test_task_reports_progress_before_compute_returns(
     async def record(received_id, *, progress):
         assert threading.get_ident() == flow_thread
         updates.append(progress)
+        return "recorded"
 
     monkeypatch.setattr(workflow, "get_run_logger", get_run_logger)
     monkeypatch.setattr(workflow, "_record_reconstruction_progress", record)
@@ -205,17 +339,28 @@ def test_task_reports_progress_before_compute_returns(
 
 
 @pytest.mark.parametrize("use_frame_picker", [False, True])
-@pytest.mark.parametrize("fail_brush", [False, True])
+@pytest.mark.parametrize("brush_error", [None, RuntimeError, asyncio.CancelledError])
+@pytest.mark.parametrize("failed_progress", [None, 0.25, 0.4, 0.7, 0.92, 0.95, "all"])
 def test_flow_combines_intermediate_updates_with_validated_milestones(
-    monkeypatch: pytest.MonkeyPatch, tmp_path, use_frame_picker: bool, fail_brush: bool
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    use_frame_picker: bool,
+    brush_error: type[BaseException] | None,
+    failed_progress: float | str | None,
 ) -> None:
     updates: list[tuple[float, object]] = []
     monkeypatch.setattr(
         workflow, "get_run_logger", lambda: SimpleNamespace(info=lambda *args: None)
     )
 
-    async def record(received_id, *, progress, artifacts=None):
-        updates.append((progress, artifacts))
+    async def record(received_id, *, progress, artifact_changes):
+        updates.append((progress, artifact_changes))
+        if failed_progress == "all" or progress == failed_progress:
+            raise ConnectionRefusedError("Connection refused")
+
+    @asynccontextmanager
+    async def service():
+        yield SimpleNamespace(record_progress=record)
 
     async def fake_task(**kwargs):
         await run_in_threadpool(kwargs["report_progress"], 0.5)
@@ -223,18 +368,18 @@ def test_flow_combines_intermediate_updates_with_validated_milestones(
 
     async def fake_brush(**kwargs):
         await run_in_threadpool(kwargs["report_progress"], 0.5)
-        if fail_brush:
-            raise RuntimeError("Brush failed to export")
+        if brush_error is not None:
+            raise brush_error("Brush failed to export")
         return kwargs["splat_path"]
 
     async def fake_point_cloud(**kwargs):
-        assert not fail_brush
+        assert brush_error is None
         assert kwargs == {
             "splat_path": str(tmp_path / "splat.ply"),
             "colmap_directory": str(tmp_path / "colmap"),
         }
 
-    monkeypatch.setattr(workflow, "_record_reconstruction_progress", record)
+    monkeypatch.setattr(workflow, "_reconstruction_service", service)
     monkeypatch.setattr(workflow, "extract_frames_task", fake_task)
     monkeypatch.setattr(workflow, "pick_frames_task", fake_task)
     monkeypatch.setattr(workflow, "reconstruct_with_colmap_task", fake_task)
@@ -257,8 +402,8 @@ def test_flow_combines_intermediate_updates_with_validated_milestones(
             reconstruction_id=uuid4(),
         )
 
-    if fail_brush:
-        with pytest.raises(RuntimeError, match="failed to export"):
+    if brush_error is not None:
+        with pytest.raises(brush_error, match="failed to export"):
             asyncio.run(run())
     else:
         assert asyncio.run(run()) == str(tmp_path / "splat.ply")
@@ -267,9 +412,9 @@ def test_flow_combines_intermediate_updates_with_validated_milestones(
     if use_frame_picker:
         expected.append(0.325)
     expected.extend([0.4, 0.55, 0.7, 0.81])
-    if not fail_brush:
+    if brush_error is None:
         expected.extend([0.92, 0.95])
     assert [progress for progress, _ in updates] == pytest.approx(expected)
     assert [progress for progress, artifacts in updates if artifacts is not None] == (
-        [0.25, 0.4, 0.7] if fail_brush else [0.25, 0.4, 0.7, 0.92, 0.95]
+        [0.25, 0.4, 0.7] if brush_error is not None else [0.25, 0.4, 0.7, 0.92, 0.95]
     )
