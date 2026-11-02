@@ -32,7 +32,7 @@
                 class="full-width q-mb-md"
                 unelevated
                 no-caps
-                :loading="isCancelPending"
+                :disable="isCancelPending"
                 @click="confirmCancel"
             />
 

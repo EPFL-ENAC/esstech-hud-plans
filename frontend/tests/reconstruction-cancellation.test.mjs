@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { setImmediate as nextTurn } from 'node:timers/promises';
 import { test } from 'node:test';
-import { createApp, effectScope } from 'vue';
+import { computed, createApp, effectScope, ref, watch } from 'vue';
 import { createPinia, disposePinia, setActivePinia } from 'pinia';
 import { PiniaColada, useQuery, useQueryCache } from '@pinia/colada';
 import { deferred, importTypeScript } from './helpers/typescript.mjs';
@@ -21,6 +21,7 @@ const listKey = (offset = 0, buildingId = 'building-a', subject = 'test-user') =
 
 async function fixture(t) {
     const requests = [];
+    const listRequests = [];
     const buildings = await importTypeScript(t, 'src/lib/buildings.ts', {
         'src/i18n/instance': { i18n: {} },
         'boot/api': { baseUrl: 'https://hud.test' },
@@ -44,6 +45,26 @@ async function fixture(t) {
             'src/lib/buildings': buildings,
         },
     );
+    const { useReconstructionsQuery } = await importTypeScript(
+        t,
+        'src/queries/reconstructions.ts',
+        {
+            vue: { computed, ref, watch, onActivated() {}, onDeactivated() {} },
+            '@pinia/colada': import.meta.resolve('@pinia/colada'),
+            'src/lib/auth': { getAuthSubject: () => 'test-user' },
+            'src/composables/useDocumentVisibility': { useDocumentVisibility: () => ref(true) },
+            'src/lib/buildings': {
+                ...buildings,
+                listReconstructions(buildingId, options) {
+                    const gate = deferred();
+                    listRequests.push({ buildingId, options, gate });
+                    return gate.promise;
+                },
+            },
+            'src/stores/splatDownload': { useSplatDownloadStore() {} },
+            'src/stores/videoDownload': { useVideoDownloadStore() {} },
+        },
+    );
     const app = createApp({});
     const pinia = createPinia();
     app.use(pinia);
@@ -64,14 +85,19 @@ async function fixture(t) {
         cache,
         mutation,
         requests,
+        listRequests,
         invalidation,
         query: (options) => app.runWithContext(() => scope.run(() => useQuery(options))),
+        reconstructions: () =>
+            app.runWithContext(() =>
+                scope.run(() => useReconstructionsQuery(ref('building-a'), ref(0))),
+            ),
         stop: () => scope.stop(),
     };
 }
 
 for (const status of ['cancelling', 'cancelled']) {
-    test(`cancellation applies the backend ${status} row without an optimistic update`, async (t) => {
+    test(`cancellation is optimistic across cached pages and applies the backend ${status} row`, async (t) => {
         const f = await fixture(t);
         const page = { items: [row, sibling], total: 2 };
         const keys = [listKey(), listKey(20)];
@@ -84,7 +110,12 @@ for (const status of ['cancelling', 'cancelled']) {
         const promise = f.mutation.mutateAsync(variables);
         await nextTurn();
         assert.equal(f.mutation.isLoading.value, true);
-        for (const key of keys) assert.equal(f.cache.getQueryData(key), page);
+        for (const key of keys) {
+            assert.deepEqual(f.cache.getQueryData(key), {
+                ...page,
+                items: [{ ...row, status: 'cancelling' }, sibling],
+            });
+        }
         assert.equal(
             f.requests[0].url,
             '/buildings/building-a/reconstructions/reconstruction-a/cancel',
@@ -92,7 +123,10 @@ for (const status of ['cancelling', 'cancelled']) {
         assert.equal(f.requests[0].init.method, 'POST');
 
         const updatedSibling = { ...sibling, progress: 0.8 };
-        f.cache.setQueryData(keys[0], { ...page, items: [row, updatedSibling] });
+        f.cache.setQueryData(keys[0], {
+            ...page,
+            items: [f.cache.getQueryData(keys[0]).items[0], updatedSibling],
+        });
         const result = { ...row, status, error_message: 'Cancellation requested' };
         f.requests[0].gate.resolve(result);
         assert.equal(await promise, result);
@@ -149,5 +183,84 @@ test('a successful response cancels an older poll and updates the cache after th
     await promise;
     poll.resolve(page);
     await polling;
+    assert.equal(f.cache.getQueryData(listKey()).items[0], cancelling);
+});
+
+test('refetches use server data during cancellation and the mutation applies its response', async (t) => {
+    const f = await fixture(t);
+    const query = f.reconstructions();
+    f.listRequests[0].gate.resolve({ items: [row, sibling], total: 2 });
+    await nextTurn();
+    const promise = f.mutation.mutateAsync(variables);
+    await nextTurn();
+    assert.equal(query.data.value.items[0].status, 'cancelling');
+
+    const refresh = query.refetch();
+    const updatedSibling = { ...sibling, progress: 0.8 };
+    f.listRequests[1].gate.resolve({ items: [row, updatedSibling], total: 2 });
+    await refresh;
+    assert.equal(query.data.value.items[0], row);
+    assert.equal(query.data.value.items[1], updatedSibling);
+
+    const cancelling = { ...row, status: 'cancelling' };
+    f.requests[0].gate.resolve(cancelling);
+    await promise;
+    assert.deepEqual(query.data.value.items, [cancelling, updatedSibling]);
+    f.listRequests[2].gate.resolve({ items: [cancelling, updatedSibling], total: 2 });
+    await nextTurn();
+});
+
+for (const status of ['cancelling', 'cancelled', 'completed', 'failed', 'crashed']) {
+    test(`a server-confirmed ${status} row is preserved when the cancel request fails`, async (t) => {
+        const f = await fixture(t);
+        const query = f.reconstructions();
+        f.listRequests[0].gate.resolve({ items: [row], total: 1 });
+        await nextTurn();
+        const promise = f.mutation.mutateAsync(variables);
+        const failure = assert.rejects(promise, { message: 'Response lost' });
+        await nextTurn();
+        const refresh = query.refetch();
+        const confirmed = { ...row, status };
+        f.listRequests[1].gate.resolve({ items: [confirmed], total: 1 });
+        await refresh;
+        assert.equal(query.data.value.items[0], confirmed);
+
+        f.requests[0].gate.reject(new Error('Response lost'));
+        await failure;
+        assert.equal(query.data.value.items[0], confirmed);
+        f.listRequests[2].gate.resolve({ items: [confirmed], total: 1 });
+        await nextTurn();
+    });
+}
+
+test('a delayed cancelling response does not replace a server-confirmed cancelled row', async (t) => {
+    const f = await fixture(t);
+    const query = f.reconstructions();
+    f.listRequests[0].gate.resolve({ items: [row], total: 1 });
+    await nextTurn();
+    const promise = f.mutation.mutateAsync(variables);
+    await nextTurn();
+    const refresh = query.refetch();
+    const cancelled = { ...row, status: 'cancelled' };
+    f.listRequests[1].gate.resolve({ items: [cancelled], total: 1 });
+    await refresh;
+    f.requests[0].gate.resolve({ ...row, status: 'cancelling' });
+    await promise;
+    assert.equal(query.data.value.items[0], cancelled);
+    f.listRequests[2].gate.resolve({ items: [cancelled], total: 1 });
+    await nextTurn();
+});
+
+test('retrying a persisted cancellation leaves it unchanged if the retry fails', async (t) => {
+    const f = await fixture(t);
+    const cancelling = { ...row, status: 'cancelling' };
+    const page = { items: [cancelling], total: 1 };
+    f.cache.setQueryData(listKey(), page);
+    const promise = f.mutation.mutateAsync(variables);
+    const failure = assert.rejects(promise, { message: 'Still unavailable' });
+    await nextTurn();
+    assert.equal(f.cache.getQueryData(listKey()).items[0], cancelling);
+    f.requests[0].gate.reject(new Error('Still unavailable'));
+    await failure;
     assert.equal(f.cache.getQueryData(listKey()).items[0], cancelling);
 });
