@@ -58,8 +58,7 @@ import { computed, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import PageHeader from 'src/components/PageHeader.vue';
-import type { ReconstructionSummary } from 'src/lib/buildings';
-import { cancelReconstruction } from 'src/lib/buildings';
+import { cancelReconstruction, isReconstructionProcessing } from 'src/lib/buildings';
 import { useReconstructionsQuery, useReconstructionStepQuery } from 'src/queries/reconstructions';
 import { useI18n } from 'vue-i18n';
 import { useReconstructionProcessingStore } from 'src/stores/reconstructions';
@@ -77,13 +76,6 @@ const { data, refetch } = useReconstructionsQuery(buildingId, offset);
 
 // Same source as the status chips in the reconstruction list.
 const reconstructions = computed(() => data.value?.items ?? []);
-// Server statuses only. 'cancelling' is a frontend-only optimistic state
-// (see confirmCancelProcessing) that the backend never returns.
-function isProcessing(reconstruction: ReconstructionSummary): boolean {
-    return ['waiting_for_upload', 'preparing', 'scheduled', 'running'].includes(
-        reconstruction.status,
-    );
-}
 const reconstruction = computed(() => {
     const list = reconstructions.value;
     // Prefer the reconstruction the user opened the drawer for, then any
@@ -91,7 +83,7 @@ const reconstruction = computed(() => {
     const requested = requestedReconstructionId.value
         ? list.find(({ id }) => id === requestedReconstructionId.value)
         : undefined;
-    return requested ?? list.find(isProcessing) ?? list[0];
+    return requested ?? list.find((item) => isReconstructionProcessing(item.status)) ?? list[0];
 });
 
 const isFailureState = computed(
@@ -107,7 +99,7 @@ const isCancelling = computed(
     () =>
         reconstruction.value !== undefined &&
         reconstructionProcessingStore.isCancelling(reconstruction.value.id) &&
-        isProcessing(reconstruction.value),
+        isReconstructionProcessing(reconstruction.value.status),
 );
 
 // Redirect to the building page if the reconstruction is completed

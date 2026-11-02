@@ -8,7 +8,11 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { ReconstructionStatus, ReconstructionSummary } from 'src/lib/buildings';
+import {
+    isReconstructionProcessing,
+    type ReconstructionStatus,
+    type ReconstructionSummary,
+} from 'src/lib/buildings';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
@@ -44,10 +48,10 @@ const statuses = computed(
         >,
 );
 
-const isProcessing = computed(() =>
-    ['waiting_for_upload', 'preparing', 'scheduled', 'running', 'cancelling'].includes(
-        props.reconstruction?.status ?? '',
-    ),
+const isProcessing = computed(
+    () =>
+        isReconstructionProcessing(props.reconstruction?.status) ||
+        props.reconstruction?.status === 'cancelling',
 );
 
 const presentation = computed(() =>

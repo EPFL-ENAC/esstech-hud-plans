@@ -226,7 +226,11 @@ import { computed, ref, toRef, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import ReconstructionStatusChip from 'src/components/ReconstructionStatusChip.vue';
 import ReconstructionVideo from 'src/components/ReconstructionVideo.vue';
-import { deleteReconstruction, type Reconstruction } from 'src/lib/buildings';
+import {
+    deleteReconstruction,
+    isReconstructionProcessing,
+    type Reconstruction,
+} from 'src/lib/buildings';
 import { RECONSTRUCTIONS_PAGE_SIZE, useReconstructionsQuery } from 'src/queries/reconstructions';
 import { useReconstructionProcessingStore } from 'src/stores/reconstructions';
 import { useI18n } from 'vue-i18n';
@@ -301,24 +305,19 @@ async function deleteCapture(reconstruction: Reconstruction) {
 function hasSplat(reconstruction: Reconstruction): boolean {
     return reconstruction.status === 'completed' && reconstruction.splat_path !== null;
 }
-function isProcessing(reconstruction: Reconstruction): boolean {
-    return ['waiting_for_upload', 'preparing', 'scheduled', 'running'].includes(
-        reconstruction.status,
-    );
-}
 function chipReconstruction(reconstruction: Reconstruction): Reconstruction {
     // The optimistic state only applies while the backend still reports
     // a processing status.
     if (
         reconstructionProcessingStore.isCancelling(reconstruction.id) &&
-        isProcessing(reconstruction)
+        isReconstructionProcessing(reconstruction.status)
     ) {
         return { ...reconstruction, status: 'cancelling' };
     }
     return reconstruction;
 }
 function showProcessingDetails(reconstruction: Reconstruction): boolean {
-    return isProcessing(reconstruction) || reconstruction.status === 'failed';
+    return isReconstructionProcessing(reconstruction.status) || reconstruction.status === 'failed';
 }
 watch(reconstructions, (rows) => {
     if (!rows.some(({ id }) => id === expandedId.value)) expandedId.value = null;

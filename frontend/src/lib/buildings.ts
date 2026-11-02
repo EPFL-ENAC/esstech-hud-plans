@@ -82,6 +82,15 @@ export type ReconstructionStatus =
     | 'cancelled'
     | 'crashed';
 
+export function isReconstructionProcessing(status: ReconstructionStatus | undefined): boolean {
+    return (
+        status === 'waiting_for_upload' ||
+        status === 'preparing' ||
+        status === 'scheduled' ||
+        status === 'running'
+    );
+}
+
 export interface ReconstructionSummary {
     id: string;
     status: ReconstructionStatus;

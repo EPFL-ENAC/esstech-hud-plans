@@ -3,13 +3,19 @@ import { test } from 'node:test';
 import { importTypeScript } from './helpers/typescript.mjs';
 
 async function allBuildingsQuery(t, listBuildings) {
+    const buildings = await importTypeScript(t, 'src/lib/buildings.ts', {
+        'src/i18n/instance': { i18n: {} },
+        'boot/api': { baseUrl: 'https://hud.test/api' },
+        'src/lib/api': { ApiError: class extends Error {}, requestJson() {} },
+        'src/lib/utils/resumableDownload': { downloadResumable() {} },
+    });
     const queries = await importTypeScript(t, 'src/queries/buildings.ts', {
         vue: import.meta.resolve('vue'),
         '@pinia/colada': { useQuery: (options) => options },
+        'src/composables/useDocumentVisibility': { useDocumentVisibility() {} },
         'src/lib/auth': { getAuthSubject: () => 'owner' },
         'src/lib/buildings': {
-            getBuilding() {},
-            listBuildingLocations() {},
+            ...buildings,
             listBuildings,
         },
     });
