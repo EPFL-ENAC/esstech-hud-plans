@@ -38,7 +38,8 @@ from api.lib.utils.commands import (
     LocalCommandExecutionEnvironment,
     ScitasCommandExecutionEnvironment,
 )
-from api.models.reconstruction import ReconstructionArtifactUpdate
+from api.lib.workflows import common as workflow_common
+from api.models.reconstruction import Reconstruction, ReconstructionArtifactUpdate
 from api.models.workflows import (
     BrushSettings,
     ColmapSettings,
@@ -316,6 +317,14 @@ class SplatGenerationArtifact:
     @classmethod
     def load(cls, artifact_id: UUID, storage_root: Path) -> Self:
         return cls(artifact_id, storage_root)
+
+    @classmethod
+    def from_local_reconstruction(cls, reconstruction: Reconstruction) -> Self:
+        """Locate reconstruction artifacts under this process's storage root."""
+        return cls.load(
+            reconstruction.id,
+            workflow_common.WORKFLOW_DATA_DIRECTORY.resolve(),
+        )
 
     @classmethod
     def from_flow_run(cls, flow_run: FlowRun, storage_root: Path) -> Self:

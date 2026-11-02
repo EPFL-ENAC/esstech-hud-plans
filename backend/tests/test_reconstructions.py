@@ -1204,6 +1204,52 @@ def test_reconstruction_assets_serve_inline_bytes_when_available(
 
 
 @pytest.mark.parametrize(
+    "reconstruction_asset",
+    ["splat", "point-cloud", "point-cloud/meta"],
+    indirect=True,
+)
+@pytest.mark.parametrize(
+    "stored_file_exists, local_file_exists",
+    [(False, True), (True, True), (True, False)],
+)
+def test_reconstruction_assets_use_local_storage_with_foreign_stored_paths(
+    reconstruction_asset: tuple[TestClient, UUID, str, Path],
+    tmp_path: Path,
+    stored_file_exists: bool,
+    local_file_exists: bool,
+) -> None:
+    client, reconstruction_id, artifact, path = reconstruction_asset
+    stored_splat_path = (
+        tmp_path / "foreign-mount" / "workflows" / reconstruction_id.hex / "splat.ply"
+    )
+    if stored_file_exists:
+        stored_splat_path.parent.mkdir(parents=True)
+        for filename in (
+            "splat.ply",
+            POINT_CLOUD_BINARY_FILENAME,
+            POINT_CLOUD_META_FILENAME,
+        ):
+            stored_splat_path.with_name(filename).write_bytes(b"must not be served")
+    if not local_file_exists:
+        for local_path in path.parent.iterdir():
+            local_path.unlink()
+    _set_artifact_path(client, reconstruction_id, artifact, stored_splat_path)
+
+    response = client.get(_asset_url(reconstruction_id, artifact))
+
+    if local_file_exists:
+        assert response.status_code == 200
+        assert response.content == path.read_bytes()
+    else:
+        assert response.status_code == 404
+        assert response.json() == {"detail": "File not found"}
+    reconstruction = client.get(
+        f"/buildings/{BUILDING_ID}/reconstructions/{reconstruction_id}"
+    ).json()
+    assert reconstruction["splat_path"] == str(stored_splat_path)
+
+
+@pytest.mark.parametrize(
     "status",
     [
         state
@@ -1286,7 +1332,7 @@ def test_reconstruction_assets_support_byte_ranges(
         "storage_root_symlink",
     ],
 )
-def test_reconstruction_assets_reject_unavailable_or_escaped_paths(
+def test_reconstruction_assets_enforce_local_file_boundaries(
     reconstruction_asset: tuple[TestClient, UUID, str, Path],
     tmp_path: Path,
     case: str,
@@ -1298,7 +1344,8 @@ def test_reconstruction_assets_reject_unavailable_or_escaped_paths(
     elif case == "missing":
         path.unlink()
     elif case == "directory":
-        path = path.parent
+        path.unlink()
+        path.mkdir()
     elif case in {"outside", "sibling", "symlink"}:
         outside = tmp_path / ("outside" if case != "sibling" else uuid4().hex)
         outside.mkdir()
@@ -1324,6 +1371,12 @@ def test_reconstruction_assets_reject_unavailable_or_escaped_paths(
     _set_artifact_path(client, reconstruction_id, artifact, path)
 
     response = client.get(_asset_url(reconstruction_id, artifact))
+
+    if artifact != "video" and case in {"outside", "sibling"}:
+        local_path = reconstruction_asset[3]
+        assert response.status_code == 200
+        assert response.content == local_path.read_bytes()
+        return
 
     assert response.status_code == 404
     assert response.json() == {
@@ -1430,9 +1483,13 @@ def _fake_point_cloud_colmap(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+@pytest.mark.parametrize("foreign_stored_path", [False, True])
+@pytest.mark.parametrize("first_artifact", ["point-cloud", "point-cloud/meta"])
 def test_missing_point_cloud_artifacts_are_generated_on_request(
     reconstruction_api: tuple[TestClient, UUID],
     monkeypatch: pytest.MonkeyPatch,
+    foreign_stored_path: bool,
+    first_artifact: str,
 ) -> None:
     client, building_id = reconstruction_api
     reconstruction_id, splat_path = _completed_reconstruction_with_splat(
@@ -1441,11 +1498,36 @@ def test_missing_point_cloud_artifacts_are_generated_on_request(
     )
     monkeypatch.setattr(config, "PLAN_DENSITY_THRESHOLD", 1.0)
     _fake_point_cloud_colmap(monkeypatch)
+    if foreign_stored_path:
+        _set_artifact_path(
+            client,
+            reconstruction_id,
+            "splat",
+            Path("/foreign-mount/workflows") / reconstruction_id.hex / "splat.ply",
+        )
+    calls: list[tuple[Path, Path]] = []
+    original = point_cloud_compute.generate_plan_point_cloud
+
+    def recording_generate(splat_path: Path, colmap_directory: Path) -> None:
+        calls.append((splat_path, colmap_directory))
+        original(splat_path, colmap_directory)
+
+    monkeypatch.setattr(
+        point_cloud_compute, "generate_plan_point_cloud", recording_generate
+    )
     url = f"/buildings/{BUILDING_ID}/reconstructions/{reconstruction_id}"
 
-    binary_response = client.get(f"{url}/point-cloud")
-    meta_response = client.get(f"{url}/point-cloud/meta")
+    second_artifact = (
+        "point-cloud/meta" if first_artifact == "point-cloud" else "point-cloud"
+    )
+    responses = {
+        artifact: client.get(f"{url}/{artifact}")
+        for artifact in (first_artifact, second_artifact)
+    }
+    binary_response = responses["point-cloud"]
+    meta_response = responses["point-cloud/meta"]
 
+    assert calls == [(splat_path, splat_path.parent / "colmap")]
     assert binary_response.status_code == 200
     assert binary_response.headers["content-type"] == "application/octet-stream"
     assert meta_response.status_code == 200
