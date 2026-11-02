@@ -344,7 +344,7 @@ def test_registration_timeout_records_failure(
 
     monkeypatch.setattr(config, "PREFECT_SUBMISSION_TIMEOUT_SECONDS", 0.01)
     monkeypatch.setattr(
-        splat_workflow, "schedule_splat_generation_from_tus", never_finishes
+        splat_workflow, "schedule_splat_generation_from_upload", never_finishes
     )
     response = client.post(
         _from_upload_url(building_id, False), json={"upload_id": str(upload_id)}
@@ -466,7 +466,7 @@ def reconstruction_api(
         return WORKFLOW_ID
 
     monkeypatch.setattr(
-        splat_workflow, "schedule_splat_generation_from_tus", fake_schedule
+        splat_workflow, "schedule_splat_generation_from_upload", fake_schedule
     )
 
     app = FastAPI()
@@ -625,7 +625,7 @@ def test_pending_upload_submission_persists_without_scheduling(
         raise AssertionError("A pending upload must not start a workflow")
 
     monkeypatch.setattr(
-        splat_workflow, "schedule_splat_generation_from_tus", unexpected_schedule
+        splat_workflow, "schedule_splat_generation_from_upload", unexpected_schedule
     )
     url = _from_upload_url(building_id, new_building)
     response = client.post(
@@ -682,14 +682,16 @@ def test_completion_dispatches_all_waiting_settings_and_skips_repeated_hooks(
 
     async def schedule(**kwargs):
         calls.append(kwargs)
-        assert kwargs["tus_upload_path"] == str(path)
+        assert kwargs["upload_path"] == str(path)
         assert path.read_bytes() == b"stored video bytes"
         assert kwargs["owner_id"] == USER_ID
         if fail_first and kwargs["settings"].ffmpeg.fps == 3:
             raise RuntimeError("Scheduler unavailable")
         return uuid4()
 
-    monkeypatch.setattr(splat_workflow, "schedule_splat_generation_from_tus", schedule)
+    monkeypatch.setattr(
+        splat_workflow, "schedule_splat_generation_from_upload", schedule
+    )
     assert _finish_upload(client, upload_id).status_code == 200
     assert _finish_upload(client, upload_id).status_code == 200
     assert len(calls) == 2
@@ -726,7 +728,7 @@ def test_waiting_reconstruction_can_be_cancelled_or_deleted_before_completion(
 
     monkeypatch.setattr(workflow_common, "cancel_workflow", unexpected_call)
     monkeypatch.setattr(
-        splat_workflow, "schedule_splat_generation_from_tus", unexpected_call
+        splat_workflow, "schedule_splat_generation_from_upload", unexpected_call
     )
     if action == "cancel":
         response = client.post(f"{url}/cancel")
@@ -849,7 +851,9 @@ def test_reconstruction_from_stored_upload_is_reusable(
         scheduled.append(kwargs)
         return uuid4()
 
-    monkeypatch.setattr(splat_workflow, "schedule_splat_generation_from_tus", schedule)
+    monkeypatch.setattr(
+        splat_workflow, "schedule_splat_generation_from_upload", schedule
+    )
     results = []
     for _ in range(2):
         response = client.post(
@@ -875,8 +879,8 @@ def test_reconstruction_from_stored_upload_is_reusable(
     assert results[0]["input_video_path"] != results[1]["input_video_path"]
     assert len(scheduled) == 2
     for call in scheduled:
-        assert call["tus_upload_path"] == str(path)
-        assert call["tus_video_filename"] == "stored.mp4"
+        assert call["upload_path"] == str(path)
+        assert call["upload_filename"] == "stored.mp4"
         assert call["owner_id"] == USER_ID
     assert path.read_bytes() == b"stored video bytes"
 
@@ -963,7 +967,7 @@ def test_reconstruction_from_upload_retains_rows_on_scheduling_failure(
         raise OSError("Scheduler unavailable")
 
     monkeypatch.setattr(
-        splat_workflow, "schedule_splat_generation_from_tus", fail_schedule
+        splat_workflow, "schedule_splat_generation_from_upload", fail_schedule
     )
     response = client.post(
         _from_upload_url(building_id, new_building),

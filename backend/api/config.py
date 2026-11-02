@@ -73,8 +73,6 @@ class Config(BaseSettings):
     TUSD_UPLOAD_RETENTION_DAYS: int = 7
     # Internal credential injected by the API proxy and forwarded to tusd hooks.
     TUSD_HOOK_SECRET: str = ""
-    # Hook endpoint URL tusd calls for upload lifecycle events (used by compose).
-    TUSD_HOOKS_HTTP_URL: str = "http://host.docker.internal:8000/tus/hooks"
     # Internal address of the tusd server. The API proxies upload requests to
     # it, so the browser never reaches tusd. Dev targets the loopback-published
     # compose port. In the real deployment tusd is not exposed and this points

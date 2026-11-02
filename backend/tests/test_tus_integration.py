@@ -405,7 +405,9 @@ def test_real_tus_upload_is_reusable_for_both_reconstruction_routes(
         scheduled.append(kwargs)
         return uuid4()
 
-    monkeypatch.setattr(splat_workflow, "schedule_splat_generation_from_tus", schedule)
+    monkeypatch.setattr(
+        splat_workflow, "schedule_splat_generation_from_upload", schedule
+    )
     client = real_tus.client
     location, upload_id = _start_upload(real_tus)
     first = client.post(
@@ -433,9 +435,9 @@ def test_real_tus_upload_is_reusable_for_both_reconstruction_routes(
     source = upload_file_path(UUID(upload_id), "scan.mp4")
     assert len(scheduled) == 2
     for parameters in scheduled:
-        assert parameters["tus_upload_path"] == str(source)
+        assert parameters["upload_path"] == str(source)
         artifact = parameters["artifact"]
-        splat_workflow._copy_tus_upload(str(source), str(artifact.video_path))
+        splat_workflow._copy_uploaded_video(str(source), str(artifact.video_path))
         assert artifact.video_path.read_bytes() == b"video bytes"
         assert source.read_bytes() == b"video bytes"
     assert not (real_tus.upload_directory / upload_id).exists()
@@ -482,7 +484,9 @@ def test_submission_racing_completion_never_misses_or_duplicates_scheduling(
         return uuid4()
 
     monkeypatch.setattr(AsyncSession, "commit", commit_with_pause)
-    monkeypatch.setattr(splat_workflow, "schedule_splat_generation_from_tus", schedule)
+    monkeypatch.setattr(
+        splat_workflow, "schedule_splat_generation_from_upload", schedule
+    )
     with ThreadPoolExecutor(max_workers=2) as executor:
         creation = executor.submit(
             client.post,
@@ -596,7 +600,9 @@ def test_concurrent_hook_delivery_preserves_one_row_and_timestamp(
         await asyncio.sleep(0.05)  # Keep the claim in flight during other deliveries.
         return uuid4()
 
-    monkeypatch.setattr(splat_workflow, "schedule_splat_generation_from_tus", schedule)
+    monkeypatch.setattr(
+        splat_workflow, "schedule_splat_generation_from_upload", schedule
+    )
     rows = []
     for fps in (3, 5):
         created = real_tus.client.post(

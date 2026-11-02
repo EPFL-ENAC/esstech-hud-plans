@@ -4,7 +4,6 @@ Backend :
 - tus_proxy.py seems to do a lot of hand work, can't FastAPI (or an idiomatic package) be used instead ?
 - _splat_generation_parameters should be a proper dataclas with .from_xxx() methods
 - views/reconstruction_submissions.py doesn't have any endpoint and thus shouldn't be in /views/
-- Revisit tus cleanup later : it needs to be database-aware to mark abandoned uploads as failed when their staging files are deleted while preserving completed uploads.
 - paginated queries should return the total number of items or pages (whatever is easier), so that the frontend doesn't need to fetch extra items to guess if there is a next page
 
 Frontend :
