@@ -59,7 +59,7 @@
                                 </q-item-label>
                                 <q-item-label>
                                     <reconstruction-status-chip
-                                        :reconstruction="chipReconstruction(reconstruction)"
+                                        :reconstruction="reconstruction"
                                         :tooltip="t('reconstructions.attempt')"
                                     />
                                 </q-item-label>
@@ -232,7 +232,6 @@ import {
     type Reconstruction,
 } from 'src/lib/buildings';
 import { RECONSTRUCTIONS_PAGE_SIZE, useReconstructionsQuery } from 'src/queries/reconstructions';
-import { useReconstructionProcessingStore } from 'src/stores/reconstructions';
 import { useI18n } from 'vue-i18n';
 
 const { t, locale } = useI18n();
@@ -247,7 +246,6 @@ watch(offset, () => {
 const query = useReconstructionsQuery(toRef(props, 'buildingId'), offset);
 const { data, state, refetch, isForegroundLoading: isLoading } = query;
 const reconstructions = computed(() => data.value?.items ?? []);
-const reconstructionProcessingStore = useReconstructionProcessingStore();
 const dateFormatter = computed(
     () =>
         new Intl.DateTimeFormat(locale.value, {
@@ -305,19 +303,12 @@ async function deleteCapture(reconstruction: Reconstruction) {
 function hasSplat(reconstruction: Reconstruction): boolean {
     return reconstruction.status === 'completed' && reconstruction.splat_path !== null;
 }
-function chipReconstruction(reconstruction: Reconstruction): Reconstruction {
-    // The optimistic state only applies while the backend still reports
-    // a processing status.
-    if (
-        reconstructionProcessingStore.isCancelling(reconstruction.id) &&
-        isReconstructionProcessing(reconstruction.status)
-    ) {
-        return { ...reconstruction, status: 'cancelling' };
-    }
-    return reconstruction;
-}
 function showProcessingDetails(reconstruction: Reconstruction): boolean {
-    return isReconstructionProcessing(reconstruction.status) || reconstruction.status === 'failed';
+    return (
+        isReconstructionProcessing(reconstruction.status) ||
+        reconstruction.status === 'cancelling' ||
+        reconstruction.status === 'failed'
+    );
 }
 watch(reconstructions, (rows) => {
     if (!rows.some(({ id }) => id === expandedId.value)) expandedId.value = null;

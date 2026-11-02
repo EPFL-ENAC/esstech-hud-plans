@@ -58,10 +58,10 @@ import { computed, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import PageHeader from 'src/components/PageHeader.vue';
-import { cancelReconstruction, isReconstructionProcessing } from 'src/lib/buildings';
+import { isReconstructionProcessing } from 'src/lib/buildings';
 import { useReconstructionsQuery, useReconstructionStepQuery } from 'src/queries/reconstructions';
 import { useI18n } from 'vue-i18n';
-import { useReconstructionProcessingStore } from 'src/stores/reconstructions';
+import { useCancelReconstructionMutation } from 'src/mutations/reconstructions';
 
 const { t } = useI18n();
 
@@ -72,7 +72,9 @@ const $q = useQuasar();
 const buildingId = computed(() => route.params.id as string);
 const requestedReconstructionId = computed(() => route.query.reconstruction as string | null);
 const offset = ref(0);
-const { data, refetch } = useReconstructionsQuery(buildingId, offset);
+const { data } = useReconstructionsQuery(buildingId, offset);
+const { mutateAsync: cancelReconstruction, isLoading: isCancelPending } =
+    useCancelReconstructionMutation();
 
 // Same source as the status chips in the reconstruction list.
 const reconstructions = computed(() => data.value?.items ?? []);
@@ -83,7 +85,13 @@ const reconstruction = computed(() => {
     const requested = requestedReconstructionId.value
         ? list.find(({ id }) => id === requestedReconstructionId.value)
         : undefined;
-    return requested ?? list.find((item) => isReconstructionProcessing(item.status)) ?? list[0];
+    return (
+        requested ??
+        list.find(
+            (item) => isReconstructionProcessing(item.status) || item.status === 'cancelling',
+        ) ??
+        list[0]
+    );
 });
 
 const isFailureState = computed(
@@ -92,15 +100,7 @@ const isFailureState = computed(
         ['failed', 'cancelled', 'crashed'].includes(reconstruction.value.status),
 );
 const isCompletedState = computed(() => reconstruction.value?.status === 'completed');
-const reconstructionProcessingStore = useReconstructionProcessingStore();
-// The optimistic state only applies while the backend still reports a
-// processing status, so a leftover entry never shows for a settled row.
-const isCancelling = computed(
-    () =>
-        reconstruction.value !== undefined &&
-        reconstructionProcessingStore.isCancelling(reconstruction.value.id) &&
-        isReconstructionProcessing(reconstruction.value.status),
-);
+const isCancelling = computed(() => reconstruction.value?.status === 'cancelling');
 
 // Redirect to the building page if the reconstruction is completed
 let redirectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -161,16 +161,10 @@ function confirmCancel() {
 
 async function confirmCancelProcessing() {
     const reconstructionId = reconstruction.value?.id;
-    if (!reconstructionId || isCancelling.value) return;
+    if (!reconstructionId || isCancelling.value || isCancelPending.value) return;
 
-    // Show the cancelling state immediately while the cancel request
-    // runs; surviving a page close needs the shared store.
-    reconstructionProcessingStore.markCancelling(reconstructionId);
     try {
-        await cancelReconstruction(buildingId.value, reconstructionId);
-        // Refresh the shared list at once so the building page already shows
-        // the settled row after the redirect.
-        void refetch();
+        await cancelReconstruction({ buildingId: buildingId.value, reconstructionId });
         $q.notify({
             type: 'positive',
             message: t('processing.cancelled'),
@@ -178,7 +172,6 @@ async function confirmCancelProcessing() {
         });
         void router.replace(`/building/${buildingId.value}`);
     } catch {
-        reconstructionProcessingStore.clearCancelling(reconstructionId);
         $q.notify({
             type: 'negative',
             message: t('processing.cancelFailed'),
