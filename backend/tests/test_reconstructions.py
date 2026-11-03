@@ -1,4 +1,5 @@
 import asyncio
+import errno
 import json
 import struct
 import threading
@@ -1409,18 +1410,20 @@ def test_reconstruction_assets_require_authentication_and_ownership(
     assert client.get(_asset_url(uuid4(), artifact)).status_code == 404
 
 
-@pytest.mark.parametrize("operation", ["stat", "open"])
+@pytest.mark.parametrize("operation", ["resolve", "stat", "open"])
+@pytest.mark.parametrize("error_number", [errno.EACCES, errno.EIO])
 def test_reconstruction_assets_map_storage_failures_to_503(
     reconstruction_asset: tuple[TestClient, UUID, str, Path],
     monkeypatch: pytest.MonkeyPatch,
     operation: str,
+    error_number: int,
 ) -> None:
     client, reconstruction_id, artifact, path = reconstruction_asset
     original = getattr(Path, operation)
 
     def fail_access(self: Path, *args: object, **kwargs: object):
         if self == path:
-            raise PermissionError(f"Cannot access {path}")
+            raise OSError(error_number, f"Cannot access {path}")
         return original(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, operation, fail_access)
@@ -1428,6 +1431,57 @@ def test_reconstruction_assets_map_storage_failures_to_503(
 
     assert response.status_code == 503
     assert response.json() == {"detail": "File storage is unavailable"}
+
+
+@pytest.mark.parametrize(
+    "error_type, expected_status",
+    [
+        (PermissionError, 503),
+        (OSError, 503),
+        (FileNotFoundError, 404),
+        (NotADirectoryError, 404),
+        (ValueError, 404),
+        (RuntimeError, 404),
+    ],
+)
+def test_reconstruction_assets_map_storage_root_resolution_failures(
+    reconstruction_asset: tuple[TestClient, UUID, str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    error_type: type[Exception],
+    expected_status: int,
+) -> None:
+    client, reconstruction_id, artifact, _ = reconstruction_asset
+    storage_root = (
+        config.DATA_PATH
+        if artifact == "video"
+        else workflow_common.WORKFLOW_DATA_DIRECTORY
+    )
+    original_resolve = Path.resolve
+
+    def fail_resolve(self: Path, strict: bool = False) -> Path:
+        if self == storage_root:
+            raise error_type(f"Cannot resolve {storage_root}")
+        return original_resolve(self, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", fail_resolve)
+    response = client.get(_asset_url(reconstruction_id, artifact))
+
+    assert response.status_code == expected_status
+    assert response.json() == {
+        "detail": (
+            "File storage is unavailable"
+            if expected_status == 503
+            else "File not found"
+        )
+    }
+    if expected_status == 503:
+        storage_logs = [
+            record for record in caplog.records if record.name == "api.utils.responses"
+        ]
+        assert len(storage_logs) == 1
+        assert str(storage_root) in storage_logs[0].getMessage()
+        assert storage_logs[0].exc_info is not None
 
 
 def test_reconstruction_assets_map_database_failures_to_503(
