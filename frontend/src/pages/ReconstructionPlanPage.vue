@@ -19,10 +19,10 @@
             :error-message="errorMessage"
         >
             <template #pending>
-                <splat-download-progress role="presentation" />
+                <splat-download-progress :progress="downloadProgress" role="presentation" />
             </template>
             <template #refreshing>
-                <splat-download-progress role="presentation" />
+                <splat-download-progress :progress="downloadProgress" role="presentation" />
             </template>
             <template #success="{ data }">
                 <template v-if="showSplat">
@@ -94,7 +94,7 @@ const buildingId = computed(() =>
 const reconstructionId = computed(() =>
     typeof route.params.reconstructionId === 'string' ? route.params.reconstructionId : '',
 );
-const { data, error, state, asyncStatus, refetch } = useReconstructionSplatQuery(
+const { data, error, state, asyncStatus, refetch, downloadProgress } = useReconstructionSplatQuery(
     buildingId,
     reconstructionId,
 );

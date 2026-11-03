@@ -36,7 +36,7 @@ async function fixture(t, kind, initialSubject = 'user-a') {
         'src/i18n/instance': { i18n: {} },
         'boot/api': { baseUrl: 'https://hud.test/api' },
         'src/lib/api': { ApiError: class extends Error {}, requestJson() {} },
-        'src/lib/utils/resumableDownload': { downloadResumable() {} },
+        'src/lib/downloads/resumableDownload': { ResumableDownload: class {} },
     });
     const imports = {
         vue: {
@@ -59,8 +59,7 @@ async function fixture(t, kind, initialSubject = 'user-a') {
             getReconstructionStep: (buildingId, reconstructionId, signal) =>
                 request({ buildingId, reconstructionId, signal }),
         },
-        'src/stores/splatDownload': { useSplatDownloadStore() {} },
-        'src/stores/videoDownload': { useVideoDownloadStore() {} },
+        'src/queries/downloadProgress': { trackDownloadProgress() {} },
     };
     const queries = await importTypeScript(
         t,

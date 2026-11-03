@@ -24,11 +24,11 @@
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { formatMb } from 'src/lib/utils/fetchProgress';
-import { useVideoDownloadStore } from 'src/stores/videoDownload';
+import type { FetchProgress } from 'src/lib/utils/fetchProgress';
 
 const { t } = useI18n();
-const videoDownload = useVideoDownloadStore();
-const progress = computed(() => videoDownload.progress ?? { loaded: 0, total: 0 });
+const props = defineProps<{ progress: FetchProgress | null }>();
+const progress = computed(() => props.progress ?? { loaded: 0, total: 0 });
 const loaded = computed(() => progress.value.loaded);
 const total = computed(() => progress.value.total);
 const ratio = computed(() => (total.value > 0 ? Math.min(loaded.value / total.value, 1) : 0));

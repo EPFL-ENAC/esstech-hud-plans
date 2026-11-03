@@ -2,9 +2,7 @@ import { useQuery, useQueryCache } from '@pinia/colada';
 import { computed, onActivated, onDeactivated, ref, watch, type Ref } from 'vue';
 import { useDocumentVisibility } from 'src/composables/useDocumentVisibility';
 import { getAuthSubject } from 'src/lib/auth';
-import type { FetchProgress } from 'src/lib/utils/fetchProgress';
-import { useSplatDownloadStore } from 'src/stores/splatDownload';
-import { useVideoDownloadStore } from 'src/stores/videoDownload';
+import { trackDownloadProgress } from 'src/queries/downloadProgress';
 import {
     getReconstructionPointCloud,
     getReconstructionPointCloudMeta,
@@ -111,24 +109,20 @@ export function useReconstructionVideoQuery(
 ) {
     const subject = getAuthSubject();
     const cache = useQueryCache();
-    const videoDownload = useVideoDownloadStore();
     const key = computed(() => [
         ...reconstructionKey(subject, buildingId.value),
         'video',
         reconstructionId.value,
     ]);
-    // A different building or reconstruction must restart the progress bar.
-    watch([buildingId, reconstructionId], () => videoDownload.reset());
     const query = useQuery({
         key: () => key.value,
         enabled: false,
-        query: ({ signal }) => {
-            videoDownload.reset();
+        query: ({ signal, entry }) => {
             return getReconstructionVideo(
                 buildingId.value,
                 reconstructionId.value,
                 signal,
-                (progress) => videoDownload.update(progress),
+                trackDownloadProgress(entry, signal),
             );
         },
         staleTime: Infinity,
@@ -152,14 +146,6 @@ export function useReconstructionPointCloudQuery(
     reconstructionId: Ref<string>,
 ) {
     const subject = getAuthSubject();
-    const splatDownload = useSplatDownloadStore();
-
-    // A different building or reconstruction must restart the progress bar.
-    watch([buildingId, reconstructionId], () => splatDownload.reset());
-
-    function reportProgress(progress: FetchProgress): void {
-        splatDownload.update(progress);
-    }
 
     return useQuery({
         key: () => [
@@ -168,8 +154,8 @@ export function useReconstructionPointCloudQuery(
             reconstructionId.value,
         ],
         enabled: () => subject !== null && buildingId.value !== '' && reconstructionId.value !== '',
-        query: ({ signal }) => {
-            splatDownload.reset();
+        query: ({ signal, entry }) => {
+            const reportProgress = trackDownloadProgress(entry, signal);
             return Promise.all([
                 getReconstructionPointCloud(
                     buildingId.value,
@@ -195,14 +181,6 @@ export function useReconstructionSplatQuery(
     reconstructionId: Ref<string>,
 ) {
     const subject = getAuthSubject();
-    const splatDownload = useSplatDownloadStore();
-
-    // A different building or reconstruction must restart the progress bar.
-    watch([buildingId, reconstructionId], () => splatDownload.reset());
-
-    function reportProgress(progress: FetchProgress): void {
-        splatDownload.update(progress);
-    }
 
     return useQuery({
         key: () => [
@@ -211,13 +189,12 @@ export function useReconstructionSplatQuery(
             reconstructionId.value,
         ],
         enabled: () => subject !== null && buildingId.value !== '' && reconstructionId.value !== '',
-        query: ({ signal }) => {
-            splatDownload.reset();
+        query: ({ signal, entry }) => {
             return getReconstructionSplat(
                 buildingId.value,
                 reconstructionId.value,
                 signal,
-                reportProgress,
+                trackDownloadProgress(entry, signal),
             );
         },
         staleTime: Infinity,

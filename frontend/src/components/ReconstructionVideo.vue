@@ -3,7 +3,7 @@
         <div class="text-subtitle2">{{ t('reconstructions.video.title') }}</div>
 
         <div v-if="loading" role="status" class="q-gutter-y-sm">
-            <video-download-progress />
+            <video-download-progress :progress="downloadProgress" />
             <q-btn flat dense :label="t('common.cancel')" @click="cancel" />
         </div>
 
@@ -66,6 +66,7 @@ const videoUrl = ref<string | null>(null);
 const playbackError = ref('');
 const errorDismissed = ref(false);
 const loading = query.isLoading;
+const downloadProgress = query.downloadProgress;
 const errorMessage = computed(() => {
     if (playbackError.value) return playbackError.value;
     const error = query.error.value;

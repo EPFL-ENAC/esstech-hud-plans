@@ -33,10 +33,16 @@
             :error-message="t('plans.splat.unavailable')"
         >
             <template #pending>
-                <splat-download-progress role="presentation" />
+                <splat-download-progress
+                    :progress="splatQuery.downloadProgress"
+                    role="presentation"
+                />
             </template>
             <template #refreshing>
-                <splat-download-progress role="presentation" />
+                <splat-download-progress
+                    :progress="splatQuery.downloadProgress"
+                    role="presentation"
+                />
             </template>
             <template #success="{ data }">
                 <div v-if="showSplat" class="viewer-wrapper">
@@ -68,10 +74,16 @@
                 <div class="text-caption text-grey-7 q-mb-xs">
                     {{ t('plans.points.preparing') }}
                 </div>
-                <splat-download-progress role="presentation" />
+                <splat-download-progress
+                    :progress="pointCloudQuery.downloadProgress"
+                    role="presentation"
+                />
             </template>
             <template #refreshing>
-                <splat-download-progress role="presentation" />
+                <splat-download-progress
+                    :progress="pointCloudQuery.downloadProgress"
+                    role="presentation"
+                />
             </template>
             <template #success="{ data }">
                 <div v-if="showPointCloud" class="viewer-wrapper">
