@@ -106,7 +106,9 @@ def _get_ssh_client() -> paramiko.SSHClient:
             )
             connect_kwargs["look_for_keys"] = True
 
-        _ssh_client.connect(**connect_kwargs)
+        _ssh_client.connect(
+            **connect_kwargs, auth_timeout=300
+        )  # 5mn timeout for SSH auth
         logger.info(f"Connected to Scitas SSH at {config.SCITAS_HOST}")
         return _ssh_client
 
