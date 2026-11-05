@@ -36,7 +36,7 @@ async function fixture(t, kind, initialSubject = 'user-a') {
         'src/i18n/instance': { i18n: {} },
         'boot/api': { baseUrl: 'https://hud.test/api' },
         'src/lib/api': { ApiError: class extends Error {}, requestJson() {} },
-        'src/lib/utils/resumableDownload': { downloadResumable() {} },
+        'src/lib/resumableDownload': { ResumableDownload: {} },
     });
     const imports = {
         vue: {

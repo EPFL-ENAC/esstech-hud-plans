@@ -22,7 +22,7 @@ async function fixture(t) {
         'src/i18n/instance': { i18n: { global: { t: (key) => key } } },
         'boot/api': { baseUrl: 'https://hud.test' },
         'src/lib/api': api,
-        'src/lib/utils/resumableDownload': { downloadResumable() {} },
+        'src/lib/resumableDownload': { ResumableDownload: {} },
     });
     const { useSubmitReconstructionMutation } = await importTypeScript(
         t,
