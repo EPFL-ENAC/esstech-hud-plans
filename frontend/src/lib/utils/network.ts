@@ -20,7 +20,7 @@ export async function withAbortController<T>(
 }
 
 /** Bound one network wait and abort the underlying transport when it expires. */
-export async function waitForNetwork<T>(
+export async function executeAsyncOperiationWithTimeoutAndAbort<T>(
     operation: () => Promise<T>,
     controller: AbortController,
     timeoutMs = 60_000,
@@ -74,7 +74,10 @@ export async function* readResponseChunks(
     if (!reader) return;
     try {
         for (;;) {
-            const { done, value } = await waitForNetwork(() => reader.read(), controller);
+            const { done, value } = await executeAsyncOperiationWithTimeoutAndAbort(
+                () => reader.read(),
+                controller,
+            );
             if (done) return;
             if (value.byteLength > 0) yield value;
         }

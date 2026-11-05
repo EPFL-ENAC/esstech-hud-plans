@@ -5,7 +5,11 @@ import type { DownloadFile } from './downloadFile';
 import { DiskDownloadFile } from './diskDownloadFile';
 import { MemoryDownloadFile } from './memoryDownloadFile';
 import { DownloadsDatabase } from './downloadsDatabase';
-import { readResponseChunks, waitForNetwork, withAbortController } from 'src/lib/utils/network';
+import {
+    readResponseChunks,
+    executeAsyncOperiationWithTimeoutAndAbort,
+    withAbortController,
+} from 'src/lib/utils/network';
 import type { DownloadMetadata, DownloadOptions } from './types';
 
 const activeMemoryDownloads = new Set<string>();
@@ -190,7 +194,7 @@ export class ResumableDownload {
             headers.set('Range', `bytes=${this.file.size}-`);
             headers.set('If-Range', etag);
         }
-        return waitForNetwork(
+        return executeAsyncOperiationWithTimeoutAndAbort(
             () => authFetch(this.url, { headers, signal: controller.signal }),
             controller,
         );
