@@ -86,7 +86,13 @@ import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
 
-const SplatRenderer = defineAsyncComponent(() => import('src/components/SplatRenderer.vue'));
+const SplatRenderer = defineAsyncComponent({
+    loader: () => import('src/components/SplatRenderer.vue'),
+    onError(_error, _retry, fail) {
+        onRenderError();
+        fail();
+    },
+});
 const route = useRoute();
 const buildingId = computed(() =>
     typeof route.params.buildingId === 'string' ? route.params.buildingId : '',

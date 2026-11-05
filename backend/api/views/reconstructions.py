@@ -26,6 +26,7 @@ from api.lib.workflows.common import (
     get_owned_workflow_run,
     stream_workflow_logs,
 )
+from api.lib.workflows.splat_generation import SplatGenerationArtifact
 from api.models.building import Building
 from api.models.pagination import Page
 from api.models.reconstruction import (
@@ -41,7 +42,7 @@ from api.services.reconstructions import (
     ReconstructionService,
     SortOrder,
 )
-from api.utils.responses import inline_file_response
+from api.utils.responses import file_storage_errors, inline_file_response
 from api.views.buildings import get_current_building
 from api.views.reconstruction_submission import (
     UploadReconstructionSubmission,
@@ -105,11 +106,12 @@ def get_reconstruction_video(
     if media_type is None or not media_type.startswith("video/"):
         media_type = "application/octet-stream"
 
-    return inline_file_response(
-        path,
-        root_directory=config.DATA_PATH.resolve() / "uploads",
-        media_type=media_type,
-    )
+    with file_storage_errors(config.DATA_PATH):
+        return inline_file_response(
+            path,
+            root_directory=config.DATA_PATH.resolve() / "uploads",
+            media_type=media_type,
+        )
 
 
 @router.get(
@@ -159,13 +161,13 @@ def get_reconstruction_splat(
             detail="Reconstruction splat not found",
         )
 
-    return inline_file_response(
-        Path(reconstruction.splat_path),
-        root_directory=(
-            workflow_common.WORKFLOW_DATA_DIRECTORY.resolve() / reconstruction.id.hex
-        ),
-        media_type="application/octet-stream",
-    )
+    with file_storage_errors(workflow_common.WORKFLOW_DATA_DIRECTORY):
+        artifact = SplatGenerationArtifact.from_local_reconstruction(reconstruction)
+        return inline_file_response(
+            artifact.splat_path,
+            root_directory=artifact.root_directory,
+            media_type="application/octet-stream",
+        )
 
 
 @router.get("/{reconstruction_id}/point-cloud", response_class=FileResponse)
@@ -181,23 +183,24 @@ def get_reconstruction_point_cloud(
             detail="Reconstruction point cloud not found",
         )
 
-    splat_path = Path(reconstruction.splat_path)
-    root_directory = (
-        workflow_common.WORKFLOW_DATA_DIRECTORY.resolve() / reconstruction.id.hex
-    )
-    try:
-        generate_plan_point_cloud_if_missing(splat_path, root_directory / "colmap")
-    except Exception:
-        logger.exception(
-            "On-demand plan point cloud generation failed for reconstruction %s",
-            reconstruction.id,
-        )
+    with file_storage_errors(workflow_common.WORKFLOW_DATA_DIRECTORY):
+        artifact = SplatGenerationArtifact.from_local_reconstruction(reconstruction)
+        try:
+            generate_plan_point_cloud_if_missing(
+                artifact.splat_path,
+                artifact.colmap_directory,
+            )
+        except Exception:
+            logger.exception(
+                "On-demand plan point cloud generation failed for reconstruction %s",
+                reconstruction.id,
+            )
 
-    return inline_file_response(
-        splat_path.with_name(POINT_CLOUD_BINARY_FILENAME),
-        root_directory=root_directory,
-        media_type="application/octet-stream",
-    )
+        return inline_file_response(
+            artifact.root_directory / POINT_CLOUD_BINARY_FILENAME,
+            root_directory=artifact.root_directory,
+            media_type="application/octet-stream",
+        )
 
 
 @router.get("/{reconstruction_id}/point-cloud/meta", response_class=FileResponse)
@@ -213,23 +216,24 @@ def get_reconstruction_point_cloud_meta(
             detail="Reconstruction point cloud meta not found",
         )
 
-    splat_path = Path(reconstruction.splat_path)
-    root_directory = (
-        workflow_common.WORKFLOW_DATA_DIRECTORY.resolve() / reconstruction.id.hex
-    )
-    try:
-        generate_plan_point_cloud_if_missing(splat_path, root_directory / "colmap")
-    except Exception:
-        logger.exception(
-            "On-demand plan point cloud generation failed for reconstruction %s",
-            reconstruction.id,
-        )
+    with file_storage_errors(workflow_common.WORKFLOW_DATA_DIRECTORY):
+        artifact = SplatGenerationArtifact.from_local_reconstruction(reconstruction)
+        try:
+            generate_plan_point_cloud_if_missing(
+                artifact.splat_path,
+                artifact.colmap_directory,
+            )
+        except Exception:
+            logger.exception(
+                "On-demand plan point cloud generation failed for reconstruction %s",
+                reconstruction.id,
+            )
 
-    return inline_file_response(
-        splat_path.with_name(POINT_CLOUD_META_FILENAME),
-        root_directory=root_directory,
-        media_type="application/json",
-    )
+        return inline_file_response(
+            artifact.root_directory / POINT_CLOUD_META_FILENAME,
+            root_directory=artifact.root_directory,
+            media_type="application/json",
+        )
 
 
 @router.post(

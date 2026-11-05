@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Literal, Self
 from uuid import UUID, uuid4
 
 from anyio import from_thread
@@ -38,7 +38,8 @@ from api.lib.utils.commands import (
     LocalCommandExecutionEnvironment,
     ScitasCommandExecutionEnvironment,
 )
-from api.models.reconstruction import ReconstructionArtifactUpdate
+from api.lib.workflows import common as workflow_common
+from api.models.reconstruction import Reconstruction, ReconstructionArtifactUpdate
 from api.models.workflows import (
     BrushSettings,
     ColmapSettings,
@@ -55,6 +56,8 @@ LOCAL_EXECUTION_ENVIRONMENT = LocalCommandExecutionEnvironment()
 SCITAS_EXECUTION_ENVIRONMENT = ScitasCommandExecutionEnvironment()
 
 logger = logging.getLogger(__name__)
+
+ProgressWriteOutcome = Literal["recorded", "failed", "disabled"]
 
 
 @asynccontextmanager
@@ -214,15 +217,32 @@ async def _record_reconstruction_progress(
     *,
     progress: float,
     artifacts: ReconstructionArtifactUpdate | None = None,
-) -> None:
+) -> ProgressWriteOutcome:
+    """Publish optional progress without letting reporting failures stop compute."""
     if reconstruction_id is None:
-        return
-    async with _reconstruction_service() as reconstructions:
-        await reconstructions.record_progress(
+        return "disabled"
+    try:
+        async with _reconstruction_service() as reconstructions:
+            await reconstructions.record_progress(
+                reconstruction_id,
+                progress=progress,
+                artifact_changes=artifacts,
+            )
+    except ReconstructionNotFoundError:
+        logger.info(
+            "Reconstruction %s was deleted; skip progress update",
             reconstruction_id,
-            progress=progress,
-            artifact_changes=artifacts,
         )
+        return "disabled"
+    except Exception:
+        logger.warning(
+            "Could not publish progress %s for reconstruction %s",
+            progress,
+            reconstruction_id,
+            exc_info=True,
+        )
+        return "failed"
+    return "recorded"
 
 
 def _progress_callback(
@@ -252,15 +272,13 @@ def _progress_callback(
 
         last_attempt = now
         try:
-            from_thread.run(
+            outcome = from_thread.run(
                 partial(
                     _record_reconstruction_progress,
                     reconstruction_id,
                     progress=progress,
                 )
             )
-        except ReconstructionNotFoundError:
-            enabled = False
         except Exception:
             logger.warning(
                 "Could not publish progress for reconstruction %s",
@@ -268,7 +286,10 @@ def _progress_callback(
                 exc_info=True,
             )
         else:
-            last_progress = progress
+            if outcome == "disabled":
+                enabled = False
+            elif outcome == "recorded":
+                last_progress = progress
 
     return report_progress
 
@@ -316,6 +337,14 @@ class SplatGenerationArtifact:
     @classmethod
     def load(cls, artifact_id: UUID, storage_root: Path) -> Self:
         return cls(artifact_id, storage_root)
+
+    @classmethod
+    def from_local_reconstruction(cls, reconstruction: Reconstruction) -> Self:
+        """Locate reconstruction artifacts under this process's storage root."""
+        return cls.load(
+            reconstruction.id,
+            workflow_common.WORKFLOW_DATA_DIRECTORY.resolve(),
+        )
 
     @classmethod
     def from_flow_run(cls, flow_run: FlowRun, storage_root: Path) -> Self:

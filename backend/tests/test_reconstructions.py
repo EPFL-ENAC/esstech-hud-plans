@@ -1,4 +1,5 @@
 import asyncio
+import errno
 import json
 import struct
 import threading
@@ -1280,6 +1281,52 @@ def test_reconstruction_assets_serve_inline_bytes_when_available(
 
 
 @pytest.mark.parametrize(
+    "reconstruction_asset",
+    ["splat", "point-cloud", "point-cloud/meta"],
+    indirect=True,
+)
+@pytest.mark.parametrize(
+    "stored_file_exists, local_file_exists",
+    [(False, True), (True, True), (True, False)],
+)
+def test_reconstruction_assets_use_local_storage_with_foreign_stored_paths(
+    reconstruction_asset: tuple[TestClient, UUID, str, Path],
+    tmp_path: Path,
+    stored_file_exists: bool,
+    local_file_exists: bool,
+) -> None:
+    client, reconstruction_id, artifact, path = reconstruction_asset
+    stored_splat_path = (
+        tmp_path / "foreign-mount" / "workflows" / reconstruction_id.hex / "splat.ply"
+    )
+    if stored_file_exists:
+        stored_splat_path.parent.mkdir(parents=True)
+        for filename in (
+            "splat.ply",
+            POINT_CLOUD_BINARY_FILENAME,
+            POINT_CLOUD_META_FILENAME,
+        ):
+            stored_splat_path.with_name(filename).write_bytes(b"must not be served")
+    if not local_file_exists:
+        for local_path in path.parent.iterdir():
+            local_path.unlink()
+    _set_artifact_path(client, reconstruction_id, artifact, stored_splat_path)
+
+    response = client.get(_asset_url(reconstruction_id, artifact))
+
+    if local_file_exists:
+        assert response.status_code == 200
+        assert response.content == path.read_bytes()
+    else:
+        assert response.status_code == 404
+        assert response.json() == {"detail": "File not found"}
+    reconstruction = client.get(
+        f"/buildings/{BUILDING_ID}/reconstructions/{reconstruction_id}"
+    ).json()
+    assert reconstruction["splat_path"] == str(stored_splat_path)
+
+
+@pytest.mark.parametrize(
     "status",
     [
         state
@@ -1362,7 +1409,7 @@ def test_reconstruction_assets_support_byte_ranges(
         "storage_root_symlink",
     ],
 )
-def test_reconstruction_assets_reject_unavailable_or_escaped_paths(
+def test_reconstruction_assets_enforce_local_file_boundaries(
     reconstruction_asset: tuple[TestClient, UUID, str, Path],
     tmp_path: Path,
     case: str,
@@ -1374,7 +1421,8 @@ def test_reconstruction_assets_reject_unavailable_or_escaped_paths(
     elif case == "missing":
         path.unlink()
     elif case == "directory":
-        path = path.parent
+        path.unlink()
+        path.mkdir()
     elif case in {"outside", "sibling", "symlink"}:
         outside = tmp_path / ("outside" if case != "sibling" else uuid4().hex)
         outside.mkdir()
@@ -1400,6 +1448,12 @@ def test_reconstruction_assets_reject_unavailable_or_escaped_paths(
     _set_artifact_path(client, reconstruction_id, artifact, path)
 
     response = client.get(_asset_url(reconstruction_id, artifact))
+
+    if artifact != "video" and case in {"outside", "sibling"}:
+        local_path = reconstruction_asset[3]
+        assert response.status_code == 200
+        assert response.content == local_path.read_bytes()
+        return
 
     assert response.status_code == 404
     assert response.json() == {
@@ -1432,18 +1486,20 @@ def test_reconstruction_assets_require_authentication_and_ownership(
     assert client.get(_asset_url(uuid4(), artifact)).status_code == 404
 
 
-@pytest.mark.parametrize("operation", ["stat", "open"])
+@pytest.mark.parametrize("operation", ["resolve", "stat", "open"])
+@pytest.mark.parametrize("error_number", [errno.EACCES, errno.EIO])
 def test_reconstruction_assets_map_storage_failures_to_503(
     reconstruction_asset: tuple[TestClient, UUID, str, Path],
     monkeypatch: pytest.MonkeyPatch,
     operation: str,
+    error_number: int,
 ) -> None:
     client, reconstruction_id, artifact, path = reconstruction_asset
     original = getattr(Path, operation)
 
     def fail_access(self: Path, *args: object, **kwargs: object):
         if self == path:
-            raise PermissionError(f"Cannot access {path}")
+            raise OSError(error_number, f"Cannot access {path}")
         return original(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, operation, fail_access)
@@ -1451,6 +1507,57 @@ def test_reconstruction_assets_map_storage_failures_to_503(
 
     assert response.status_code == 503
     assert response.json() == {"detail": "File storage is unavailable"}
+
+
+@pytest.mark.parametrize(
+    "error_type, expected_status",
+    [
+        (PermissionError, 503),
+        (OSError, 503),
+        (FileNotFoundError, 404),
+        (NotADirectoryError, 404),
+        (ValueError, 404),
+        (RuntimeError, 404),
+    ],
+)
+def test_reconstruction_assets_map_storage_root_resolution_failures(
+    reconstruction_asset: tuple[TestClient, UUID, str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    error_type: type[Exception],
+    expected_status: int,
+) -> None:
+    client, reconstruction_id, artifact, _ = reconstruction_asset
+    storage_root = (
+        config.DATA_PATH
+        if artifact == "video"
+        else workflow_common.WORKFLOW_DATA_DIRECTORY
+    )
+    original_resolve = Path.resolve
+
+    def fail_resolve(self: Path, strict: bool = False) -> Path:
+        if self == storage_root:
+            raise error_type(f"Cannot resolve {storage_root}")
+        return original_resolve(self, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", fail_resolve)
+    response = client.get(_asset_url(reconstruction_id, artifact))
+
+    assert response.status_code == expected_status
+    assert response.json() == {
+        "detail": (
+            "File storage is unavailable"
+            if expected_status == 503
+            else "File not found"
+        )
+    }
+    if expected_status == 503:
+        storage_logs = [
+            record for record in caplog.records if record.name == "api.utils.responses"
+        ]
+        assert len(storage_logs) == 1
+        assert str(storage_root) in storage_logs[0].getMessage()
+        assert storage_logs[0].exc_info is not None
 
 
 def test_reconstruction_assets_map_database_failures_to_503(
@@ -1506,9 +1613,13 @@ def _fake_point_cloud_colmap(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+@pytest.mark.parametrize("foreign_stored_path", [False, True])
+@pytest.mark.parametrize("first_artifact", ["point-cloud", "point-cloud/meta"])
 def test_missing_point_cloud_artifacts_are_generated_on_request(
     reconstruction_api: tuple[TestClient, UUID],
     monkeypatch: pytest.MonkeyPatch,
+    foreign_stored_path: bool,
+    first_artifact: str,
 ) -> None:
     client, building_id = reconstruction_api
     reconstruction_id, splat_path = _completed_reconstruction_with_splat(
@@ -1517,11 +1628,36 @@ def test_missing_point_cloud_artifacts_are_generated_on_request(
     )
     monkeypatch.setattr(config, "PLAN_DENSITY_THRESHOLD", 1.0)
     _fake_point_cloud_colmap(monkeypatch)
+    if foreign_stored_path:
+        _set_artifact_path(
+            client,
+            reconstruction_id,
+            "splat",
+            Path("/foreign-mount/workflows") / reconstruction_id.hex / "splat.ply",
+        )
+    calls: list[tuple[Path, Path]] = []
+    original = point_cloud_compute.generate_plan_point_cloud
+
+    def recording_generate(splat_path: Path, colmap_directory: Path) -> None:
+        calls.append((splat_path, colmap_directory))
+        original(splat_path, colmap_directory)
+
+    monkeypatch.setattr(
+        point_cloud_compute, "generate_plan_point_cloud", recording_generate
+    )
     url = f"/buildings/{BUILDING_ID}/reconstructions/{reconstruction_id}"
 
-    binary_response = client.get(f"{url}/point-cloud")
-    meta_response = client.get(f"{url}/point-cloud/meta")
+    second_artifact = (
+        "point-cloud/meta" if first_artifact == "point-cloud" else "point-cloud"
+    )
+    responses = {
+        artifact: client.get(f"{url}/{artifact}")
+        for artifact in (first_artifact, second_artifact)
+    }
+    binary_response = responses["point-cloud"]
+    meta_response = responses["point-cloud/meta"]
 
+    assert calls == [(splat_path, splat_path.parent / "colmap")]
     assert binary_response.status_code == 200
     assert binary_response.headers["content-type"] == "application/octet-stream"
     assert meta_response.status_code == 200
@@ -1859,9 +1995,10 @@ def test_reconstruction_flow_records_milestones_and_artifacts(
         *,
         progress: float,
         artifacts: ReconstructionArtifactUpdate | None = None,
-    ) -> None:
+    ) -> splat_workflow.ProgressWriteOutcome:
         assert received_id == reconstruction_id
         updates.append((progress, artifacts))
+        return "recorded"
 
     async def fake_extract_frames(**kwargs):
         return kwargs["frames_directory"]
