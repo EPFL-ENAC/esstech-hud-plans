@@ -29,27 +29,21 @@ class FramePickerSettings(BaseModel):
     outlier_sharpness_ratio: float = Field(default=0.1, ge=0, le=1)
 
 
-class ColmapSettings(BaseModel):
+class SpirulaSfmSettings(BaseModel):
     data_type: Literal["individual", "video", "internet"] = "video"
     quality: Literal["low", "medium", "high", "extreme"] = "low"
-    camera_model: Literal["PINHOLE", "OPENCV", "OPENCV_FISHEYE", "RADIAL"] = "OPENCV"
+    camera_model: Literal[
+        "simple-pinhole", "pinhole", "radial", "opencv", "opencv-fisheye"
+    ] = "opencv"
     single_camera: bool = True
-    use_gpu: bool = False
-    use_global_mapper: bool = False
 
 
-class BrushSettings(BaseModel):
-    total_steps: int = Field(default=10_000, gt=0)
-    render_mode: Literal["default", "mip"] = "default"
+class SpirulaTrainSettings(BaseModel):
+    num_iterations: int = Field(default=30_000, gt=0)
+    quality: Literal["low", "medium", "high", "ultra"] = "medium"
+    primitive: Literal["3dgs", "mip"] = "3dgs"
     sh_degree: int = Field(default=3, ge=0, le=3)
-    max_splats: int = Field(default=10_000_000, gt=0)
-    refine_every: int = Field(default=200, gt=0)
-    growth_grad_threshold: float = Field(default=0.0025, gt=0)
-    growth_stop_iter: int = Field(default=15_000, ge=0)
-    max_resolution: int = Field(default=1920, gt=0)
-    subsample_frames: int = Field(default=1, gt=0)
-    alpha_mode: Literal["masked", "transparent"] = "transparent"
-    export_every: int = Field(default=5_000, gt=0)
+    cap_max: int = Field(default=1_000_000, gt=0)
 
 
 class SplatGenerationWorkflowSettings(BaseModel):
@@ -61,13 +55,13 @@ class SplatGenerationWorkflowSettings(BaseModel):
         default=None,
         description="Optional settings for movement- and sharpness-based frame selection.",
     )
-    colmap: ColmapSettings = Field(
-        default_factory=ColmapSettings,
-        description="Settings for the COLMAP sparse-reconstruction task.",
+    spirula_sfm: SpirulaSfmSettings = Field(
+        default_factory=SpirulaSfmSettings,
+        description="Settings for the spirula sparse-reconstruction task.",
     )
-    brush: BrushSettings = Field(
-        default_factory=BrushSettings,
-        description="Settings for the Brush Gaussian-splat training task.",
+    spirula_train: SpirulaTrainSettings = Field(
+        default_factory=SpirulaTrainSettings,
+        description="Settings for the spirula Gaussian-splat training task.",
     )
 
 

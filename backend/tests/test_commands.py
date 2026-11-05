@@ -108,10 +108,10 @@ def test_local_environment_prefers_bundled_executable(
 def test_local_environment_falls_back_to_system_executable(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(local_commands.shutil, "which", lambda tool: "/usr/bin/colmap")
+    monkeypatch.setattr(local_commands.shutil, "which", lambda tool: "/usr/bin/spirula")
     environment = commands.LocalCommandExecutionEnvironment(tmp_path / "missing")
 
-    assert environment._resolve_tool("colmap") == "/usr/bin/colmap"
+    assert environment._resolve_tool("spirula") == "/usr/bin/spirula"
 
 
 @pytest.mark.parametrize(
@@ -162,7 +162,6 @@ def test_local_environment_configures_capture_and_streams_before_waiting(
         "stdin": subprocess.DEVNULL,
         "stdout": expected_stdout,
         "stderr": expected_stderr,
-        "env": None,
         "bufsize": 0,
         "start_new_session": True,
     }
@@ -224,7 +223,7 @@ def test_local_environment_wraps_process_start_failure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     environment = commands.LocalCommandExecutionEnvironment()
-    command = commands.Command(tool="colmap", arguments=(), capture="combined")
+    command = commands.Command(tool="spirula", arguments=(), capture="combined")
 
     def missing_tool(tool: commands.CommandTool) -> str:
         raise FileNotFoundError("missing tool")
@@ -287,30 +286,23 @@ def test_local_environment_terminates_when_reading_fails(
     assert process.waited
 
 
-@pytest.mark.parametrize("tool", ["ffmpeg", "brush"])
+@pytest.mark.parametrize("tool", ["ffmpeg", "spirula"])
 def test_local_environment_delivers_small_records_while_process_is_running(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, tool: commands.CommandTool
 ) -> None:
     environment = commands.LocalCommandExecutionEnvironment()
     monkeypatch.setattr(environment, "_resolve_tool", lambda tool: sys.executable)
-    monkeypatch.setenv("NO_COLOR", "1")
-    monkeypatch.setenv("TERM", "dumb")
     # The child only finishes after the callback acknowledges its first record.
-    # Brush additionally requires terminal output, like its actual progress bar.
     script = """
-import os, pathlib, sys, time
-if sys.argv[1] == 'brush':
-    assert sys.stderr.isatty()
-    assert os.environ['TERM'] == 'xterm-256color'
-    assert 'NO_COLOR' not in os.environ
-sys.stderr.write('10/100 Steps\\r')
+import pathlib, sys, time
+sys.stderr.write('10/100 steps\\r')
 sys.stderr.flush()
 deadline = time.monotonic() + 5
 while not pathlib.Path('acknowledged').exists():
     if time.monotonic() > deadline:
         raise RuntimeError('Progress was buffered until process exit')
     time.sleep(0.01)
-sys.stderr.write('20/100 Steps')
+sys.stderr.write('20/100 steps')
 sys.stderr.flush()
 """
     records: list[str] = []
@@ -326,10 +318,10 @@ sys.stderr.flush()
     )
 
     assert result.return_code == 0
-    assert records == ["10/100 Steps", "20/100 Steps"]
+    assert records == ["10/100 steps", "20/100 steps"]
 
 
-def test_local_brush_preserves_failure_exit_code(
+def test_local_spirula_preserves_failure_exit_code(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     environment = commands.LocalCommandExecutionEnvironment()
@@ -339,7 +331,7 @@ def test_local_brush_preserves_failure_exit_code(
     with pytest.raises(commands.CommandExecutionError) as error:
         environment.execute(
             commands.Command(
-                tool="brush",
+                tool="spirula",
                 arguments=("-c", "print('before failure', flush=True); exit(3)"),
                 capture="combined",
             ),

@@ -12,9 +12,9 @@ from starlette.concurrency import run_in_threadpool
 from api.lib.workflows import splat_generation as workflow
 from api.models.reconstruction import ReconstructionArtifactUpdate
 from api.models.workflows import (
-    BrushSettings,
-    ColmapSettings,
     FramePickerSettings,
+    SpirulaSfmSettings,
+    SpirulaTrainSettings,
     SplatGenerationWorkflowSettings,
 )
 
@@ -49,7 +49,7 @@ def test_progress_callback_scales_throttles_and_writes_on_flow_event_loop(
                 (0, 0.25),
                 (1, 0.5),  # Throttled.
                 (2, 0.5),
-                (4, 0.1),  # Regressing output (e.g. another COLMAP model).
+                (4, 0.1),  # Regressing output (e.g. another reconstruction).
                 (4, float("nan")),
                 (4, float("inf")),
                 (4, -1),
@@ -233,8 +233,8 @@ def test_progress_callback_survives_thread_bridge_failure(
     [
         workflow.extract_frames_task,
         workflow.pick_frames_task,
-        workflow.reconstruct_with_colmap_task,
-        workflow.train_with_brush_task,
+        workflow.reconstruct_with_spirula_task,
+        workflow.train_with_spirula_task,
     ],
 )
 def test_task_cache_key_excludes_unserializable_progress_callback(task) -> None:
@@ -256,8 +256,8 @@ def test_task_cache_key_excludes_unserializable_progress_callback(task) -> None:
     "task",
     [
         workflow.extract_frames_task,
-        workflow.reconstruct_with_colmap_task,
-        workflow.train_with_brush_task,
+        workflow.reconstruct_with_spirula_task,
+        workflow.train_with_spirula_task,
     ],
 )
 def test_task_cache_key_excludes_process_ownership(task) -> None:
@@ -274,7 +274,9 @@ def test_task_cache_key_excludes_process_ownership(task) -> None:
     assert key != task.cache_policy.compute_key(context, inputs, {})
 
 
-@pytest.mark.parametrize("tool", ["ffmpeg", "colmap", "brush", "frame-picker"])
+@pytest.mark.parametrize(
+    "tool", ["ffmpeg", "spirula-sfm", "spirula-train", "frame-picker"]
+)
 def test_task_reports_progress_before_compute_returns(
     monkeypatch: pytest.MonkeyPatch, tmp_path, tool: str
 ) -> None:
@@ -303,12 +305,12 @@ def test_task_reports_progress_before_compute_returns(
         else:
             records = {
                 "ffmpeg": ["Duration: 00:00:10.00", "time=00:00:05.00"],
-                "colmap": ["Processed file [50/100]"],
-                "brush": ["Completed loading", "500/1000 Steps"],
+                "spirula-sfm": ["1/42   frame_00001.jpg   Features: 823"],
+                "spirula-train": ["Loading config", "step  15000/30000  ( 50%)"],
             }[tool]
             for record in records:
                 kwargs["on_log"](record)
-        assert updates == pytest.approx([0.15 if tool == "colmap" else 0.5])
+        assert updates == pytest.approx([0.25 / 42 if tool == "spirula-sfm" else 0.5])
         return [object()] if tool == "frame-picker" else tmp_path
 
     if tool == "ffmpeg":
@@ -325,26 +327,26 @@ def test_task_reports_progress_before_compute_returns(
                 report_progress=report,
             )
         )
-    elif tool == "colmap":
-        monkeypatch.setattr(workflow, "run_colmap_reconstruction", compute)
+    elif tool == "spirula-sfm":
+        monkeypatch.setattr(workflow, "run_spirula_sfm", compute)
         asyncio.run(
-            workflow.reconstruct_with_colmap_task.fn(
+            workflow.reconstruct_with_spirula_task.fn(
                 str(tmp_path),
                 "frames",
                 "colmap",
-                ColmapSettings(),
+                SpirulaSfmSettings(),
                 execution_environment=workflow.LocalCommandExecutionEnvironment(),
                 report_progress=report,
             )
         )
-    elif tool == "brush":
-        monkeypatch.setattr(workflow, "run_brush_training", compute)
+    elif tool == "spirula-train":
+        monkeypatch.setattr(workflow, "run_spirula_train", compute)
         asyncio.run(
-            workflow.train_with_brush_task.fn(
+            workflow.train_with_spirula_task.fn(
                 str(tmp_path),
                 "dataset",
                 "splat.ply",
-                BrushSettings(),
+                SpirulaTrainSettings(),
                 execution_environment=workflow.LocalCommandExecutionEnvironment(),
                 report_progress=report,
             )
@@ -364,13 +366,13 @@ def test_task_reports_progress_before_compute_returns(
 
 
 @pytest.mark.parametrize("use_frame_picker", [False, True])
-@pytest.mark.parametrize("brush_error", [None, RuntimeError, asyncio.CancelledError])
+@pytest.mark.parametrize("train_error", [None, RuntimeError, asyncio.CancelledError])
 @pytest.mark.parametrize("failed_progress", [None, 0.25, 0.4, 0.7, 0.92, 0.95, "all"])
 def test_flow_combines_intermediate_updates_with_validated_milestones(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
     use_frame_picker: bool,
-    brush_error: type[BaseException] | None,
+    train_error: type[BaseException] | None,
     failed_progress: float | str | None,
 ) -> None:
     updates: list[tuple[float, object]] = []
@@ -391,14 +393,14 @@ def test_flow_combines_intermediate_updates_with_validated_milestones(
         await run_in_threadpool(kwargs["report_progress"], 0.5)
         return kwargs.get("colmap_directory", kwargs["frames_directory"])
 
-    async def fake_brush(**kwargs):
+    async def fake_train(**kwargs):
         await run_in_threadpool(kwargs["report_progress"], 0.5)
-        if brush_error is not None:
-            raise brush_error("Brush failed to export")
+        if train_error is not None:
+            raise train_error("spirula train failed to export")
         return kwargs["splat_path"]
 
     async def fake_point_cloud(**kwargs):
-        assert brush_error is None
+        assert train_error is None
         assert kwargs == {
             "splat_path": str(tmp_path / "splat.ply"),
             "colmap_directory": str(tmp_path / "colmap"),
@@ -407,8 +409,8 @@ def test_flow_combines_intermediate_updates_with_validated_milestones(
     monkeypatch.setattr(workflow, "_reconstruction_service", service)
     monkeypatch.setattr(workflow, "extract_frames_task", fake_task)
     monkeypatch.setattr(workflow, "pick_frames_task", fake_task)
-    monkeypatch.setattr(workflow, "reconstruct_with_colmap_task", fake_task)
-    monkeypatch.setattr(workflow, "train_with_brush_task", fake_brush)
+    monkeypatch.setattr(workflow, "reconstruct_with_spirula_task", fake_task)
+    monkeypatch.setattr(workflow, "train_with_spirula_task", fake_train)
     monkeypatch.setattr(workflow, "generate_plan_point_cloud_task", fake_point_cloud)
 
     async def run():
@@ -427,8 +429,8 @@ def test_flow_combines_intermediate_updates_with_validated_milestones(
             reconstruction_id=uuid4(),
         )
 
-    if brush_error is not None:
-        with pytest.raises(brush_error, match="failed to export"):
+    if train_error is not None:
+        with pytest.raises(train_error, match="failed to export"):
             asyncio.run(run())
     else:
         assert asyncio.run(run()) == str(tmp_path / "splat.ply")
@@ -437,9 +439,9 @@ def test_flow_combines_intermediate_updates_with_validated_milestones(
     if use_frame_picker:
         expected.append(0.325)
     expected.extend([0.4, 0.55, 0.7, 0.81])
-    if brush_error is None:
+    if train_error is None:
         expected.extend([0.92, 0.95])
     assert [progress for progress, _ in updates] == pytest.approx(expected)
     assert [progress for progress, artifacts in updates if artifacts is not None] == (
-        [0.25, 0.4, 0.7] if brush_error is not None else [0.25, 0.4, 0.7, 0.92, 0.95]
+        [0.25, 0.4, 0.7] if train_error is not None else [0.25, 0.4, 0.7, 0.92, 0.95]
     )

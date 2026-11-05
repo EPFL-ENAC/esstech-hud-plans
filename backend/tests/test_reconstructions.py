@@ -2051,10 +2051,10 @@ def test_reconstruction_flow_records_milestones_and_artifacts(
     async def fake_pick_frames(**kwargs):
         return str(tmp_path / "frames")
 
-    async def fake_colmap(**kwargs):
+    async def fake_sfm(**kwargs):
         return str(tmp_path / "colmap")
 
-    async def fake_brush(**kwargs):
+    async def fake_train(**kwargs):
         return str(tmp_path / "splat.ply")
 
     async def fake_point_cloud(**kwargs):
@@ -2078,13 +2078,13 @@ def test_reconstruction_flow_records_milestones_and_artifacts(
     )
     monkeypatch.setattr(
         splat_workflow,
-        "reconstruct_with_colmap_task",
-        fake_colmap,
+        "reconstruct_with_spirula_task",
+        fake_sfm,
     )
     monkeypatch.setattr(
         splat_workflow,
-        "train_with_brush_task",
-        fake_brush,
+        "train_with_spirula_task",
+        fake_train,
     )
     monkeypatch.setattr(
         splat_workflow,

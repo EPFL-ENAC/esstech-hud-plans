@@ -39,36 +39,37 @@ class FfmpegProgressEstimator:
         return None
 
 
-class ColmapProgressEstimator:
-    _PROCESSED = re.compile(r"Processed file \[(\d+)/(\d+)\]")
-    _REGISTERED = re.compile(r"num_reg_frames=(\d+)")
+class SpirulaSfmProgressEstimator:
+    _EXTRACTED = re.compile(r"^\s*(\d+)/(\d+)\s+\S+\s+Features:")
+    _MATCHED = re.compile(r"(\d+)/(\d+) pairs matched")
+    _IN_MODEL = re.compile(r"images in the model: (\d+)")
 
     def __init__(self) -> None:
         self.total_images: int | None = None
 
     def feed(self, record: str) -> float | None:
         record = _ANSI_ESCAPE.sub("", record)
-        if match := self._PROCESSED.search(record):
+        if match := self._EXTRACTED.match(record):
             self.total_images = int(match.group(2))
             progress = _fraction(int(match.group(1)), self.total_images)
-            return None if progress is None else 0.30 * progress
-        if "Feature matching & geometric verification" in record:
-            return 0.35
-        if match := self._REGISTERED.search(record):
+            return None if progress is None else 0.25 * progress
+        if match := self._MATCHED.search(record):
+            progress = _fraction(int(match.group(1)), int(match.group(2)))
+            return None if progress is None else 0.25 + 0.25 * progress
+        if match := self._IN_MODEL.search(record):
             if self.total_images is not None:
                 progress = _fraction(int(match.group(1)), self.total_images)
                 if progress is not None:
-                    return 0.40 + 0.60 * progress
-        if "incremental_pipeline.cc" in record or "Registering image" in record:
-            return 0.40
+                    return 0.50 + 0.50 * progress
+            return 0.50
         return None
 
 
-class BrushProgressEstimator:
-    _STEPS = re.compile(r"(\d+)\s*/\s*(\d+)\s+Steps\b", re.IGNORECASE)
+class SpirulaTrainProgressEstimator:
+    _STEPS = re.compile(r"step\s+\d+/(\d+)\s+\(\s*(\d+)%\)")
 
     def feed(self, record: str) -> float | None:
-        match = self._STEPS.search(_ANSI_ESCAPE.sub("", record))
-        if match is None:
-            return None
-        return _fraction(int(match.group(1)), int(match.group(2)))
+        record = _ANSI_ESCAPE.sub("", record)
+        if match := self._STEPS.search(record):
+            return _fraction(int(match.group(2)), 100)
+        return None

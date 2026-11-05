@@ -1,0 +1,54 @@
+########################################
+# Spirula Studio Dockerfile
+########################################
+# Builds https://github.com/harry7557558/spirula-studio with the Vulkan
+# backend and exposes the `spirula` command-line tool.
+
+ARG UBUNTU_VERSION=24.04
+ARG NVIDIA_CUDA_VERSION=13.1.1
+
+#
+# Docker builder stage.
+#
+FROM nvcr.io/nvidia/cuda:${NVIDIA_CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION} AS builder
+
+ARG SPIRULA_VERSION=v2026.10.16
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        git \
+        cmake \
+        ninja-build \
+        build-essential \
+        libvulkan-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# slangc is not packaged: CMake fetches the pinned release at configure time.
+RUN git clone --branch ${SPIRULA_VERSION} --single-branch --depth 1 \
+        https://github.com/harry7557558/spirula-studio.git && \
+    cd spirula-studio && \
+    cmake -G Ninja -B build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DSS_BACKEND=vulkan \
+        -DSS_BUILD_GUI=OFF && \
+    cmake --build build -j"$(nproc)"
+
+#
+# Docker runtime stage.
+#
+FROM nvcr.io/nvidia/cuda:${NVIDIA_CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION}
+
+# nvidia-driver-570 provides the NVIDIA Vulkan ICD JSON. The driver itself
+# still comes from the host.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        libvulkan1 \
+        libgomp1 \
+        nvidia-driver-570 && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /spirula-studio/build/spirula /usr/local/bin/spirula

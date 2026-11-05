@@ -59,25 +59,13 @@ def _assert_closed(process: subprocess.Popen) -> None:
             assert pipe.closed
 
 
-@pytest.mark.parametrize("tool", ["ffmpeg", "brush"])
 @pytest.mark.parametrize("streaming", [False, True])
 def test_cancel_kills_and_reaps_command(
     environment,
     processes,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    tool: local.CommandTool,
     streaming: bool,
 ) -> None:
-    descriptors: list[int] = []
-    openpty = local.pty.openpty
-
-    def track_pty():
-        pair = openpty()
-        descriptors.extend(pair)
-        return pair
-
-    monkeypatch.setattr(local.pty, "openpty", track_pty)
     ready = threading.Event()
     records: list[str] = []
 
@@ -88,7 +76,7 @@ def test_cancel_kills_and_reaps_command(
     with ThreadPoolExecutor() as pool:
         execution = pool.submit(
             environment.execute,
-            _command(tool, streaming=streaming),
+            _command(streaming=streaming),
             workspace=tmp_path,
             on_log=on_log,
         )
@@ -101,9 +89,6 @@ def test_cancel_kills_and_reaps_command(
 
     assert processes[0].returncode == -signal.SIGKILL
     _assert_closed(processes[0])
-    for descriptor in descriptors:
-        with pytest.raises(OSError):
-            os.fstat(descriptor)
     assert records[0] == "ready"
     environment.cancel()
 
@@ -293,9 +278,8 @@ def test_cancel_isolates_environments(
 
 
 @pytest.mark.parametrize("cancellation", ["asyncio", "anyio"])
-@pytest.mark.parametrize("tool", ["ffmpeg", "brush"])
 def test_async_cancellation_waits_for_output_cleanup(
-    environment, processes, tmp_path: Path, cancellation: str, tool: local.CommandTool
+    environment, processes, tmp_path: Path, cancellation: str
 ) -> None:
     records: list[str] = []
 
@@ -308,7 +292,7 @@ def test_async_cancellation_waits_for_output_cleanup(
 
         operation = partial(
             environment.execute,
-            _command(tool, streaming=True),
+            _command(streaming=True),
             workspace=tmp_path,
             on_log=lambda record: anyio.from_thread.run(record_log, record),
         )

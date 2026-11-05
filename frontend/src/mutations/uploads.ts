@@ -11,8 +11,7 @@ export interface UploadVideoVariables {
 }
 
 export type UploadTransferState =
-    | { phase: 'idle' }
-    | { phase: 'uploading'; progress: FetchProgress | null; resumed: boolean };
+    { phase: 'idle' } | { phase: 'uploading'; progress: FetchProgress | null; resumed: boolean };
 
 export function useUploadVideoMutation() {
     const subject = getAuthSubject();

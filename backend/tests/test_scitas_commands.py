@@ -8,7 +8,7 @@ from pathlib import Path, PurePosixPath
 import pytest
 
 from api.lib.compute import scitas as scitas_compute
-from api.lib.compute.progress import BrushProgressEstimator
+from api.lib.compute.progress import SpirulaTrainProgressEstimator
 from api.lib.utils import commands
 from api.lib.utils.commands.environments import scitas as scitas_commands
 
@@ -37,23 +37,25 @@ def test_scitas_run_offloads_operation_and_preserves_outcome(fails: bool) -> Non
 def test_scitas_log_tail_feeds_incremental_progress_across_polls(
     tmp_path: Path,
 ) -> None:
-    log_path = tmp_path / "brush.log"
+    log_path = tmp_path / "spirula.log"
     tail = scitas_commands._IncrementalLogTail()
-    estimator = BrushProgressEstimator()
+    estimator = SpirulaTrainProgressEstimator()
     updates: list[float] = []
 
     def report(record: str) -> None:
         if (progress := estimator.feed(record)) is not None:
             updates.append(progress)
 
-    log_path.write_bytes(b"Completed loading\n\x1b[2K100/1000 Steps\r200/100")
+    log_path.write_bytes(
+        b"Loading config\n\x1b[2Kstep   100/1000  ( 10%)\rstep   200/10"
+    )
     tail.read(log_path, report)
     assert updates == [0.1]
     tail.read(log_path, report)
     assert updates == [0.1]  # Re-reading must not replay old records.
 
     with log_path.open("ab") as stream:
-        stream.write(b"0 Steps\r300/1000 Steps")
+        stream.write(b"00  ( 20%)\rstep   300/1000  ( 30%)")
     tail.read(log_path, report)
     assert updates == [0.1, 0.2]
     tail.finish(report)
@@ -124,7 +126,7 @@ def test_scitas_environment_submits_and_streams_workspace_job(
         remote_workspace_prefix=PurePosixPath("remote jobs"),
     )
     command = commands.Command(
-        tool="colmap",
+        tool="spirula",
         arguments=("--image_path", "frames directory"),
         capture="combined",
     )
@@ -142,11 +144,9 @@ def test_scitas_environment_submits_and_streams_workspace_job(
         (
             "submit",
             {
-                "tool": "colmap",
+                "tool": "spirula",
                 "command": [
-                    "xvfb-run",
-                    "-a",
-                    "colmap",
+                    "spirula",
                     "--image_path",
                     "frames directory",
                 ],
@@ -183,7 +183,7 @@ def test_scitas_environment_reports_failure_and_forgets_finished_job(
     monkeypatch.setattr(scitas_compute.Scitas, "cancel_job", cancelled.append)
     registered, forgotten = _stub_registry(monkeypatch)
 
-    command = commands.Command(tool="colmap", arguments=(), capture="combined")
+    command = commands.Command(tool="spirula", arguments=(), capture="combined")
     environment = commands.ScitasCommandExecutionEnvironment(poll_interval_seconds=0)
 
     with pytest.raises(commands.CommandExecutionError) as error:
@@ -224,7 +224,7 @@ def test_scitas_environment_cancels_job_when_log_callback_fails(
 
     with pytest.raises(RuntimeError, match="Could not log: record"):
         environment.execute(
-            commands.Command(tool="colmap", arguments=(), capture="combined"),
+            commands.Command(tool="spirula", arguments=(), capture="combined"),
             workspace=workspace,
             on_log=fail_to_log,
         )
@@ -265,7 +265,7 @@ def test_scitas_environment_stops_after_unavailable_status_limit(
         match="Failed to get Scitas job status after 2 attempts",
     ):
         environment.execute(
-            commands.Command(tool="colmap", arguments=(), capture="combined"),
+            commands.Command(tool="spirula", arguments=(), capture="combined"),
             workspace=workspace,
         )
 
@@ -363,8 +363,8 @@ def test_scitas_submit_job_uses_workspace_cwd_capture_and_failure_safe_stage_out
         scitas_compute.config, "SCITAS_REMOTE_IMAGES_PATH", str(images_root)
     )
     job_name = scitas_compute.Scitas.submit_job(
-        tool="colmap",
-        command=["colmap", "--image_path", "frames directory"],
+        tool="spirula",
+        command=["spirula", "--image_path", "frames directory"],
         workspace_rel_path=workspace,
         capture=capture,
     )
@@ -444,8 +444,8 @@ def test_scitas_submit_job_uses_workspace_cwd_capture_and_failure_safe_stage_out
         for argument in (
             "exec",
             "--nv",
-            str(images_root / "hud-colmap_latest.sif"),
-            "colmap",
+            str(images_root / "hud-spirula_latest.sif"),
+            "spirula",
             "--image_path",
             "frames directory",
         )

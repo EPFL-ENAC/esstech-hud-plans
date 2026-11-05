@@ -16,6 +16,9 @@ class Command:
     tool: CommandTool
     arguments: tuple[str, ...]
     capture: CommandLogCapture
+    # Return codes that succeed although they are not zero, such as spirula
+    # sfm's 3 for a partial reconstruction.
+    acceptable_return_codes: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)

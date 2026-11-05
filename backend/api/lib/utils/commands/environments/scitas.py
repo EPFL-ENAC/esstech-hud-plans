@@ -143,8 +143,7 @@ class ScitasCommandExecutionEnvironment(CommandExecutionEnvironment):
         try:
             launchers = {
                 "ffmpeg": ["ffmpeg"],
-                "colmap": ["xvfb-run", "-a", "colmap"],
-                "brush": ["brush"],
+                "spirula": ["spirula"],
             }
             argv = [*launchers[command.tool], *command.arguments]
             job_name = scitas_compute.Scitas.submit_job(
@@ -168,7 +167,9 @@ class ScitasCommandExecutionEnvironment(CommandExecutionEnvironment):
         if job_name is not None:
             scitas_compute.forget_job(job_name, workspace.name)
 
-        if result.return_code != 0:
+        if result.return_code != 0 and (
+            result.return_code not in command.acceptable_return_codes
+        ):
             raise CommandExecutionError(command, return_code=result.return_code)
 
         return CommandResult(return_code=0)

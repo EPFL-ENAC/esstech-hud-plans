@@ -3,7 +3,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Literal, Protocol
 
-type CommandTool = Literal["ffmpeg", "colmap", "brush"]
+type CommandTool = Literal["ffmpeg", "spirula"]
 type CommandLogCapture = Literal["stdout", "stderr", "combined"]
 
 

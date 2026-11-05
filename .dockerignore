@@ -1,0 +1,4 @@
+scripts/
+backend/external
+backend/.venv
+frontend/node_modules

@@ -8,14 +8,12 @@ install:
 .PHONY: install-external-softwares-macos
 install-external-softwares-macos:
 	./scripts/macos/install_ffmpeg.sh
-	./scripts/macos/install_colmap.sh
-	./scripts/macos/install_brush.sh
+	./scripts/macos/install_spirula.sh
 
 .PHONY: install-external-softwares-linux
 install-external-softwares-linux:
 	./scripts/linux/install_ffmpeg.sh
-	./scripts/linux/install_colmap.sh
-	./scripts/linux/install_brush.sh
+	./scripts/linux/install_spirula.sh
 
 run:
 	uv run dotenv -f "$(env_path)" run uvicorn api.main:app --reload --host 0.0.0.0

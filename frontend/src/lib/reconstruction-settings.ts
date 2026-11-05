@@ -1,5 +1,15 @@
-import type { ColmapWorkflowSettings, FfmpegSettings, SplatGenerationSettings } from './buildings';
-import { type BrushTrainingConfig, makeDefaultBrushConfig } from './splats/brush';
+import type {
+    FfmpegSettings,
+    SplatGenerationSettings,
+    SpirulaSfmWorkflowSettings,
+    SpirulaTrainWorkflowSettings,
+} from './buildings';
+import {
+    type SpirulaSfmConfig,
+    type SpirulaTrainConfig,
+    makeDefaultSpirulaSfmConfig,
+    makeDefaultSpirulaTrainConfig,
+} from './splats/spirula';
 import { type FramePickerConfig, makeDefaultFramePickerConfig } from './splats/framePicker';
 
 export type ReconstructionPreset = 'indoors' | 'outdoors' | 'advanced';
@@ -7,8 +17,8 @@ export type ReconstructionPreset = 'indoors' | 'outdoors' | 'advanced';
 export interface ReconstructionSettingsConfig {
     ffmpeg: FfmpegSettings;
     framePicker: FramePickerConfig;
-    colmap: ColmapWorkflowSettings;
-    brush: BrushTrainingConfig;
+    spirulaSfm: SpirulaSfmConfig;
+    spirulaTrain: SpirulaTrainConfig;
 }
 
 export function makeDefaultReconstructionSettings(
@@ -17,20 +27,13 @@ export function makeDefaultReconstructionSettings(
     return {
         ffmpeg: { fps: preset === 'indoors' ? 4 : 2, fit_in_width: 1920, fit_in_height: 1920 },
         framePicker: makeDefaultFramePickerConfig(),
-        colmap: {
-            data_type: 'video',
-            quality: preset === 'indoors' ? 'high' : 'low',
-            camera_model: 'OPENCV',
-            single_camera: true,
-            use_gpu: true,
-            use_global_mapper: true,
-        },
-        brush: makeDefaultBrushConfig(),
+        spirulaSfm: makeDefaultSpirulaSfmConfig(preset),
+        spirulaTrain: makeDefaultSpirulaTrainConfig(),
     };
 }
 
 export function isValidReconstructionSettings(settings: ReconstructionSettingsConfig): boolean {
-    const { ffmpeg, framePicker, brush } = settings;
+    const { ffmpeg, framePicker, spirulaTrain } = settings;
     const positiveInteger = (value: number) => Number.isInteger(value) && value > 0;
     const positiveNumber = (value: number) => Number.isFinite(value) && value > 0;
     return (
@@ -44,25 +47,33 @@ export function isValidReconstructionSettings(settings: ReconstructionSettingsCo
                 Number.isFinite(framePicker.outlier_sharpness_ratio) &&
                 framePicker.outlier_sharpness_ratio >= 0 &&
                 framePicker.outlier_sharpness_ratio <= 1)) &&
-        positiveInteger(brush.totalSteps) &&
-        Number.isInteger(brush.shDegree) &&
-        brush.shDegree >= 0 &&
-        brush.shDegree <= 3 &&
-        positiveInteger(brush.maxSplats) &&
-        positiveInteger(brush.refineEvery) &&
-        positiveNumber(brush.growthGradThreshold) &&
-        Number.isInteger(brush.growthStopIter) &&
-        brush.growthStopIter >= 0 &&
-        positiveInteger(brush.maxResolution) &&
-        positiveInteger(brush.subsampleFrames) &&
-        positiveInteger(brush.exportEvery)
+        positiveInteger(spirulaTrain.numIterations) &&
+        Number.isInteger(spirulaTrain.shDegree) &&
+        spirulaTrain.shDegree >= 0 &&
+        spirulaTrain.shDegree <= 3 &&
+        positiveInteger(spirulaTrain.capMax)
     );
 }
 
 export function toSplatGenerationSettings(
     settings: ReconstructionSettingsConfig,
 ): SplatGenerationSettings {
-    const { framePicker, brush } = settings;
+    const { framePicker, spirulaSfm, spirulaTrain } = settings;
+
+    const sfm: SpirulaSfmWorkflowSettings = {
+        data_type: spirulaSfm.dataType,
+        quality: spirulaSfm.quality,
+        camera_model: spirulaSfm.cameraModel,
+        single_camera: spirulaSfm.singleCamera,
+    };
+    const train: SpirulaTrainWorkflowSettings = {
+        num_iterations: spirulaTrain.numIterations,
+        quality: spirulaTrain.quality,
+        primitive: spirulaTrain.primitive,
+        sh_degree: spirulaTrain.shDegree,
+        cap_max: spirulaTrain.capMax,
+    };
+
     return {
         ffmpeg: { ...settings.ffmpeg },
         frame_picker: framePicker.enabled
@@ -73,19 +84,7 @@ export function toSplatGenerationSettings(
                   outlier_sharpness_ratio: framePicker.outlier_sharpness_ratio,
               }
             : null,
-        colmap: { ...settings.colmap },
-        brush: {
-            total_steps: brush.totalSteps,
-            render_mode: brush.renderMode,
-            sh_degree: brush.shDegree,
-            max_splats: brush.maxSplats,
-            refine_every: brush.refineEvery,
-            growth_grad_threshold: brush.growthGradThreshold,
-            growth_stop_iter: brush.growthStopIter,
-            max_resolution: brush.maxResolution,
-            subsample_frames: brush.subsampleFrames,
-            alpha_mode: brush.alphaMode,
-            export_every: brush.exportEvery,
-        },
+        spirula_sfm: sfm,
+        spirula_train: train,
     };
 }
