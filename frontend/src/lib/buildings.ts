@@ -3,7 +3,7 @@ import { i18n } from 'src/i18n/instance';
 import { baseUrl } from 'boot/api';
 import { ApiError, requestJson } from 'src/lib/api';
 import type { FetchProgress } from 'src/lib/utils/fetchProgress';
-import { downloadResumable, type ResumableDownloadOptions } from 'src/lib/utils/resumableDownload';
+import { ResumableDownload } from 'src/lib/resumableDownload';
 
 export { ApiError } from 'src/lib/api';
 
@@ -275,19 +275,19 @@ export function deleteReconstruction(buildingId: string, reconstructionId: strin
     );
 }
 
-export function getReconstructionVideo(
+export async function getReconstructionVideo(
     buildingId: string,
     reconstructionId: string,
     signal: AbortSignal,
     onProgress?: (progress: FetchProgress) => void,
 ): Promise<Blob> {
-    const options: ResumableDownloadOptions = {};
-    if (onProgress) options.onProgress = onProgress;
-    return downloadResumable(
+    const download = await ResumableDownload.open(
         `${baseUrl}/buildings/${encodeURIComponent(buildingId)}/reconstructions/${encodeURIComponent(reconstructionId)}/video`,
-        { signal },
-        options,
     );
+    return download.download({
+        signal,
+        ...(onProgress ? { onProgress } : {}),
+    });
 }
 
 export async function getReconstructionSplat(
@@ -296,13 +296,13 @@ export async function getReconstructionSplat(
     signal: AbortSignal,
     onProgress?: (progress: FetchProgress) => void,
 ): Promise<ArrayBuffer> {
-    const options: ResumableDownloadOptions = {};
-    if (onProgress) options.onProgress = onProgress;
-    const blob = await downloadResumable(
+    const download = await ResumableDownload.open(
         `${baseUrl}/buildings/${encodeURIComponent(buildingId)}/reconstructions/${encodeURIComponent(reconstructionId)}/splat`,
-        { signal },
-        options,
     );
+    const blob = await download.download({
+        signal,
+        ...(onProgress ? { onProgress } : {}),
+    });
     return blob.arrayBuffer();
 }
 
@@ -318,13 +318,13 @@ export async function getReconstructionPointCloud(
     signal: AbortSignal,
     onProgress?: (progress: FetchProgress) => void,
 ): Promise<ArrayBuffer> {
-    const options: ResumableDownloadOptions = {};
-    if (onProgress) options.onProgress = onProgress;
-    const blob = await downloadResumable(
+    const download = await ResumableDownload.open(
         `${baseUrl}/buildings/${encodeURIComponent(buildingId)}/reconstructions/${encodeURIComponent(reconstructionId)}/point-cloud`,
-        { signal },
-        options,
     );
+    const blob = await download.download({
+        signal,
+        ...(onProgress ? { onProgress } : {}),
+    });
     return blob.arrayBuffer();
 }
 

@@ -33,7 +33,7 @@ async function fixture(t) {
                 return gate.promise;
             },
         },
-        'src/lib/utils/resumableDownload': { downloadResumable() {} },
+        'src/lib/resumableDownload': { ResumableDownload: {} },
     });
     const { useCancelReconstructionMutation } = await importTypeScript(
         t,
