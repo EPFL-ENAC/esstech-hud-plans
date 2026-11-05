@@ -1,13 +1,16 @@
 import type {
     FfmpegSettings,
     SplatGenerationSettings,
+    SpirulaGeometryWorkflowSettings,
     SpirulaSfmWorkflowSettings,
     SpirulaTrainWorkflowSettings,
 } from './buildings';
 import {
+    type SpirulaGeometryConfig,
     type SpirulaSfmConfig,
     type SpirulaTrainConfig,
     makeDefaultSpirulaSfmConfig,
+    makeDefaultSpirulaGeometryConfig,
     makeDefaultSpirulaTrainConfig,
 } from './splats/spirula';
 import { type FramePickerConfig, makeDefaultFramePickerConfig } from './splats/framePicker';
@@ -18,6 +21,7 @@ export interface ReconstructionSettingsConfig {
     ffmpeg: FfmpegSettings;
     framePicker: FramePickerConfig;
     spirulaSfm: SpirulaSfmConfig;
+    spirulaGeometry: SpirulaGeometryConfig;
     spirulaTrain: SpirulaTrainConfig;
 }
 
@@ -28,6 +32,7 @@ export function makeDefaultReconstructionSettings(
         ffmpeg: { fps: preset === 'indoors' ? 4 : 2, fit_in_width: 1920, fit_in_height: 1920 },
         framePicker: makeDefaultFramePickerConfig(),
         spirulaSfm: makeDefaultSpirulaSfmConfig(preset),
+        spirulaGeometry: makeDefaultSpirulaGeometryConfig(),
         spirulaTrain: makeDefaultSpirulaTrainConfig(),
     };
 }
@@ -58,17 +63,24 @@ export function isValidReconstructionSettings(settings: ReconstructionSettingsCo
 export function toSplatGenerationSettings(
     settings: ReconstructionSettingsConfig,
 ): SplatGenerationSettings {
-    const { framePicker, spirulaSfm, spirulaTrain } = settings;
+    const { framePicker, spirulaSfm, spirulaGeometry, spirulaTrain } = settings;
 
     const sfm: SpirulaSfmWorkflowSettings = {
         data_type: spirulaSfm.dataType,
+        pairs: spirulaSfm.pairs,
         quality: spirulaSfm.quality,
         camera_model: spirulaSfm.cameraModel,
         single_camera: spirulaSfm.singleCamera,
     };
+    const geometry: SpirulaGeometryWorkflowSettings = {
+        compute_depth: spirulaGeometry.computeDepth,
+        compute_normals: spirulaGeometry.computeNormals,
+    };
     const train: SpirulaTrainWorkflowSettings = {
         num_iterations: spirulaTrain.numIterations,
         quality: spirulaTrain.quality,
+        floater_suppression: spirulaTrain.floaterSuppression,
+        meshing_preset: spirulaTrain.meshingPreset,
         primitive: spirulaTrain.primitive,
         sh_degree: spirulaTrain.shDegree,
         cap_max: spirulaTrain.capMax,
@@ -85,6 +97,7 @@ export function toSplatGenerationSettings(
               }
             : null,
         spirula_sfm: sfm,
+        spirula_geometry: geometry,
         spirula_train: train,
     };
 }

@@ -47,6 +47,15 @@
                 :label="t('settings.spirula.sfm.dataType')"
             />
             <q-select
+                v-model="settings.spirulaSfm.pairs"
+                class="col-12 col-sm-6"
+                outlined
+                emit-value
+                map-options
+                :options="sfmPairsOptions"
+                :label="t('settings.spirula.sfm.pairs')"
+            />
+            <q-select
                 v-model="settings.spirulaSfm.quality"
                 class="col-12 col-sm-6"
                 outlined
@@ -72,6 +81,23 @@
         </div>
 
         <q-separator />
+        <div class="text-subtitle1 text-weight-bold">
+            {{ t('settings.spirula.geometry.title') }}
+        </div>
+        <div class="row q-col-gutter-md">
+            <q-toggle
+                v-model="settings.spirulaGeometry.computeDepth"
+                class="col-12 col-sm-6"
+                :label="t('settings.spirula.geometry.computeDepth')"
+            />
+            <q-toggle
+                v-model="settings.spirulaGeometry.computeNormals"
+                class="col-12 col-sm-6"
+                :label="t('settings.spirula.geometry.computeNormals')"
+            />
+        </div>
+
+        <q-separator />
         <spirula-train-settings v-model="settings.spirulaTrain" embedded />
     </div>
 </template>
@@ -91,6 +117,12 @@ const sfmDataTypeOptions = computed(() => [
     { label: t('settings.spirula.sfm.individual'), value: 'individual' },
     { label: t('settings.spirula.sfm.video'), value: 'video' },
     { label: t('settings.spirula.sfm.internet'), value: 'internet' },
+]);
+const sfmPairsOptions = computed(() => [
+    { value: 'auto', label: t('settings.spirula.sfm.pairsAuto') },
+    { value: 'exhaustive', label: t('settings.spirula.sfm.pairsExhaustive') },
+    { value: 'sequential', label: t('settings.spirula.sfm.pairsSequential') },
+    { value: 'prefilter', label: t('settings.spirula.sfm.pairsPrefilter') },
 ]);
 const sfmQualityOptions = computed(() => [
     { value: 'low', label: t('settings.spirula.sfm.qualities.low') },

@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Literal
@@ -9,6 +10,10 @@ from ..common import CommandLogCapture, CommandTool
 
 type LogCallback = Callable[[str], None]
 type CommandLogStream = Literal["stdout", "stderr"]
+
+# How much captured output a CommandExecutionError keeps for diagnostics.
+ERROR_LOG_TAIL_RECORDS = 15
+ERROR_LOG_RECORD_MAX_LENGTH = 500
 
 
 @dataclass(frozen=True)
@@ -33,9 +38,11 @@ class CommandExecutionError(RuntimeError):
         *,
         return_code: int | None = None,
         message: str | None = None,
+        log_tail: Sequence[str] | None = None,
     ) -> None:
         self.command = command
         self.return_code = return_code
+        self.log_tail = list(log_tail or ())
 
         if message is None:
             if return_code is None:
@@ -44,8 +51,19 @@ class CommandExecutionError(RuntimeError):
                 message = (
                     f"{command.tool} command exited with return code {return_code}"
                 )
+        if self.log_tail:
+            message = "\n".join(
+                [message, "Last output:"]
+                + [f"  {_shorten(record)}" for record in self.log_tail]
+            )
 
         super().__init__(message)
+
+
+def _shorten(record: str) -> str:
+    if len(record) <= ERROR_LOG_RECORD_MAX_LENGTH:
+        return record
+    return record[: ERROR_LOG_RECORD_MAX_LENGTH - 3] + "..."
 
 
 class CommandExecutionEnvironment(ABC):

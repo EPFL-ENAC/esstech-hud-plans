@@ -4,6 +4,7 @@ import shutil
 import signal
 import subprocess
 import threading
+from collections import deque
 from collections.abc import Callable
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -13,6 +14,7 @@ from anyio import CancelScope, to_thread
 
 from ..common import BinaryReadStream, CommandTool, iter_command_log_records
 from .base import (
+    ERROR_LOG_TAIL_RECORDS,
     Command,
     CommandExecutionEnvironment,
     CommandExecutionError,
@@ -144,10 +146,13 @@ class LocalCommandExecutionEnvironment(CommandExecutionEnvironment):
         stream: BinaryReadStream,
         emit_log: LogCallback,
     ) -> CommandResult:
+        log_tail: deque[str] = deque(maxlen=ERROR_LOG_TAIL_RECORDS)
+
         for record in iter_command_log_records(stream):
             with self._condition:
                 cancelled = self._cancelled
             if not cancelled:
+                log_tail.append(record)
                 emit_log(record)
 
         return_code = process.wait()
@@ -157,9 +162,12 @@ class LocalCommandExecutionEnvironment(CommandExecutionEnvironment):
                     command,
                     return_code=return_code,
                     message="Local command execution was cancelled",
+                    log_tail=log_tail,
                 )
         if return_code != 0 and return_code not in command.acceptable_return_codes:
-            raise CommandExecutionError(command, return_code=return_code)
+            raise CommandExecutionError(
+                command, return_code=return_code, log_tail=log_tail
+            )
         return CommandResult(return_code=return_code)
 
     def execute(

@@ -9,7 +9,11 @@ from api.lib.utils.commands import (
     CommandResult,
     LogCallback,
 )
-from api.models.workflows import SpirulaSfmSettings, SpirulaTrainSettings
+from api.models.workflows import (
+    SpirulaGeometrySettings,
+    SpirulaSfmSettings,
+    SpirulaTrainSettings,
+)
 
 
 class _NoOpEnvironment(CommandExecutionEnvironment):
@@ -51,6 +55,7 @@ def test_build_sfm_command_uses_workspace_relative_paths_and_settings(
         colmap_directory,
         SpirulaSfmSettings(
             data_type="internet",
+            pairs="prefilter",
             quality="high",
             camera_model="radial",
             single_camera=False,
@@ -68,6 +73,8 @@ def test_build_sfm_command_uses_workspace_relative_paths_and_settings(
             "COLMAP workspace",
             "--data-type",
             "internet",
+            "--pairs",
+            "prefilter",
             "--quality",
             "high",
             "--camera-model",
@@ -80,8 +87,65 @@ def test_build_sfm_command_uses_workspace_relative_paths_and_settings(
     )
 
 
+@pytest.mark.parametrize(
+    ("compute_depth", "compute_normals", "flag_arguments"),
+    [
+        (False, False, ("--no-normal",)),
+        (True, True, ("--depth",)),
+        (True, False, ("--depth", "--no-normal")),
+        (False, True, ()),
+    ],
+)
+def test_build_geometry_command_uses_workspace_relative_paths_and_flags(
+    tmp_path: Path,
+    compute_depth: bool,
+    compute_normals: bool,
+    flag_arguments: tuple[str, ...],
+) -> None:
+    dataset_directory = tmp_path / "dataset"
+
+    command = spirula.build_spirula_geometry_command(
+        dataset_directory,
+        SpirulaGeometrySettings(
+            compute_depth=compute_depth,
+            compute_normals=compute_normals,
+        ),
+        workspace_directory=tmp_path,
+    )
+
+    assert command == Command(
+        tool="spirula",
+        arguments=(
+            "geometry",
+            "dataset",
+            "--image-dir",
+            "frames",
+            *flag_arguments,
+        ),
+        capture="combined",
+    )
+
+
+@pytest.mark.parametrize(
+    ("meshing_preset", "floater_suppression", "head_arguments", "tail_arguments"),
+    [
+        (True, True, ("meshing",), ("--floater-suppression", "mild")),
+        (True, False, ("meshing",), ()),
+        (
+            False,
+            True,
+            (),
+            ("--primitive", "mip", "--sh-degree", "2", "--floater-suppression", "mild"),
+        ),
+        (False, False, (), ("--primitive", "mip", "--sh-degree", "2")),
+    ],
+)
 def test_build_train_command_uses_workspace_relative_paths_and_settings(
     tmp_path: Path,
+    meshing_preset: bool,
+    floater_suppression: bool,
+    head_arguments: tuple[str, ...],
+    tail_arguments: tuple[str, ...],
 ) -> None:
     splat_path = tmp_path / "outputs" / "scene.ply"
 
@@ -94,6 +158,8 @@ def test_build_train_command_uses_workspace_relative_paths_and_settings(
             primitive="mip",
             sh_degree=2,
             cap_max=500_000,
+            floater_suppression=floater_suppression,
+            meshing_preset=meshing_preset,
         ),
         workspace_directory=tmp_path,
     )
@@ -102,6 +168,7 @@ def test_build_train_command_uses_workspace_relative_paths_and_settings(
         tool="spirula",
         arguments=(
             "train",
+            *head_arguments,
             "--data",
             ".",
             "--image-dir",
@@ -118,10 +185,7 @@ def test_build_train_command_uses_workspace_relative_paths_and_settings(
             "45000",
             "--quality",
             "high",
-            "--primitive",
-            "mip",
-            "--sh-degree",
-            "2",
+            *tail_arguments,
             "--cap-max",
             "500000",
         ),
@@ -136,6 +200,11 @@ def test_build_train_command_uses_workspace_relative_paths_and_settings(
             tmp_path.parent / "frames",
             tmp_path / "colmap",
             SpirulaSfmSettings(),
+            workspace_directory=tmp_path,
+        ),
+        lambda tmp_path: spirula.build_spirula_geometry_command(
+            tmp_path.parent / "dataset",
+            SpirulaGeometrySettings(),
             workspace_directory=tmp_path,
         ),
         lambda tmp_path: spirula.build_spirula_train_command(
@@ -268,10 +337,62 @@ def test_run_sfm_requires_valid_sparse_model(tmp_path: Path) -> None:
         )
 
 
+def test_run_geometry_forwards_logs_and_returns_dataset(tmp_path: Path) -> None:
+    _create_frames(tmp_path / "frames")
+    captured: dict = {}
+
+    class FakeEnvironment(CommandExecutionEnvironment):
+        def execute(
+            self,
+            command: Command,
+            *,
+            workspace: Path,
+            on_log: LogCallback | None = None,
+        ) -> CommandResult:
+            captured["command"] = command
+            captured["workspace"] = workspace
+            captured["on_log"] = on_log
+            assert on_log is not None
+            on_log("depth: frame_00001.jpg")
+            on_log("normals: frame_00001.jpg")
+            return CommandResult(return_code=0)
+
+    records: list[str] = []
+    on_log = records.append
+
+    result = spirula.run_spirula_geometry(
+        tmp_path,
+        SpirulaGeometrySettings(compute_depth=True),
+        workspace_directory=tmp_path,
+        execution_environment=FakeEnvironment(),
+        on_log=on_log,
+    )
+
+    assert result == tmp_path.resolve()
+    assert records == ["depth: frame_00001.jpg", "normals: frame_00001.jpg"]
+    assert captured["command"].arguments[:2] == ("geometry", ".")
+    assert captured["workspace"] == tmp_path.resolve()
+    assert captured["on_log"] is on_log
+
+
+def test_run_geometry_requires_frames(tmp_path: Path) -> None:
+    (tmp_path / "frames").mkdir()
+
+    with pytest.raises(RuntimeError, match="contains no JPEG frames"):
+        spirula.run_spirula_geometry(
+            tmp_path,
+            SpirulaGeometrySettings(),
+            workspace_directory=tmp_path,
+            execution_environment=_NoOpEnvironment(),
+        )
+
+
 def test_run_train_forwards_logs_and_moves_splat(tmp_path: Path) -> None:
     _create_train_dataset(tmp_path)
     splat_path = tmp_path / "outputs" / "scene.ply"
-    run_splat_path = tmp_path / "outputs" / "train" / "step-000030000.ckpt" / "splat.ply"
+    run_splat_path = (
+        tmp_path / "outputs" / "train" / "step-000030000.ckpt" / "splat.ply"
+    )
     captured: dict = {}
 
     class FakeEnvironment(CommandExecutionEnvironment):
@@ -306,7 +427,13 @@ def test_run_train_forwards_logs_and_moves_splat(tmp_path: Path) -> None:
     assert splat_path.is_file()
     assert not run_splat_path.exists()
     assert records == ["step  15000/30000  ( 50%)  splats 900000"]
-    assert captured["command"].arguments[:4] == ("train", "--data", ".", "--image-dir")
+    assert captured["command"].arguments[:5] == (
+        "train",
+        "meshing",
+        "--data",
+        ".",
+        "--image-dir",
+    )
     assert captured["workspace"] == tmp_path.resolve()
     assert captured["on_log"] is on_log
 

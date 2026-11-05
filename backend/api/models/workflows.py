@@ -31,11 +31,17 @@ class FramePickerSettings(BaseModel):
 
 class SpirulaSfmSettings(BaseModel):
     data_type: Literal["individual", "video", "internet"] = "video"
+    pairs: Literal["auto", "exhaustive", "sequential", "prefilter"] = "exhaustive"
     quality: Literal["low", "medium", "high", "extreme"] = "low"
     camera_model: Literal[
         "simple-pinhole", "pinhole", "radial", "opencv", "opencv-fisheye"
     ] = "opencv"
     single_camera: bool = True
+
+
+class SpirulaGeometrySettings(BaseModel):
+    compute_depth: bool = False
+    compute_normals: bool = False
 
 
 class SpirulaTrainSettings(BaseModel):
@@ -44,6 +50,8 @@ class SpirulaTrainSettings(BaseModel):
     primitive: Literal["3dgs", "mip"] = "3dgs"
     sh_degree: int = Field(default=3, ge=0, le=3)
     cap_max: int = Field(default=1_000_000, gt=0)
+    floater_suppression: bool = True
+    meshing_preset: bool = True
 
 
 class SplatGenerationWorkflowSettings(BaseModel):
@@ -58,6 +66,10 @@ class SplatGenerationWorkflowSettings(BaseModel):
     spirula_sfm: SpirulaSfmSettings = Field(
         default_factory=SpirulaSfmSettings,
         description="Settings for the spirula sparse-reconstruction task.",
+    )
+    spirula_geometry: SpirulaGeometrySettings = Field(
+        default_factory=SpirulaGeometrySettings,
+        description="Settings for the spirula depth- and normal-map prediction task.",
     )
     spirula_train: SpirulaTrainSettings = Field(
         default_factory=SpirulaTrainSettings,

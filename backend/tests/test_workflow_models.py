@@ -4,6 +4,7 @@ from pydantic import ValidationError
 from api.models.workflows import (
     FfmpegSettings,
     FramePickerSettings,
+    SpirulaGeometrySettings,
     SpirulaSfmSettings,
     SpirulaTrainSettings,
     SplatGenerationWorkflowSettings,
@@ -21,9 +22,14 @@ def test_splat_generation_workflow_settings_defaults_are_grouped_by_tool() -> No
     assert settings.frame_picker is None
     assert settings.spirula_sfm == SpirulaSfmSettings(
         data_type="video",
+        pairs="exhaustive",
         quality="low",
         camera_model="opencv",
         single_camera=True,
+    )
+    assert settings.spirula_geometry == SpirulaGeometrySettings(
+        compute_depth=False,
+        compute_normals=False,
     )
     assert settings.spirula_train == SpirulaTrainSettings(
         num_iterations=30_000,
@@ -31,6 +37,8 @@ def test_splat_generation_workflow_settings_defaults_are_grouped_by_tool() -> No
         primitive="3dgs",
         sh_degree=3,
         cap_max=1_000_000,
+        floater_suppression=True,
+        meshing_preset=True,
     )
 
 
@@ -77,6 +85,7 @@ def test_frame_picker_settings_reject_invalid_values(field: str, value: object) 
     ("field", "value"),
     [
         ("data_type", "archive"),
+        ("pairs", "bruteforce"),
         ("quality", "maximum"),
         ("camera_model", "SIMPLE_RADIAL"),
     ],

@@ -13,6 +13,7 @@ from api.lib.workflows import splat_generation as workflow
 from api.models.reconstruction import ReconstructionArtifactUpdate
 from api.models.workflows import (
     FramePickerSettings,
+    SpirulaGeometrySettings,
     SpirulaSfmSettings,
     SpirulaTrainSettings,
     SplatGenerationWorkflowSettings,
@@ -234,6 +235,7 @@ def test_progress_callback_survives_thread_bridge_failure(
         workflow.extract_frames_task,
         workflow.pick_frames_task,
         workflow.reconstruct_with_spirula_task,
+        workflow.predict_geometry_maps_task,
         workflow.train_with_spirula_task,
     ],
 )
@@ -365,6 +367,7 @@ def test_task_reports_progress_before_compute_returns(
         )
 
 
+@pytest.mark.parametrize("use_geometry", [False, True])
 @pytest.mark.parametrize("use_frame_picker", [False, True])
 @pytest.mark.parametrize("train_error", [None, RuntimeError, asyncio.CancelledError])
 @pytest.mark.parametrize("failed_progress", [None, 0.25, 0.4, 0.7, 0.92, 0.95, "all"])
@@ -372,6 +375,7 @@ def test_flow_combines_intermediate_updates_with_validated_milestones(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
     use_frame_picker: bool,
+    use_geometry: bool,
     train_error: type[BaseException] | None,
     failed_progress: float | str | None,
 ) -> None:
@@ -399,6 +403,9 @@ def test_flow_combines_intermediate_updates_with_validated_milestones(
             raise train_error("spirula train failed to export")
         return kwargs["splat_path"]
 
+    async def fake_geometry(**kwargs):
+        return kwargs["dataset_directory"]
+
     async def fake_point_cloud(**kwargs):
         assert train_error is None
         assert kwargs == {
@@ -410,6 +417,7 @@ def test_flow_combines_intermediate_updates_with_validated_milestones(
     monkeypatch.setattr(workflow, "extract_frames_task", fake_task)
     monkeypatch.setattr(workflow, "pick_frames_task", fake_task)
     monkeypatch.setattr(workflow, "reconstruct_with_spirula_task", fake_task)
+    monkeypatch.setattr(workflow, "predict_geometry_maps_task", fake_geometry)
     monkeypatch.setattr(workflow, "train_with_spirula_task", fake_train)
     monkeypatch.setattr(workflow, "generate_plan_point_cloud_task", fake_point_cloud)
 
@@ -423,7 +431,8 @@ def test_flow_combines_intermediate_updates_with_validated_milestones(
             colmap_directory=str(tmp_path / "colmap"),
             splat_path=str(tmp_path / "splat.ply"),
             settings=SplatGenerationWorkflowSettings(
-                frame_picker=FramePickerSettings() if use_frame_picker else None
+                frame_picker=FramePickerSettings() if use_frame_picker else None,
+                spirula_geometry=SpirulaGeometrySettings(compute_depth=use_geometry),
             ),
             owner_id=uuid4(),
             reconstruction_id=uuid4(),
@@ -438,7 +447,12 @@ def test_flow_combines_intermediate_updates_with_validated_milestones(
     expected = [0.15, 0.25]
     if use_frame_picker:
         expected.append(0.325)
-    expected.extend([0.4, 0.55, 0.7, 0.81])
+    expected.append(0.4)
+    if use_geometry:
+        expected.extend([0.525, 0.65, 0.7])
+    else:
+        expected.extend([0.55, 0.7])
+    expected.append(0.81)
     if train_error is None:
         expected.extend([0.92, 0.95])
     assert [progress for progress, _ in updates] == pytest.approx(expected)

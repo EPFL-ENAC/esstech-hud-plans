@@ -469,6 +469,11 @@ export default {
             sfm: {
                 title: 'Reconstruction des caméras (spirula)',
                 dataType: 'Type de données',
+                pairs: 'Génération de paires',
+                pairsAuto: 'Automatique',
+                pairsExhaustive: 'Appariement exhaustif',
+                pairsSequential: 'Séquentiel',
+                pairsPrefilter: 'Préfiltrage par arbre de vocabulaire',
                 quality: 'Qualité',
                 cameraModel: 'Modèle de caméra',
                 sharedIntrinsics: 'Utiliser des paramètres intrinsèques de caméra communs',
@@ -489,12 +494,19 @@ export default {
                     extreme: 'extrême',
                 },
             },
+            geometry: {
+                title: 'Cartes de géométrie (spirula)',
+                computeDepth: 'Calculer les cartes de profondeur',
+                computeNormals: 'Calculer les cartes de normales',
+            },
             train: {
                 title: 'Entraînement des splats gaussiens (spirula)',
                 description:
                     'Entraîner un modèle de splats gaussiens 3D pour reconstruire la scène.',
                 numIterations: 'Itérations d’entraînement',
                 quality: 'Qualité',
+                floaterSuppression: 'Suppression des artefacts flottants',
+                meshingPreset: 'Préréglage de maillage',
                 primitive: 'Primitive de splat',
                 shDegree: 'Degré SH (harmoniques sphériques)',
                 capMax: 'Nombre maximal de splats',

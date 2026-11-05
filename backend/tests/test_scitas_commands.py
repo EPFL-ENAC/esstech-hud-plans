@@ -167,10 +167,12 @@ def test_scitas_environment_reports_failure_and_forgets_finished_job(
     monkeypatch.setattr(
         scitas_compute.Scitas, "submit_job", lambda **kwargs: "failed-job"
     )
+    log_path = tmp_path / "failed.log"
+    log_path.write_bytes(b"loading model\ncrashed during matching\rprogress 99%\r\n")
     monkeypatch.setattr(
         scitas_compute.Scitas,
         "get_log_file_path",
-        lambda job_name: str(tmp_path / "missing.log"),
+        lambda job_name: str(log_path),
     )
     monkeypatch.setattr(
         scitas_compute.Scitas, "get_job_status", lambda job_name: "FAILED"
@@ -191,6 +193,14 @@ def test_scitas_environment_reports_failure_and_forgets_finished_job(
 
     assert error.value.command == command
     assert error.value.return_code == 42
+    assert error.value.log_tail == [
+        "loading model",
+        "crashed during matching",
+        "progress 99%",
+    ]
+    assert "return code 42" in str(error.value)
+    assert "Last output:" in str(error.value)
+    assert "  crashed during matching" in str(error.value)
     assert cancelled == []
     assert registered == [("failed-job", "workspace")]
     # A job that reports failure in a normal way is dropped from the registry.

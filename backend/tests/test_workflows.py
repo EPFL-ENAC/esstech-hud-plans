@@ -22,6 +22,7 @@ from api.lib.workflows import splat_generation as splat_workflow
 from api.models.user import User
 from api.models.workflows import (
     FramePickerSettings,
+    SpirulaGeometrySettings,
     SpirulaSfmSettings,
     SpirulaTrainSettings,
     SplatGenerationWorkflowSettings,
@@ -450,6 +451,7 @@ def test_train_with_spirula_task_sends_output_to_prefect_run_logger(
     ]
 
 
+@pytest.mark.parametrize("use_geometry", [False, True])
 @pytest.mark.parametrize("use_frame_picker", [False, True])
 @pytest.mark.parametrize("use_scitas", [False, True])
 def test_splat_generation_flow_selects_gpu_environment(
@@ -457,6 +459,7 @@ def test_splat_generation_flow_selects_gpu_environment(
     tmp_path: Path,
     use_scitas: bool,
     use_frame_picker: bool,
+    use_geometry: bool,
 ) -> None:
     calls: list[tuple] = []
     video_path = tmp_path / "uploads" / "source video.mov"
@@ -465,7 +468,10 @@ def test_splat_generation_flow_selects_gpu_environment(
     workspace = tmp_path / "workflow"
     workspace.mkdir()
     picker_settings = FramePickerSettings() if use_frame_picker else None
-    settings = SplatGenerationWorkflowSettings(frame_picker=picker_settings)
+    settings = SplatGenerationWorkflowSettings(
+        frame_picker=picker_settings,
+        spirula_geometry=SpirulaGeometrySettings(compute_depth=use_geometry),
+    )
 
     class FakeRunLogger:
         def info(self, *args) -> None:
@@ -486,6 +492,10 @@ def test_splat_generation_flow_selects_gpu_environment(
         calls.append(("spirula-sfm", kwargs))
         return str(workspace / "colmap")
 
+    async def fake_geometry_task(**kwargs):
+        calls.append(("spirula-geometry", kwargs))
+        return kwargs["dataset_directory"]
+
     async def fake_train_task(**kwargs):
         calls.append(("spirula-train", kwargs))
         return str(workspace / "splat.ply")
@@ -501,6 +511,11 @@ def test_splat_generation_flow_selects_gpu_environment(
         splat_workflow,
         "reconstruct_with_spirula_task",
         fake_sfm_task,
+    )
+    monkeypatch.setattr(
+        splat_workflow,
+        "predict_geometry_maps_task",
+        fake_geometry_task,
     )
     monkeypatch.setattr(splat_workflow, "train_with_spirula_task", fake_train_task)
     monkeypatch.setattr(
@@ -570,6 +585,22 @@ def test_splat_generation_flow_selects_gpu_environment(
                     "execution_environment": gpu_environment,
                 },
             ),
+        ]
+    )
+    if use_geometry:
+        expected_calls.append(
+            (
+                "spirula-geometry",
+                {
+                    "workspace_directory": str(workspace),
+                    "dataset_directory": str(workspace),
+                    "settings": settings.spirula_geometry,
+                    "execution_environment": gpu_environment,
+                },
+            )
+        )
+    expected_calls.extend(
+        [
             (
                 "spirula-train",
                 {

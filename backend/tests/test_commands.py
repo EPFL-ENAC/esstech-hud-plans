@@ -217,6 +217,9 @@ def test_local_environment_logs_output_before_nonzero_exit(
     assert records == ["before failure"]
     assert error.value.return_code == 2
     assert error.value.command == command
+    assert error.value.log_tail == ["before failure"]
+    assert "return code 2" in str(error.value)
+    assert "  before failure" in str(error.value)
 
 
 def test_local_environment_wraps_process_start_failure(
@@ -341,3 +344,33 @@ def test_local_spirula_preserves_failure_exit_code(
 
     assert records == ["before failure"]
     assert error.value.return_code == 3
+    assert "return code 3" in str(error.value)
+    assert "before failure" in str(error.value)
+
+
+def test_local_environment_caps_log_tail_in_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    short_records = [f"line {index}" for index in range(19)]
+    long_record = "x" * 600
+    stdout = (
+        "".join(f"{record}\n" for record in short_records) + long_record + "\n"
+    ).encode()
+    process = _FakeProcess(1, stdout=stdout)
+    monkeypatch.setattr(
+        local_commands.subprocess,
+        "Popen",
+        lambda *args, **kwargs: process,
+    )
+    environment = commands.LocalCommandExecutionEnvironment()
+    monkeypatch.setattr(environment, "_resolve_tool", lambda tool: "/bin/tool")
+
+    with pytest.raises(commands.CommandExecutionError) as error:
+        environment.execute(
+            commands.Command(tool="spirula", arguments=(), capture="combined"),
+            workspace=tmp_path,
+        )
+
+    assert error.value.log_tail == short_records[-14:] + [long_record]
+    assert "line 4" not in str(error.value)
+    assert "x" * 497 + "..." in str(error.value)

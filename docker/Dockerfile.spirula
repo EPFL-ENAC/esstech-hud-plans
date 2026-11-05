@@ -7,9 +7,8 @@
 ARG UBUNTU_VERSION=24.04
 ARG NVIDIA_CUDA_VERSION=13.1.1
 
-#
-# Docker builder stage.
-#
+# Docker builder stage
+
 FROM nvcr.io/nvidia/cuda:${NVIDIA_CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION} AS builder
 
 ARG SPIRULA_VERSION=v2026.10.16
@@ -36,15 +35,14 @@ RUN git clone --branch ${SPIRULA_VERSION} --single-branch --depth 1 \
         -DSS_BUILD_GUI=OFF && \
     cmake --build build -j"$(nproc)"
 
-#
-# Docker runtime stage.
-#
+# Docker runtime stage
+
 FROM nvcr.io/nvidia/cuda:${NVIDIA_CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION}
 
-# nvidia-driver-570 provides the NVIDIA Vulkan ICD JSON. The driver itself
-# still comes from the host.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
         libvulkan1 \
         libgomp1 \
         nvidia-driver-570 && \
@@ -52,3 +50,12 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /spirula-studio/build/spirula /usr/local/bin/spirula
+
+# Download the default depth/normals model
+ENV XDG_CACHE_HOME=/opt/spirula-cache
+RUN mkdir -p "$XDG_CACHE_HOME/spirula-studio/models" && \
+    curl -fsSL --retry 3 -o \
+        "$XDG_CACHE_HOME/spirula-studio/models/moge2-vitb-normal.onnx" \
+        "https://huggingface.co/Ruicheng/moge-2-vitb-normal-onnx/resolve/main/model.onnx" && \
+    sha256sum "$XDG_CACHE_HOME/spirula-studio/models/moge2-vitb-normal.onnx" | \
+        grep -q "^bbf14e07a30f11e69d36ab861590123f5598ababcbc8946a063eb4a966f35a21"

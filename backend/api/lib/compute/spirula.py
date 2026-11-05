@@ -7,7 +7,11 @@ from api.lib.utils.commands import (
     LogCallback,
     workspace_relative_path,
 )
-from api.models.workflows import SpirulaSfmSettings, SpirulaTrainSettings
+from api.models.workflows import (
+    SpirulaGeometrySettings,
+    SpirulaSfmSettings,
+    SpirulaTrainSettings,
+)
 
 # spirula train writes <output-dir-prefix>/<output-dir-name>/ containing the
 # config and step-*.ckpt checkpoint directories; the trained PLY lives inside
@@ -44,6 +48,8 @@ def build_spirula_sfm_command(
             relative_colmap_directory.as_posix(),
             "--data-type",
             settings.data_type,
+            "--pairs",
+            settings.pairs,
             "--quality",
             settings.quality,
             "--camera-model",
@@ -54,6 +60,28 @@ def build_spirula_sfm_command(
         capture="combined",
         acceptable_return_codes=(SFM_PARTIAL_RETURN_CODE,),
     )
+
+
+def build_spirula_geometry_command(
+    dataset_directory: Path,
+    settings: SpirulaGeometrySettings,
+    *,
+    workspace_directory: Path,
+) -> Command:
+    relative_dataset_directory = workspace_relative_path(
+        dataset_directory, workspace_directory
+    )
+    arguments = [
+        "geometry",
+        relative_dataset_directory.as_posix(),
+        "--image-dir",
+        "frames",
+    ]
+    if settings.compute_depth:
+        arguments.append("--depth")
+    if not settings.compute_normals:
+        arguments.append("--no-normal")
+    return Command(tool="spirula", arguments=tuple(arguments), capture="combined")
 
 
 def build_spirula_train_command(
@@ -69,10 +97,12 @@ def build_spirula_train_command(
     relative_splat_path = workspace_relative_path(splat_path, workspace_directory)
     export_directory = relative_splat_path.parent
 
-    return Command(
-        tool="spirula",
-        arguments=(
-            "train",
+    arguments = ["train"]
+    if settings.meshing_preset:
+        # The preset owns --primitive (Mip-Splats) and --sh-degree (0).
+        arguments.append("meshing")
+    arguments.extend(
+        [
             "--data",
             relative_dataset_directory.as_posix(),
             "--image-dir",
@@ -89,15 +119,17 @@ def build_spirula_train_command(
             str(settings.num_iterations),
             "--quality",
             settings.quality,
-            "--primitive",
-            settings.primitive,
-            "--sh-degree",
-            str(settings.sh_degree),
-            "--cap-max",
-            str(settings.cap_max),
-        ),
-        capture="combined",
+        ]
     )
+    if not settings.meshing_preset:
+        arguments.extend(
+            ["--primitive", settings.primitive, "--sh-degree", str(settings.sh_degree)]
+        )
+    if settings.floater_suppression:
+        arguments.extend(["--floater-suppression", "mild"])
+    arguments.extend(["--cap-max", str(settings.cap_max)])
+
+    return Command(tool="spirula", arguments=tuple(arguments), capture="combined")
 
 
 def looks_like_colmap_model(directory: Path) -> bool:
@@ -114,7 +146,9 @@ def _validate_frames_directory(frames_directory: Path) -> None:
     if not frames_directory.is_dir():
         raise FileNotFoundError(f"Frames directory does not exist: {frames_directory}")
     if not any(frames_directory.glob("frame_*.jpg")):
-        raise RuntimeError(f"Frames directory contains no JPEG frames: {frames_directory}")
+        raise RuntimeError(
+            f"Frames directory contains no JPEG frames: {frames_directory}"
+        )
 
 
 def _validate_dataset_directory(dataset_directory: Path) -> None:
@@ -168,6 +202,34 @@ def run_spirula_sfm(
         )
 
     return colmap_directory
+
+
+def run_spirula_geometry(
+    dataset_directory: Path,
+    settings: SpirulaGeometrySettings,
+    *,
+    workspace_directory: Path,
+    execution_environment: CommandExecutionEnvironment,
+    on_log: LogCallback | None = None,
+) -> Path:
+    """Predict depth/normal supervision maps beside the dataset."""
+
+    workspace_directory = workspace_directory.resolve()
+    dataset_directory = dataset_directory.resolve()
+
+    command = build_spirula_geometry_command(
+        dataset_directory,
+        settings,
+        workspace_directory=workspace_directory,
+    )
+    _validate_frames_directory(dataset_directory / "frames")
+    execution_environment.execute(
+        command,
+        workspace=workspace_directory,
+        on_log=on_log,
+    )
+
+    return dataset_directory
 
 
 def run_spirula_train(

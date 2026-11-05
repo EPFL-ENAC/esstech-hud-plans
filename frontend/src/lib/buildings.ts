@@ -2,6 +2,7 @@ import type { Page } from 'src/lib/pagination';
 import type {
     SpirulaSfmCameraModel,
     SpirulaSfmDataType,
+    SpirulaSfmPairs,
     SpirulaSfmQuality,
     SpirulaTrainPrimitive,
     SpirulaTrainQuality,
@@ -45,11 +46,13 @@ export type BuildingUpdate = {
     name?: string;
     address?: string | null;
 } & (
-    { latitude?: never; longitude?: never } | { latitude: number | null; longitude: number | null }
+    | { latitude?: never; longitude?: never }
+    | { latitude: number | null; longitude: number | null }
 );
 
 export type BuildingSelection =
-    { buildingId: string } | { buildingId: null; building: BuildingCreate };
+    | { buildingId: string }
+    | { buildingId: null; building: BuildingCreate };
 
 export function isValidBuildingCreate(building: BuildingCreate): boolean {
     const { latitude, longitude } = building;
@@ -122,14 +125,22 @@ export interface FramePickerWorkflowSettings {
 
 export interface SpirulaSfmWorkflowSettings {
     data_type: SpirulaSfmDataType;
+    pairs: SpirulaSfmPairs;
     quality: SpirulaSfmQuality;
     camera_model: SpirulaSfmCameraModel;
     single_camera: boolean;
 }
 
+export interface SpirulaGeometryWorkflowSettings {
+    compute_depth: boolean;
+    compute_normals: boolean;
+}
+
 export interface SpirulaTrainWorkflowSettings {
     num_iterations: number;
     quality: SpirulaTrainQuality;
+    floater_suppression: boolean;
+    meshing_preset: boolean;
     primitive: SpirulaTrainPrimitive;
     sh_degree: number;
     cap_max: number;
@@ -139,6 +150,7 @@ export interface SplatGenerationSettings {
     ffmpeg: FfmpegSettings;
     frame_picker: FramePickerWorkflowSettings | null;
     spirula_sfm: SpirulaSfmWorkflowSettings;
+    spirula_geometry: SpirulaGeometryWorkflowSettings;
     spirula_train: SpirulaTrainWorkflowSettings;
 }
 

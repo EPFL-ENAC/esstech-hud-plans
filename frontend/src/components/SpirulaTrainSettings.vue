@@ -70,7 +70,18 @@ const resetDefaults = () => {
                 </div>
             </div>
 
+            <q-toggle
+                v-model="config.floaterSuppression"
+                :label="t('settings.spirula.train.floaterSuppression')"
+            />
+
+            <q-toggle
+                v-model="config.meshingPreset"
+                :label="t('settings.spirula.train.meshingPreset')"
+            />
+
             <q-select
+                v-if="!config.meshingPreset"
                 v-model="config.primitive"
                 :options="primitiveOptions"
                 :label="t('settings.spirula.train.primitive')"
@@ -90,7 +101,7 @@ const resetDefaults = () => {
             </q-select>
 
             <div class="row q-col-gutter-sm">
-                <div class="col-12 col-sm-6">
+                <div v-if="!config.meshingPreset" class="col-12 col-sm-6">
                     <q-input
                         v-model.number="config.shDegree"
                         :min="0"
