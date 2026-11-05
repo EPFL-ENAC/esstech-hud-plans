@@ -137,16 +137,16 @@ export async function downloadFixture(t, { persistent = false, locksAvailable = 
 
     const base = 'src/lib/resumableDownload/';
     const contract = await importTypeScript(t, `${base}downloadFile.ts`, {});
-    const hashing = await importTypeScript(t, `${base}sha256Hex.ts`, {});
-    const ranges = await importTypeScript(t, `${base}contentRange.ts`, {});
+    const hashing = await importTypeScript(t, 'src/lib/utils/sha256Hex.ts', {});
+    const ranges = await importTypeScript(t, 'src/lib/utils/contentRange.ts', {});
     const disk = await importTypeScript(t, `${base}diskDownloadFile.ts`, {
         './downloadFile': contract,
-        './sha256Hex': hashing,
+        'src/lib/utils/sha256Hex': hashing,
     });
     const memory = await importTypeScript(t, `${base}memoryDownloadFile.ts`, {
         './downloadFile': contract,
     });
-    const network = await importTypeScript(t, `${base}network.ts`, {});
+    const network = await importTypeScript(t, 'src/lib/utils/network.ts', {});
     const engine = await importTypeScript(t, `${base}resumableDownload.ts`, {
         'src/lib/auth': {
             authFetch(url, init) {
@@ -156,11 +156,11 @@ export async function downloadFixture(t, { persistent = false, locksAvailable = 
             },
         },
         'src/lib/api': { ApiError },
-        './contentRange': ranges,
+        'src/lib/utils/contentRange': ranges,
         './diskDownloadFile': disk,
         './memoryDownloadFile': memory,
         './downloadsDatabase': { DownloadsDatabase: Database },
-        './network': network,
+        'src/lib/utils/network': network,
     });
 
     return {

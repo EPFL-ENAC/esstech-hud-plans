@@ -1,11 +1,11 @@
 import { authFetch } from 'src/lib/auth';
 import { ApiError } from 'src/lib/api';
-import { parseContentRange } from './contentRange';
+import { parseContentRange } from 'src/lib/utils/contentRange';
 import type { DownloadFile } from './downloadFile';
 import { DiskDownloadFile } from './diskDownloadFile';
 import { MemoryDownloadFile } from './memoryDownloadFile';
 import { DownloadsDatabase } from './downloadsDatabase';
-import { readResponseChunks, waitForNetwork, withAbortController } from './network';
+import { readResponseChunks, waitForNetwork, withAbortController } from 'src/lib/utils/network';
 import type { DownloadMetadata, DownloadOptions } from './types';
 
 const activeMemoryDownloads = new Set<string>();

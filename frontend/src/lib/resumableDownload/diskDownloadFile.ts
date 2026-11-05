@@ -1,5 +1,5 @@
 import { DownloadFile } from './downloadFile';
-import { sha256Hex } from './sha256Hex';
+import { sha256Hex } from 'src/lib/utils/sha256Hex';
 
 export class DiskDownloadFile extends DownloadFile {
     private constructor(
