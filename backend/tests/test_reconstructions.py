@@ -1439,7 +1439,7 @@ def test_reconstruction_assets_support_byte_ranges(
 
     response = client.get(url, headers={"Range": f"bytes={len(content)}-"})
     assert response.status_code == 416
-    assert response.headers["content-range"] == f"*/{len(content)}"
+    assert response.headers["content-range"] == f"bytes */{len(content)}"
 
 
 @pytest.mark.parametrize(

@@ -1,33 +1,30 @@
-import asyncio
-
-from prefect.runner import Runner
+from prefect import serve
 
 from api.config import config
 from api.lib.workflows.splat_generation import splat_generation_flow
 from api.lib.workflows.tus_cleanup import tus_cleanup_flow
 
 
-async def serve_workflows() -> None:
-    runner = Runner(
-        pause_on_shutdown=False,
-        limit=config.PREFECT_SPLAT_GENERATION_CONCURRENCY
-        + config.PREFECT_TUS_CLEANUP_CONCURRENCY,
-    )
-    # Keep the flow objects available so cancellation hooks need no reload.
-    await runner.aadd_flow(
-        splat_generation_flow,
+def serve_workflows() -> None:
+    reconstruction = splat_generation_flow.to_deployment(
         name="default",
         concurrency_limit=config.PREFECT_SPLAT_GENERATION_CONCURRENCY,
     )
-    await runner.aadd_flow(
-        tus_cleanup_flow,
+    cleanup = tus_cleanup_flow.to_deployment(
         name="tus-cleanup",
         interval=86400,
         concurrency_limit=config.PREFECT_TUS_CLEANUP_CONCURRENCY,
     )
 
-    await runner.start()
+    # Runner-wide cap; the sum keeps both per-flow limits reachable
+    serve(
+        reconstruction,
+        cleanup,
+        pause_on_shutdown=False,
+        limit=config.PREFECT_SPLAT_GENERATION_CONCURRENCY
+        + config.PREFECT_TUS_CLEANUP_CONCURRENCY,
+    )
 
 
 if __name__ == "__main__":
-    asyncio.run(serve_workflows())
+    serve_workflows()
