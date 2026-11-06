@@ -315,10 +315,15 @@ export async function getReconstructionSplat(
     return blob.arrayBuffer();
 }
 
-export interface ReconstructionPointCloudMeta {
-    count: number;
+export interface ReconstructionViewParams {
+    /** Rigid splat-space to plan-frame transform, row-major 4x4. */
+    matrix: number[][];
+    /** Centimetres per plan unit, null when the cameras cannot give a height. */
+    scale: number | null;
+    /** Camera envelope radius in plan units, used to frame the splat view. */
+    radius: number;
     bounds: [[number, number, number], [number, number, number]];
-    cm_per_unit: number | null;
+    count: number;
 }
 
 export async function getReconstructionPointCloud(
@@ -337,15 +342,15 @@ export async function getReconstructionPointCloud(
     return blob.arrayBuffer();
 }
 
-export function getReconstructionPointCloudMeta(
+export function getReconstructionViewParams(
     buildingId: string,
     reconstructionId: string,
     signal?: AbortSignal | null,
-): Promise<ReconstructionPointCloudMeta> {
+): Promise<ReconstructionViewParams> {
     const init: RequestInit = {};
     if (signal !== undefined && signal !== null) init.signal = signal;
     return requestJson(
-        `/buildings/${encodeURIComponent(buildingId)}/reconstructions/${encodeURIComponent(reconstructionId)}/point-cloud/meta`,
+        `/buildings/${encodeURIComponent(buildingId)}/reconstructions/${encodeURIComponent(reconstructionId)}/view-params`,
         init,
     );
 }

@@ -48,7 +48,9 @@
                         <q-card flat bordered class="overflow-hidden">
                             <SplatRenderer
                                 :key="`${buildingId}/${reconstructionId}/${renderAttempt}`"
-                                :splat-data="data"
+                                :splat-data="data.buffer"
+                                :plan-matrix="data.viewParams.matrix"
+                                :radius="data.viewParams.radius"
                                 @ready="rendering = false"
                                 @error="onRenderError"
                             />
@@ -66,7 +68,7 @@
                         class="full-width q-mt-md"
                         unelevated
                         no-caps
-                        @click="downloadPly(data)"
+                        @click="downloadPly(data.buffer)"
                     />
                 </template>
             </template>

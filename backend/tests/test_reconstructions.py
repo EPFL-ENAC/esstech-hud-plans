@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid4
 
+import numpy as np
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -1259,18 +1260,16 @@ _ASSET_NOT_FOUND_DETAILS = {
     "video": "Reconstruction video not found",
     "splat": "Reconstruction splat not found",
     "point-cloud": "Reconstruction point cloud not found",
-    "point-cloud/meta": "Reconstruction point cloud meta not found",
 }
 
 _ASSET_MEDIA_TYPES = {
     "video": "video/mp4",
     "splat": "application/octet-stream",
     "point-cloud": "application/octet-stream",
-    "point-cloud/meta": "application/json",
 }
 
 
-@pytest.fixture(params=["video", "splat", "point-cloud", "point-cloud/meta"])
+@pytest.fixture(params=["video", "splat", "point-cloud"])
 def reconstruction_asset(
     request: pytest.FixtureRequest,
     reconstruction_api: tuple[TestClient, UUID],
@@ -1294,7 +1293,6 @@ def reconstruction_asset(
         path = {
             "splat": splat_path,
             "point-cloud": splat_path.with_name(POINT_CLOUD_BINARY_FILENAME),
-            "point-cloud/meta": splat_path.with_name(POINT_CLOUD_META_FILENAME),
         }[artifact]
         _set_artifact_path(
             client,
@@ -1327,7 +1325,7 @@ def test_reconstruction_assets_serve_inline_bytes_when_available(
 
 @pytest.mark.parametrize(
     "reconstruction_asset",
-    ["splat", "point-cloud", "point-cloud/meta"],
+    ["splat", "point-cloud"],
     indirect=True,
 )
 @pytest.mark.parametrize(
@@ -1652,19 +1650,22 @@ def _completed_reconstruction_with_splat(
 def _fake_point_cloud_colmap(monkeypatch: pytest.MonkeyPatch) -> None:
     from test_point_cloud import _fake_geometric_data
 
+    fake = lambda sparse_dir: _fake_geometric_data()
     monkeypatch.setattr(
-        "api.lib.compute.colmap_geometric_data.colmap_compute_geometric_data",
-        lambda sparse_dir: _fake_geometric_data(),
+        "api.lib.compute.colmap_geometric_data.colmap_compute_geometric_data", fake
     )
+    monkeypatch.setattr(reconstruction_views, "colmap_compute_geometric_data", fake)
+
+
+def _create_sparse_model(splat_path: Path) -> None:
+    (splat_path.parent / "colmap" / "sparse" / "0").mkdir(parents=True)
 
 
 @pytest.mark.parametrize("foreign_stored_path", [False, True])
-@pytest.mark.parametrize("first_artifact", ["point-cloud", "point-cloud/meta"])
 def test_missing_point_cloud_artifacts_are_generated_on_request(
     reconstruction_api: tuple[TestClient, UUID],
     monkeypatch: pytest.MonkeyPatch,
     foreign_stored_path: bool,
-    first_artifact: str,
 ) -> None:
     client, building_id = reconstruction_api
     reconstruction_id, splat_path = _completed_reconstruction_with_splat(
@@ -1673,6 +1674,7 @@ def test_missing_point_cloud_artifacts_are_generated_on_request(
     )
     monkeypatch.setattr(config, "PLAN_DENSITY_THRESHOLD", 1.0)
     _fake_point_cloud_colmap(monkeypatch)
+    _create_sparse_model(splat_path)
     if foreign_stored_path:
         _set_artifact_path(
             client,
@@ -1692,32 +1694,84 @@ def test_missing_point_cloud_artifacts_are_generated_on_request(
     )
     url = f"/buildings/{BUILDING_ID}/reconstructions/{reconstruction_id}"
 
-    second_artifact = (
-        "point-cloud/meta" if first_artifact == "point-cloud" else "point-cloud"
-    )
-    responses = {
-        artifact: client.get(f"{url}/{artifact}")
-        for artifact in (first_artifact, second_artifact)
-    }
-    binary_response = responses["point-cloud"]
-    meta_response = responses["point-cloud/meta"]
+    binary_response = client.get(f"{url}/point-cloud")
+    view_response = client.get(f"{url}/view-params")
 
     assert calls == [(splat_path, splat_path.parent / "colmap")]
     assert binary_response.status_code == 200
     assert binary_response.headers["content-type"] == "application/octet-stream"
-    assert meta_response.status_code == 200
-    assert meta_response.headers["content-type"] == "application/json"
     binary_path = splat_path.with_name(POINT_CLOUD_BINARY_FILENAME)
     meta_path = splat_path.with_name(POINT_CLOUD_META_FILENAME)
     assert binary_response.content == binary_path.read_bytes()
     assert binary_path.read_bytes() == struct.pack("<6f", 1.0, 2.0, 2.0, -4.0, 0.5, 2.0)
     meta = json.loads(meta_path.read_text())
-    assert meta_response.content == meta_path.read_bytes()
     assert meta["count"] == 2
-    assert meta["cm_per_unit"] == pytest.approx(170.0 * 0.9 / 3.0)
     assert sorted(item.name for item in splat_path.parent.iterdir()) == sorted(
-        ["splat.ply", POINT_CLOUD_BINARY_FILENAME, POINT_CLOUD_META_FILENAME]
+        ["colmap", "splat.ply", POINT_CLOUD_BINARY_FILENAME, POINT_CLOUD_META_FILENAME]
     )
+
+    view = view_response.json()
+    assert view_response.status_code == 200
+    assert view["matrix"] == np.eye(4).tolist()
+    assert view["radius"] == pytest.approx(2.0)
+    assert view["scale"] == pytest.approx(170.0 * 0.9 / 3.0)
+    assert view["bounds"] == [[-4.0, 0.5, 2.0], [1.0, 2.0, 2.0]]
+    assert view["count"] == 2
+
+
+def test_view_params_require_a_completed_splat(
+    reconstruction_api: tuple[TestClient, UUID],
+) -> None:
+    client, building_id = reconstruction_api
+
+    created = _submit_reconstruction(client, building_id).json()
+
+    response = client.get(
+        f"/buildings/{BUILDING_ID}/reconstructions/{created['id']}/view-params"
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Reconstruction view parameters not found"}
+
+
+def test_view_params_require_a_colmap_model(
+    reconstruction_api: tuple[TestClient, UUID],
+) -> None:
+    client, building_id = reconstruction_api
+    reconstruction_id, _ = _completed_reconstruction_with_splat(client, building_id)
+
+    response = client.get(
+        f"/buildings/{BUILDING_ID}/reconstructions/{reconstruction_id}/view-params"
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "COLMAP sparse reconstruction not found"}
+
+
+def test_view_params_answer_without_scale_when_generation_fails(
+    reconstruction_api: tuple[TestClient, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, building_id = reconstruction_api
+    reconstruction_id, splat_path = _completed_reconstruction_with_splat(
+        client,
+        building_id,
+    )
+    _fake_point_cloud_colmap(monkeypatch)
+    _create_sparse_model(splat_path)
+
+    def fail(splat_path: Path, colmap_directory: Path) -> None:
+        raise RuntimeError("conversion failed")
+
+    monkeypatch.setattr(point_cloud_compute, "generate_plan_point_cloud", fail)
+
+    response = client.get(
+        f"/buildings/{BUILDING_ID}/reconstructions/{reconstruction_id}/view-params"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["scale"] is None
+    assert response.json()["count"] == 0
 
 
 def test_point_cloud_artifacts_are_generated_once_across_requests(
@@ -1731,6 +1785,7 @@ def test_point_cloud_artifacts_are_generated_once_across_requests(
     )
     monkeypatch.setattr(config, "PLAN_DENSITY_THRESHOLD", 1.0)
     _fake_point_cloud_colmap(monkeypatch)
+    _create_sparse_model(splat_path)
     calls: list[Path] = []
     original = point_cloud_compute.generate_plan_point_cloud
 
@@ -1744,7 +1799,7 @@ def test_point_cloud_artifacts_are_generated_once_across_requests(
     url = f"/buildings/{BUILDING_ID}/reconstructions/{reconstruction_id}"
 
     assert client.get(f"{url}/point-cloud").status_code == 200
-    assert client.get(f"{url}/point-cloud/meta").status_code == 200
+    assert client.get(f"{url}/view-params").status_code == 200
     assert client.get(f"{url}/point-cloud").status_code == 200
 
     assert calls == [splat_path]
@@ -1762,12 +1817,9 @@ def test_point_cloud_generation_failure_answers_not_found(
     url = f"/buildings/{BUILDING_ID}/reconstructions/{reconstruction_id}"
 
     binary_response = client.get(f"{url}/point-cloud")
-    meta_response = client.get(f"{url}/point-cloud/meta")
 
     assert binary_response.status_code == 404
     assert binary_response.json() == {"detail": "File not found"}
-    assert meta_response.status_code == 404
-    assert meta_response.json() == {"detail": "File not found"}
     assert not splat_path.with_name(POINT_CLOUD_BINARY_FILENAME).exists()
     assert not splat_path.with_name(POINT_CLOUD_META_FILENAME).exists()
 
@@ -1783,6 +1835,7 @@ def test_concurrent_point_cloud_requests_generate_once(
     )
     monkeypatch.setattr(config, "PLAN_DENSITY_THRESHOLD", 1.0)
     _fake_point_cloud_colmap(monkeypatch)
+    _create_sparse_model(splat_path)
     started = threading.Event()
     release = threading.Event()
     calls: list[Path] = []
@@ -1801,15 +1854,15 @@ def test_concurrent_point_cloud_requests_generate_once(
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         binary_request = pool.submit(client.get, f"{url}/point-cloud")
-        meta_request = pool.submit(client.get, f"{url}/point-cloud/meta")
+        view_request = pool.submit(client.get, f"{url}/view-params")
         assert started.wait(timeout=30), "generation never started"
         assert len(calls) == 1
         release.set()
         binary_response = binary_request.result(timeout=30)
-        meta_response = meta_request.result(timeout=30)
+        view_response = view_request.result(timeout=30)
 
     assert binary_response.status_code == 200
-    assert meta_response.status_code == 200
+    assert view_response.status_code == 200
     assert (
         binary_response.content
         == splat_path.with_name(POINT_CLOUD_BINARY_FILENAME).read_bytes()

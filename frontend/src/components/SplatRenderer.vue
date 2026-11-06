@@ -9,6 +9,10 @@ const { t } = useI18n();
 
 const props = defineProps<{
     splatData: ArrayBuffer;
+    /** Row-major splat-space to plan-frame transform. */
+    planMatrix: number[][];
+    /** Camera envelope radius in plan units. */
+    radius: number;
 }>();
 const emit = defineEmits<{
     ready: [];
@@ -26,6 +30,32 @@ onMounted(() => {
 
             const scene = new THREE.Scene();
             const camera = new THREE.PerspectiveCamera(60, 1, 0.01, 1000);
+            // Plan frame is Z-up and the mesh carries the plan matrix.
+            camera.up.set(0, 0, 1);
+            const [row0, row1, row2, row3] = props.planMatrix as [
+                number[],
+                number[],
+                number[],
+                number[],
+            ];
+            const planMatrix = new THREE.Matrix4().set(
+                row0[0]!,
+                row0[1]!,
+                row0[2]!,
+                row0[3]!,
+                row1[0]!,
+                row1[1]!,
+                row1[2]!,
+                row1[3]!,
+                row2[0]!,
+                row2[1]!,
+                row2[2]!,
+                row2[3]!,
+                row3[0]!,
+                row3[1]!,
+                row3[2]!,
+                row3[3]!,
+            );
             let renderer: THREE.WebGLRenderer | null = null;
             let controls: OrbitControls | null = null;
             let mesh: SplatMesh | null = null;
@@ -67,37 +97,9 @@ onMounted(() => {
                         mesh.dispose();
                         return;
                     }
-                    mesh.quaternion.set(1, 0, 0, 0);
+                    mesh.matrixAutoUpdate = false;
+                    mesh.matrix.copy(planMatrix);
                     mesh.updateMatrixWorld(true);
-                    // getBoundingBox() takes the min/max over every splat, so a
-                    // single splat with a non-finite center poisons the whole box.
-                    // Compute the bounds only from finite splat centers instead.
-                    const min = new THREE.Vector3(
-                        Number.POSITIVE_INFINITY,
-                        Number.POSITIVE_INFINITY,
-                        Number.POSITIVE_INFINITY,
-                    );
-                    const max = new THREE.Vector3(
-                        Number.NEGATIVE_INFINITY,
-                        Number.NEGATIVE_INFINITY,
-                        Number.NEGATIVE_INFINITY,
-                    );
-                    mesh.packedSplats.forEachSplat((_, center) => {
-                        if (
-                            Number.isFinite(center.x) &&
-                            Number.isFinite(center.y) &&
-                            Number.isFinite(center.z)
-                        ) {
-                            min.min(center);
-                            max.max(center);
-                        }
-                    });
-                    if (min.x > max.x || min.y > max.y || min.z > max.z) {
-                        throw new Error('The splat contains no points');
-                    }
-                    const bounds = new THREE.Box3(min, max).applyMatrix4(mesh.matrixWorld);
-                    const sphere = bounds.getBoundingSphere(new THREE.Sphere());
-                    if (!Number.isFinite(sphere.radius)) throw new Error('Invalid splat bounds');
 
                     renderer = new THREE.WebGLRenderer();
                     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -110,7 +112,7 @@ onMounted(() => {
                     scene.add(spark, mesh);
                     controls = new OrbitControls(camera, renderer.domElement);
                     controls.enableDamping = true;
-                    controls.target.copy(sphere.center);
+                    controls.target.set(0, 0, 0);
 
                     const resize = (): void => {
                         if (!renderer || !host) return;
@@ -122,12 +124,18 @@ onMounted(() => {
                         needsSort = true;
                     };
                     resize();
-                    const radius = Math.max(sphere.radius, 0.01);
+                    const radius = Math.max(props.radius, 0.01);
                     const verticalFov = THREE.MathUtils.degToRad(camera.fov);
                     const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * camera.aspect);
                     const distance =
                         (radius / Math.sin(Math.min(verticalFov, horizontalFov) / 2)) * 1.2;
-                    camera.position.copy(sphere.center).add(new THREE.Vector3(0, 0, distance));
+                    // The plan is centred on the origin, so a fixed elevation frames it.
+                    const elevation = THREE.MathUtils.degToRad(30);
+                    camera.position.set(
+                        0,
+                        -distance * Math.cos(elevation),
+                        distance * Math.sin(elevation),
+                    );
                     camera.near = Math.max(radius / 1000, 0.001);
                     camera.far = Math.max(distance + radius * 100, 100);
                     camera.updateProjectionMatrix();

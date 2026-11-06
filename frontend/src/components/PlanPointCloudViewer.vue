@@ -4,12 +4,14 @@ import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from
 import { useI18n } from 'vue-i18n';
 import { useAsyncResultCollection } from 'unwrapped/vue';
 import { AsyncResult } from 'unwrapped/core';
-import type { ReconstructionPointCloudMeta } from 'src/lib/buildings';
+import type { ReconstructionViewParams } from 'src/lib/buildings';
 import type { ZAxisRange } from 'src/lib/maths/zDistribution';
 import PlanPointDensityBar from 'src/components/PlanPointDensityBar.vue';
 
 const PAN_MARGIN = 0.2;
-const FIT_MARGIN = 1.1;
+// The camera envelope radius frames the plan, with the same 20 % breathing room
+// the 3D splat view adds to its camera distance.
+const FIT_MARGIN = 1.2;
 const ZOOM_OUT_FACTOR = 0.5;
 const ZOOM_IN_FACTOR = 40;
 const ROTATE_SPEED = 0.01;
@@ -27,14 +29,9 @@ const MIN_SPAN = 1e-6;
 /** Clip plane constant that keeps every point; the plane count must stay fixed. */
 const CLIP_OPEN = 1e6;
 
-const DEFAULT_BOUNDS: ReconstructionPointCloudMeta['bounds'] = [
-    [-1, -1, -1],
-    [1, 1, 1],
-];
-
 const props = defineProps<{
     buffer: ArrayBuffer;
-    meta: ReconstructionPointCloudMeta | null;
+    viewParams: ReconstructionViewParams;
     reconstructionId: string;
     /** Fill the available space instead of a fixed square viewer size. */
     fill?: boolean;
@@ -60,7 +57,6 @@ const clipPlanes = [minPlane, maxPlane];
 const zRange = ref<ZAxisRange | null>(null);
 
 let resizeObserver: ResizeObserver | null = null;
-let bounds: ReconstructionPointCloudMeta['bounds'] = DEFAULT_BOUNDS;
 let frustumSize = 2;
 let fitZoom = 1;
 const view = { targetX: 0, targetY: 0, rotation: 0, zoom: 1 };
@@ -108,48 +104,20 @@ const pointOpacity = ref(
 );
 const scaleBarWidthPx = ref(0);
 const hasScale = computed(() => {
-    const cmPerUnit = props.meta?.cm_per_unit;
-    return cmPerUnit != null && cmPerUnit > 0;
+    const scale = props.viewParams.scale;
+    return scale != null && scale > 0;
 });
 
-function boundsFromBuffer(buffer: ArrayBuffer): ReconstructionPointCloudMeta['bounds'] | null {
-    const positions = new Float32Array(buffer);
-    if (positions.length < 3) return null;
-    let minX = Infinity;
-    let minY = Infinity;
-    let minZ = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    let maxZ = -Infinity;
-    for (let i = 0; i + 2 < positions.length; i += 3) {
-        const x = positions[i]!;
-        const y = positions[i + 1]!;
-        const z = positions[i + 2]!;
-        minX = Math.min(minX, x);
-        minY = Math.min(minY, y);
-        minZ = Math.min(minZ, z);
-        maxX = Math.max(maxX, x);
-        maxY = Math.max(maxY, y);
-        maxZ = Math.max(maxZ, z);
-    }
-    return [
-        [minX, minY, minZ],
-        [maxX, maxY, maxZ],
-    ];
-}
-
-function resolveBounds(): ReconstructionPointCloudMeta['bounds'] {
-    return props.meta?.bounds ?? boundsFromBuffer(props.buffer) ?? DEFAULT_BOUNDS;
+function framingRadius(): number {
+    return Math.max(props.viewParams.radius, MIN_SPAN);
 }
 
 function applyBoundsAndCamera(): void {
     if (!camera) return;
-    bounds = resolveBounds();
-    const [[minX, minY, minZ], [maxX, maxY, maxZ]] = bounds;
-    const spanX = Math.max(maxX - minX, MIN_SPAN);
-    const spanY = Math.max(maxY - minY, MIN_SPAN);
+    // Framing comes from the camera radius; the cloud bounds only give the depth.
+    const [[, , minZ], [, , maxZ]] = props.viewParams.bounds;
     const depth = Math.max(maxZ - minZ, MIN_SPAN);
-    frustumSize = Math.max(spanX, spanY);
+    frustumSize = 2 * framingRadius();
     const distance = maxZ + depth * 0.5 + 1;
     camera.position.set(0, 0, distance);
     camera.near = 0.1;
@@ -175,11 +143,8 @@ function computeFitZoom(): void {
     if (!container.value) return;
     const width = container.value.clientWidth || FIXED_VIEWER_SIZE;
     const height = container.value.clientHeight || FIXED_VIEWER_SIZE;
-    const [[minX, minY], [maxX, maxY]] = bounds;
-    const spanX = Math.max(maxX - minX, MIN_SPAN);
-    const spanY = Math.max(maxY - minY, MIN_SPAN);
-    const visibleWidth = frustumSize * (width / height);
-    fitZoom = Math.min(frustumSize / (spanY * FIT_MARGIN), visibleWidth / (spanX * FIT_MARGIN));
+    // The framed square is the radius disc, so the limiting axis sets the zoom.
+    fitZoom = Math.min(1, width / height) / FIT_MARGIN;
 }
 
 function applyView(): void {
@@ -213,11 +178,9 @@ function setZoom(zoom: number): void {
 }
 
 function clampTarget(): void {
-    const [[minX, minY], [maxX, maxY]] = bounds;
-    const marginX = (maxX - minX) * PAN_MARGIN;
-    const marginY = (maxY - minY) * PAN_MARGIN;
-    view.targetX = THREE.MathUtils.clamp(view.targetX, minX - marginX, maxX + marginX);
-    view.targetY = THREE.MathUtils.clamp(view.targetY, minY - marginY, maxY + marginY);
+    const limit = framingRadius() * (1 + PAN_MARGIN);
+    view.targetX = THREE.MathUtils.clamp(view.targetX, -limit, limit);
+    view.targetY = THREE.MathUtils.clamp(view.targetY, -limit, limit);
 }
 
 function panBy(dx: number, dy: number): void {
@@ -235,17 +198,17 @@ function panBy(dx: number, dy: number): void {
 }
 
 function resetView(): void {
-    const [[minX, minY], [maxX, maxY]] = bounds;
     computeFitZoom();
-    view.targetX = (minX + maxX) / 2;
-    view.targetY = (minY + maxY) / 2;
+    // The plan frame puts the camera centre at the origin, so it is the view centre.
+    view.targetX = 0;
+    view.targetY = 0;
     view.rotation = 0;
     setZoom(fitZoom);
     applyView();
 }
 
 function updateScaleBar(): void {
-    const cmPerUnit = props.meta?.cm_per_unit;
+    const cmPerUnit = props.viewParams.scale;
     if (!renderer || cmPerUnit == null || cmPerUnit <= 0) {
         scaleBarWidthPx.value = 0;
         return;
@@ -432,7 +395,7 @@ watch(
 );
 
 watch(
-    () => props.meta,
+    () => props.viewParams,
     () => {
         applyBoundsAndCamera();
         resetView();
@@ -493,7 +456,7 @@ watch(zRange, (value) => {
             <plan-point-density-bar
                 v-model="zRange"
                 :buffer="buffer"
-                :meta="meta"
+                :view-params="viewParams"
                 :reconstruction-id="reconstructionId"
             />
         </div>

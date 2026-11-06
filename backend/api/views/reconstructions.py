@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import mimetypes
 from collections.abc import AsyncIterator
@@ -7,6 +8,7 @@ from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
+import numpy as np
 from fastapi import Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.routing import APIRouter
@@ -18,6 +20,9 @@ from api.lib.compute.point_cloud import (
     POINT_CLOUD_BINARY_FILENAME,
     POINT_CLOUD_META_FILENAME,
     generate_plan_point_cloud_if_missing,
+    plan_scale,
+    read_plan_positions,
+    transform_points,
 )
 from api.lib.workflows import common as workflow_common
 from api.lib.workflows.common import (
@@ -115,37 +120,72 @@ def get_reconstruction_video(
 
 
 @router.get(
-    "/{reconstruction_id}/blueprint-geometry",
+    "/{reconstruction_id}/view-params",
     status_code=status.HTTP_200_OK,
 )
-def get_reconstruction_blueprint_geometry(
+def get_reconstruction_view_params(
     reconstruction: CurrentReconstruction,
 ) -> JSONResponse:
-    """Geometric info for the blueprint top-down view, computed from COLMAP output."""
+    """Plan frame, scale and framing radius shared by both plan viewers.
+
+    The 3D view applies ``matrix`` to the raw splat and the 2D view reads the
+    baked point cloud, so both come from this single response. ``scale`` needs
+    the plan-frame floor, which only the baked positions give, hence the point
+    cloud artifact generation below.
+    """
     if (
         reconstruction.status != ReconstructionStatus.COMPLETED
         or not reconstruction.splat_path
     ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Reconstruction blueprint geometry not found",
+            detail="Reconstruction view parameters not found",
         )
 
-    sparse_dir = (
-        workflow_common.WORKFLOW_DATA_DIRECTORY.resolve()
-        / reconstruction.id.hex
-        / "colmap"
-        / "sparse"
-        / "0"
-    )
-    if not sparse_dir.is_dir():
+    artifact = SplatGenerationArtifact.from_local_reconstruction(reconstruction)
+    if not artifact.colmap_sparse_directory.is_dir():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="COLMAP sparse reconstruction not found",
         )
 
-    geometric_data = colmap_compute_geometric_data(str(sparse_dir))
-    return JSONResponse(content=geometric_data.model_dump(mode="json"))
+    with file_storage_errors(workflow_common.WORKFLOW_DATA_DIRECTORY):
+        try:
+            generate_plan_point_cloud_if_missing(
+                artifact.splat_path,
+                artifact.colmap_directory,
+            )
+        except Exception:
+            logger.exception(
+                "On-demand plan point cloud generation failed for reconstruction %s",
+                reconstruction.id,
+            )
+
+        geometric_data = colmap_compute_geometric_data(
+            str(artifact.colmap_sparse_directory)
+        )
+        plan_cameras = transform_points(
+            np.asarray(geometric_data.positions), geometric_data.matrix
+        )
+        meta = _read_point_cloud_meta(artifact.splat_path)
+        positions = read_plan_positions(artifact.splat_path)
+
+    return JSONResponse(
+        content={
+            "matrix": geometric_data.matrix,
+            "scale": plan_scale(positions, plan_cameras),
+            "radius": geometric_data.radius,
+            "bounds": meta["bounds"],
+            "count": meta["count"],
+        }
+    )
+
+
+def _read_point_cloud_meta(splat_path: Path) -> dict:
+    meta_path = splat_path.with_name(POINT_CLOUD_META_FILENAME)
+    if not meta_path.is_file():
+        return {"count": 0, "bounds": [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]}
+    return json.loads(meta_path.read_text())
 
 
 @router.get("/{reconstruction_id}/splat", response_class=FileResponse)
@@ -200,39 +240,6 @@ def get_reconstruction_point_cloud(
             artifact.root_directory / POINT_CLOUD_BINARY_FILENAME,
             root_directory=artifact.root_directory,
             media_type="application/octet-stream",
-        )
-
-
-@router.get("/{reconstruction_id}/point-cloud/meta", response_class=FileResponse)
-def get_reconstruction_point_cloud_meta(
-    reconstruction: CurrentReconstruction,
-) -> FileResponse:
-    if (
-        reconstruction.status != ReconstructionStatus.COMPLETED
-        or not reconstruction.splat_path
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Reconstruction point cloud meta not found",
-        )
-
-    with file_storage_errors(workflow_common.WORKFLOW_DATA_DIRECTORY):
-        artifact = SplatGenerationArtifact.from_local_reconstruction(reconstruction)
-        try:
-            generate_plan_point_cloud_if_missing(
-                artifact.splat_path,
-                artifact.colmap_directory,
-            )
-        except Exception:
-            logger.exception(
-                "On-demand plan point cloud generation failed for reconstruction %s",
-                reconstruction.id,
-            )
-
-        return inline_file_response(
-            artifact.root_directory / POINT_CLOUD_META_FILENAME,
-            root_directory=artifact.root_directory,
-            media_type="application/json",
         )
 
 

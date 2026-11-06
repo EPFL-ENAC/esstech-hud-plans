@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import type { ReconstructionPointCloudMeta } from 'src/lib/buildings';
+import type { ReconstructionViewParams } from 'src/lib/buildings';
 import {
     Z_BIN_COUNT,
     barRatio,
@@ -20,7 +20,7 @@ const BAR_COLOR = '#dcdce2';
 
 const props = defineProps<{
     buffer: ArrayBuffer;
-    meta: ReconstructionPointCloudMeta | null;
+    viewParams: ReconstructionViewParams;
     reconstructionId: string;
 }>();
 
@@ -33,7 +33,7 @@ const canvas = useTemplateRef<HTMLCanvasElement>('canvas');
 const bar = useTemplateRef<HTMLDivElement>('bar');
 let resizeObserver: ResizeObserver | null = null;
 
-const scale = computed(() => props.meta?.cm_per_unit ?? null);
+const scale = computed(() => props.viewParams.scale);
 const axis = computed<ZAxisRange | null>(() => distribution.value?.axis ?? null);
 const axisMin = computed(() => axis.value?.min ?? 0);
 const axisMax = computed(() => axis.value?.max ?? 0);
@@ -146,8 +146,8 @@ function draw(): void {
 }
 
 function rebuild(): void {
-    const bounds = props.meta?.bounds;
-    const raw = bounds ? { min: bounds[0][2], max: bounds[1][2] } : null;
+    const bounds = props.viewParams.bounds;
+    const raw = { min: bounds[0][2], max: bounds[1][2] };
     const next = computeZDistribution(new Float32Array(props.buffer), raw);
     distribution.value = next;
     // A flat or empty cloud has no axis to select on: no range means "keep every point".
@@ -184,7 +184,7 @@ onBeforeUnmount(() => {
     resizeObserver = null;
 });
 
-watch(() => [props.buffer, props.meta, props.reconstructionId], rebuild);
+watch(() => [props.buffer, props.viewParams, props.reconstructionId], rebuild);
 </script>
 
 <template>

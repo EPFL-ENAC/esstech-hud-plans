@@ -23,28 +23,30 @@ _POINT_CLOUD_LOCKS_GUARD = threading.Lock()
 logger = logging.getLogger(__name__)
 
 
+def transform_points(points: np.ndarray, matrix: np.ndarray) -> np.ndarray:
+    """Apply a 4x4 rigid transform to (N, 3) points."""
+    matrix = np.asarray(matrix, dtype=np.float64)
+    return np.asarray(points, dtype=np.float64) @ matrix[:3, :3].T + matrix[:3, 3]
+
+
 def compute_plan_point_cloud(
     means: np.ndarray,
     scales: np.ndarray,
     opacities: np.ndarray,
-    center: np.ndarray,
-    world_rotation: np.ndarray,
+    matrix: np.ndarray,
     radius: float,
     threshold: float,
-    camera_positions: np.ndarray | None = None,
-) -> tuple[np.ndarray, float | None]:
+) -> np.ndarray:
     """Filter splats by decoded density and bake positions into the plan frame.
 
     The 3DGS PLY stores opacity as a logit and scales as log-scales; the
     frontend filter sees Spark-decoded values (sigmoid/exp), so decode the
     same way and keep splats with density >= threshold * radius**3. The plan
-    frame is world_rotation.T @ (p - center): the frontend transposes
-    world_rotation before applying it to the centered position. Trained
-    splats can hold non-finite positions, and a degenerate reconstruction
-    makes the whole frame non-finite, so drop them before the stats below.
+    frame comes from ``plan_matrix``: the same matrix the viewers apply, so
+    the point cloud and the splat cannot disagree. Trained splats can hold
+    non-finite positions, and a degenerate reconstruction makes the whole
+    frame non-finite, so drop them.
     """
-    center = np.asarray(center, dtype=np.float64)
-    world_rotation = np.asarray(world_rotation, dtype=np.float64)
     means = np.asarray(means, dtype=np.float64)
     scales = np.asarray(scales, dtype=np.float64)
     opacities = np.asarray(opacities, dtype=np.float64).reshape(-1)
@@ -55,14 +57,12 @@ def compute_plan_point_cloud(
     densities = decoded_opacities / np.prod(decoded_scales, axis=-1)
     keep = densities >= threshold * radius**3
 
-    plan_positions = (world_rotation.T @ (means[keep] - center).T).T
+    plan_positions = transform_points(means[keep], matrix)
     plan_positions = plan_positions[np.isfinite(plan_positions).all(axis=1)]
-    floor_z = _floor_z_offset(plan_positions)
-    cm_per_unit = _cm_per_unit(camera_positions, center, world_rotation, floor_z)
-    return plan_positions.astype(np.float32), cm_per_unit
+    return plan_positions.astype(np.float32)
 
 
-def _floor_z_offset(plan_positions: np.ndarray) -> float | None:
+def floor_z_offset(plan_positions: np.ndarray) -> float | None:
     """Mode of the plan-frame z histogram, as frontend autoDetectFloorOffset."""
     if plan_positions.size == 0:
         return None
@@ -81,21 +81,29 @@ def _floor_z_offset(plan_positions: np.ndarray) -> float | None:
     return min_z + mode_bin * bin_size + bin_size / 2
 
 
-def _cm_per_unit(
-    camera_positions: np.ndarray | None,
-    center: np.ndarray,
-    world_rotation: np.ndarray,
-    floor_z: float | None,
+def plan_scale(
+    plan_positions: np.ndarray,
+    plan_camera_positions: np.ndarray | None,
 ) -> float | None:
     """Frontend scale-bar heuristic: cameraman height over camera-to-floor distance."""
-    if camera_positions is None or len(camera_positions) == 0 or floor_z is None:
+    floor_z = floor_z_offset(plan_positions)
+    if floor_z is None or plan_camera_positions is None:
         return None
-    camera_positions = np.asarray(camera_positions, dtype=np.float64)
-    plan_cameras = (world_rotation.T @ (camera_positions - center).T).T
-    height = float(np.mean(plan_cameras[:, 2])) - floor_z
+    plan_camera_positions = np.asarray(plan_camera_positions, dtype=np.float64)
+    if len(plan_camera_positions) == 0:
+        return None
+    height = float(np.mean(plan_camera_positions[:, 2])) - floor_z
     if height == 0:
         return None
     return CAMERAMAN_HEIGHT_CM * CAMERA_HEIGHT_FRACTION / height
+
+
+def read_plan_positions(splat_path: Path) -> np.ndarray:
+    """Plan-frame positions baked next to the splat, as (N, 3) floats."""
+    path = splat_path.with_name(POINT_CLOUD_BINARY_FILENAME)
+    if not path.is_file():
+        return np.zeros((0, 3), dtype=np.float32)
+    return np.frombuffer(path.read_bytes(), dtype="<f4").reshape(-1, 3)
 
 
 def generate_plan_point_cloud(splat_path: Path, colmap_directory: Path) -> None:
@@ -123,15 +131,13 @@ def generate_plan_point_cloud(splat_path: Path, colmap_directory: Path) -> None:
     geometric_data = colmap_compute_geometric_data(
         str(colmap_directory / "sparse" / "0")
     )
-    positions, cm_per_unit = compute_plan_point_cloud(
+    positions = compute_plan_point_cloud(
         means,
         scales,
         opacities,
-        np.asarray(geometric_data.center),
-        np.asarray(geometric_data.world_rotation),
+        geometric_data.matrix,
         geometric_data.radius,
         config.PLAN_DENSITY_THRESHOLD,
-        camera_positions=np.asarray(geometric_data.positions),
     )
 
     if positions.shape[0] == 0:
@@ -151,7 +157,6 @@ def generate_plan_point_cloud(splat_path: Path, colmap_directory: Path) -> None:
     meta = {
         "count": int(positions.shape[0]),
         "bounds": bounds,
-        "cm_per_unit": cm_per_unit,
     }
 
     _atomic_write(

@@ -14,10 +14,17 @@ OUTLIER_DISTANCE_FACTOR = 3.0
 
 
 class ColmapGeometricData(BaseModel):
-    center: list[float]
-    world_rotation: list[list[float]]
+    matrix: list[list[float]]
     radius: float
     positions: list[list[float]]
+
+
+def plan_matrix(center: np.ndarray, world_rotation: np.ndarray) -> np.ndarray:
+    """Rigid transform from splat space to the plan frame: world_rotation.T @ (p - center)."""
+    matrix = np.eye(4)
+    matrix[:3, :3] = world_rotation.T
+    matrix[:3, 3] = -world_rotation.T @ center
+    return matrix
 
 
 def colmap_compute_geometric_data(sparse_dir: str):
@@ -55,8 +62,7 @@ def colmap_compute_geometric_data(sparse_dir: str):
     radius = np.max(np.linalg.norm(centered_positions, axis=1))
 
     return ColmapGeometricData(
-        center=center.tolist(),
-        world_rotation=world_rotation.tolist(),
+        matrix=plan_matrix(center, world_rotation).tolist(),
         radius=radius,
         positions=positions.tolist(),
     )

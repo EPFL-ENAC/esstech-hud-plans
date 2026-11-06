@@ -8,13 +8,14 @@ from plyfile import PlyData, PlyElement
 
 from api.config import config
 from api.lib.compute import point_cloud as point_cloud_compute
-from api.lib.compute.colmap_geometric_data import ColmapGeometricData
+from api.lib.compute.colmap_geometric_data import ColmapGeometricData, plan_matrix
 from api.lib.compute.point_cloud import (
     POINT_CLOUD_BINARY_FILENAME,
     POINT_CLOUD_META_FILENAME,
     compute_plan_point_cloud,
     generate_plan_point_cloud,
     generate_plan_point_cloud_if_missing,
+    plan_scale,
 )
 
 
@@ -42,12 +43,11 @@ def _make_splat_arrays() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 def test_compute_plan_point_cloud_filters_by_decoded_density() -> None:
     means, scales, opacities = _make_splat_arrays()
 
-    positions, cm_per_unit = compute_plan_point_cloud(
+    positions = compute_plan_point_cloud(
         means,
         scales,
         opacities,
-        center=np.zeros(3),
-        world_rotation=np.eye(3),
+        matrix=np.eye(4),
         radius=2.0,
         threshold=1.0,
     )
@@ -55,28 +55,41 @@ def test_compute_plan_point_cloud_filters_by_decoded_density() -> None:
     # radius**3 = 8: densities are ~20.1, ~1.0, ~48.1, ~0.12
     np.testing.assert_allclose(positions, [[1.0, 2.0, 2.0], [-4.0, 0.5, 2.0]])
     assert positions.dtype == np.float32
-    assert cm_per_unit is None
 
 
-def test_compute_plan_point_cloud_applies_transposed_rotation() -> None:
+def test_compute_plan_point_cloud_applies_the_plan_matrix() -> None:
     means = np.array([[2.0, 2.0, 3.0], [0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
     scales = np.zeros((3, 3))
     opacities = np.full(3, 20.0)
     world_rotation = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+    matrix = plan_matrix(np.array([1.0, 2.0, 3.0]), world_rotation)
 
-    positions, _ = compute_plan_point_cloud(
+    positions = compute_plan_point_cloud(
         means,
         scales,
         opacities,
-        center=np.array([1.0, 2.0, 3.0]),
-        world_rotation=world_rotation,
+        matrix=matrix,
         radius=1.0,
         threshold=0.0,
     )
 
+    # Every baked position must lie where the viewers put that same splat.
+    homogeneous = np.hstack([means, np.ones((3, 1))])
+    np.testing.assert_allclose(positions, (matrix @ homogeneous.T).T[:, :3])
     np.testing.assert_allclose(
         positions, [[0.0, -1.0, 0.0], [-2.0, 1.0, -3.0], [-1.0, 0.0, -2.0]]
     )
+
+
+def test_plan_matrix_centers_and_levels_the_scene() -> None:
+    center = np.array([3.0, -2.0, 8.0])
+    world_rotation = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+
+    matrix = plan_matrix(center, world_rotation)
+
+    np.testing.assert_allclose((matrix @ np.append(center, 1.0))[:3], 0.0, atol=1e-12)
+    np.testing.assert_allclose(matrix[3], [0.0, 0.0, 0.0, 1.0])
+    assert np.linalg.det(matrix[:3, :3]) == pytest.approx(1.0)
 
 
 def test_compute_plan_point_cloud_drops_non_finite_positions() -> None:
@@ -90,89 +103,33 @@ def test_compute_plan_point_cloud_drops_non_finite_positions() -> None:
     )
     scales = np.zeros((4, 3))
     opacities = np.full(4, 20.0)
-    camera_positions = np.array([[0.0, 0.0, 5.0]])
 
-    positions, cm_per_unit = compute_plan_point_cloud(
+    positions = compute_plan_point_cloud(
         means,
         scales,
         opacities,
-        center=np.zeros(3),
-        world_rotation=np.eye(3),
+        matrix=np.eye(4),
         radius=1.0,
         threshold=0.0,
-        camera_positions=camera_positions,
     )
 
     np.testing.assert_allclose(positions, [[1.0, 2.0, 2.0], [-4.0, 0.5, 2.0]])
-    assert cm_per_unit == pytest.approx(170.0 * 0.9 / 3.0)
-
-    empty_positions, no_scale = compute_plan_point_cloud(
-        means[[1, 2]],
-        scales[:2],
-        opacities[:2],
-        center=np.zeros(3),
-        world_rotation=np.eye(3),
-        radius=1.0,
-        threshold=0.0,
-        camera_positions=camera_positions,
-    )
-
-    assert empty_positions.shape == (0, 3)
-    assert no_scale is None
 
 
-def test_compute_plan_point_cloud_cm_per_unit_from_camera_height() -> None:
-    means = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]])
-    scales = np.zeros((3, 3))
-    opacities = np.full(3, 20.0)
-    camera_positions = np.array([[0.0, 0.0, 5.0], [1.0, 0.0, 5.0]])
+def test_plan_scale_uses_the_camera_height_above_the_floor() -> None:
+    plan_positions = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]])
+    plan_cameras = np.array([[0.0, 0.0, 5.0], [1.0, 0.0, 5.0]])
 
-    _, cm_per_unit = compute_plan_point_cloud(
-        means,
-        scales,
-        opacities,
-        center=np.zeros(3),
-        world_rotation=np.eye(3),
-        radius=1.0,
-        threshold=0.0,
-        camera_positions=camera_positions,
-    )
-
-    assert cm_per_unit == pytest.approx(170.0 * 0.9 / 5.0)
+    assert plan_scale(plan_positions, plan_cameras) == pytest.approx(170.0 * 0.9 / 5.0)
 
 
-def test_compute_plan_point_cloud_cm_per_unit_is_none_when_degenerate() -> None:
-    means = np.array([[0.0, 0.0, 0.0]])
-    scales = np.zeros((1, 3))
-    opacities = np.array([20.0])
+def test_plan_scale_is_none_when_degenerate() -> None:
+    plan_positions = np.array([[0.0, 0.0, 0.0]])
 
-    _, no_cameras = compute_plan_point_cloud(
-        means, scales, opacities, np.zeros(3), np.eye(3), 1.0, 0.0
-    )
-    _, camera_at_floor = compute_plan_point_cloud(
-        means,
-        scales,
-        opacities,
-        np.zeros(3),
-        np.eye(3),
-        1.0,
-        0.0,
-        camera_positions=np.array([[0.0, 0.0, 0.0]]),
-    )
-    _, no_points = compute_plan_point_cloud(
-        np.zeros((0, 3)),
-        np.zeros((0, 3)),
-        np.zeros(0),
-        np.zeros(3),
-        np.eye(3),
-        1.0,
-        0.0,
-        camera_positions=np.array([[0.0, 0.0, 5.0]]),
-    )
-
-    assert no_cameras is None
-    assert camera_at_floor is None
-    assert no_points is None
+    assert plan_scale(plan_positions, None) is None
+    assert plan_scale(plan_positions, np.zeros((0, 3))) is None
+    assert plan_scale(plan_positions, np.array([[0.0, 0.0, 0.0]])) is None
+    assert plan_scale(np.zeros((0, 3)), np.array([[0.0, 0.0, 5.0]])) is None
 
 
 def _write_splat_ply(
@@ -205,8 +162,7 @@ def _write_splat_ply(
 
 def _fake_geometric_data() -> ColmapGeometricData:
     return ColmapGeometricData(
-        center=[0.0, 0.0, 0.0],
-        world_rotation=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        matrix=np.eye(4).tolist(),
         radius=2.0,
         positions=[[0.0, 0.0, 5.0]],
     )
@@ -241,7 +197,6 @@ def test_generate_plan_point_cloud_writes_artifacts_next_to_splat(
     meta = json.loads(meta_path.read_text())
     assert meta["count"] == 2
     assert meta["bounds"] == [[-4.0, 0.5, 2.0], [1.0, 2.0, 2.0]]
-    assert meta["cm_per_unit"] == pytest.approx(170.0 * 0.9 / 3.0)
 
 
 def _setup_generation(

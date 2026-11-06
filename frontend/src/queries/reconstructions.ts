@@ -7,13 +7,13 @@ import { useSplatDownloadStore } from 'src/stores/splatDownload';
 import { useVideoDownloadStore } from 'src/stores/videoDownload';
 import {
     getReconstructionPointCloud,
-    getReconstructionPointCloudMeta,
     getReconstructionSplat,
     getReconstructionStep,
     getReconstructionVideo,
+    getReconstructionViewParams,
     isReconstructionProcessing,
     listReconstructions,
-    type ReconstructionPointCloudMeta,
+    type ReconstructionViewParams,
 } from 'src/lib/buildings';
 
 export const RECONSTRUCTIONS_PAGE_SIZE = 20;
@@ -144,7 +144,7 @@ export function useReconstructionVideoQuery(
 
 export interface ReconstructionPointCloudData {
     buffer: ArrayBuffer;
-    meta: ReconstructionPointCloudMeta | null;
+    viewParams: ReconstructionViewParams;
 }
 
 export function useReconstructionPointCloudQuery(
@@ -177,17 +177,18 @@ export function useReconstructionPointCloudQuery(
                     signal,
                     reportProgress,
                 ),
-                getReconstructionPointCloudMeta(
-                    buildingId.value,
-                    reconstructionId.value,
-                    signal,
-                ).catch(() => null),
-            ]).then(([buffer, meta]) => ({ buffer, meta }));
+                getReconstructionViewParams(buildingId.value, reconstructionId.value, signal),
+            ]).then(([buffer, viewParams]) => ({ buffer, viewParams }));
         },
         staleTime: Infinity,
         refetchOnWindowFocus: false,
         refetchOnReconnect: false,
     });
+}
+
+export interface ReconstructionSplatData {
+    buffer: ArrayBuffer;
+    viewParams: ReconstructionViewParams;
 }
 
 export function useReconstructionSplatQuery(
@@ -213,12 +214,15 @@ export function useReconstructionSplatQuery(
         enabled: () => subject !== null && buildingId.value !== '' && reconstructionId.value !== '',
         query: ({ signal }) => {
             splatDownload.reset();
-            return getReconstructionSplat(
-                buildingId.value,
-                reconstructionId.value,
-                signal,
-                reportProgress,
-            );
+            return Promise.all([
+                getReconstructionSplat(
+                    buildingId.value,
+                    reconstructionId.value,
+                    signal,
+                    reportProgress,
+                ),
+                getReconstructionViewParams(buildingId.value, reconstructionId.value, signal),
+            ]).then(([buffer, viewParams]) => ({ buffer, viewParams }));
         },
         staleTime: Infinity,
         refetchOnWindowFocus: false,
