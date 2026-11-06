@@ -252,6 +252,28 @@ def test_task_cache_key_excludes_unserializable_progress_callback(task) -> None:
     assert key != policy.compute_key(context, {"report_progress": None, "input": 2}, {})
 
 
+@pytest.mark.parametrize(
+    "task",
+    [
+        workflow.extract_frames_task,
+        workflow.reconstruct_with_colmap_task,
+        workflow.train_with_brush_task,
+    ],
+)
+def test_task_cache_key_excludes_process_ownership(task) -> None:
+    context = SimpleNamespace(task=task, task_run=SimpleNamespace(flow_run_id=uuid4()))
+    inputs = {
+        "execution_environment": workflow.LocalCommandExecutionEnvironment(),
+        "input": 1,
+    }
+    key = task.cache_policy.compute_key(context, inputs, {})
+    assert key is not None
+    inputs["execution_environment"] = workflow.LocalCommandExecutionEnvironment()
+    assert key == task.cache_policy.compute_key(context, inputs, {})
+    inputs["input"] = 2
+    assert key != task.cache_policy.compute_key(context, inputs, {})
+
+
 @pytest.mark.parametrize("tool", ["ffmpeg", "colmap", "brush", "frame-picker"])
 def test_task_reports_progress_before_compute_returns(
     monkeypatch: pytest.MonkeyPatch, tmp_path, tool: str
@@ -299,6 +321,7 @@ def test_task_reports_progress_before_compute_returns(
                 2,
                 1920,
                 1080,
+                execution_environment=workflow.LocalCommandExecutionEnvironment(),
                 report_progress=report,
             )
         )
@@ -310,6 +333,7 @@ def test_task_reports_progress_before_compute_returns(
                 "frames",
                 "colmap",
                 ColmapSettings(),
+                execution_environment=workflow.LocalCommandExecutionEnvironment(),
                 report_progress=report,
             )
         )
@@ -321,6 +345,7 @@ def test_task_reports_progress_before_compute_returns(
                 "dataset",
                 "splat.ply",
                 BrushSettings(),
+                execution_environment=workflow.LocalCommandExecutionEnvironment(),
                 report_progress=report,
             )
         )

@@ -3,7 +3,10 @@ import logging
 import os
 import pty
 import shutil
+import signal
 import subprocess
+import threading
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -64,30 +67,37 @@ class _PtyStream:
             raise
 
 
-def _consume_output(
-    command: Command,
-    process: subprocess.Popen,
-    stream: BinaryReadStream,
-    emit_log: LogCallback,
-) -> CommandResult:
+def _kill_process_group(process: subprocess.Popen[bytes]) -> None:
+    # Descendants can still own the output stream after the leader exits.
     try:
-        for record in iter_command_log_records(stream):
-            emit_log(record)
-    except BaseException:
-        if process.poll() is None:
-            process.terminate()
-        process.wait()
-        raise
-
-    return_code = process.wait()
-    if return_code != 0:
-        raise CommandExecutionError(command, return_code=return_code)
-    return CommandResult(return_code=return_code)
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
 
 
 class LocalCommandExecutionEnvironment(CommandExecutionEnvironment):
     def __init__(self, executable_directory: Path = LOCAL_EXECUTABLES_DIRECTORY):
         self.executable_directory = executable_directory
+        self._condition = threading.Condition()
+        self._cancelled = False
+        self._running: set[subprocess.Popen[bytes]] = set()
+
+    def cancel(self) -> None:
+        """Kill command groups and wait for their output handling to finish.
+
+        Call from a worker thread so in-flight callbacks can use the event loop.
+        A cancelled environment cannot start another command.
+        """
+        with self._condition:
+            self._cancelled = True
+            for process in self._running:
+                _kill_process_group(process)
+            self._condition.wait_for(lambda: not self._running)
+
+    def _finish_execution(self, process: subprocess.Popen[bytes]) -> None:
+        with self._condition:
+            self._running.remove(process)
+            self._condition.notify_all()
 
     def _resolve_tool(self, tool: CommandTool) -> str:
         bundled_executable = self.executable_directory / tool
@@ -100,41 +110,62 @@ class LocalCommandExecutionEnvironment(CommandExecutionEnvironment):
 
         raise FileNotFoundError(f"{tool} executable was not found")
 
-    def _execute_with_pty(
+    def _start_process(
         self,
         command: Command,
         *,
         argv: list[str],
         workspace: Path,
-        emit_log: LogCallback,
-    ) -> CommandResult:
-        """Brush's progress display needs a terminal, including in headless runs."""
-        try:
-            master, slave = pty.openpty()
-        except OSError as exc:
-            raise CommandExecutionError(command, message=str(exc)) from exc
-
-        try:
-            child_environment = {**os.environ, "TERM": "xterm-256color"}
-            child_environment.pop("NO_COLOR", None)
+        stdout: int,
+        stderr: int,
+        environment: dict[str, str] | None,
+    ) -> subprocess.Popen[bytes]:
+        # Starting and registering must be atomic with respect to cancellation.
+        with self._condition:
+            if self._cancelled:
+                raise CommandExecutionError(
+                    command, message="Local command execution was cancelled"
+                )
             try:
                 process = subprocess.Popen(
                     argv,
                     cwd=workspace,
                     stdin=subprocess.DEVNULL,
-                    stdout=slave if command.capture != "stderr" else subprocess.DEVNULL,
-                    stderr=slave if command.capture != "stdout" else subprocess.DEVNULL,
-                    env=child_environment,
+                    stdout=stdout,
+                    stderr=stderr,
+                    env=environment,
                     bufsize=0,
+                    start_new_session=True,
                 )
             except OSError as exc:
                 raise CommandExecutionError(command, message=str(exc)) from exc
-            finally:
-                os.close(slave)
+            self._running.add(process)
+            return process
 
-            return _consume_output(command, process, _PtyStream(master), emit_log)
-        finally:
-            os.close(master)
+    def _consume_output(
+        self,
+        command: Command,
+        process: subprocess.Popen[bytes],
+        stream: BinaryReadStream,
+        emit_log: LogCallback,
+    ) -> CommandResult:
+        for record in iter_command_log_records(stream):
+            with self._condition:
+                cancelled = self._cancelled
+            if not cancelled:
+                emit_log(record)
+
+        return_code = process.wait()
+        with self._condition:
+            if self._cancelled:
+                raise CommandExecutionError(
+                    command,
+                    return_code=return_code,
+                    message="Local command execution was cancelled",
+                )
+        if return_code != 0:
+            raise CommandExecutionError(command, return_code=return_code)
+        return CommandResult(return_code=return_code)
 
     def execute(
         self,
@@ -162,35 +193,57 @@ class LocalCommandExecutionEnvironment(CommandExecutionEnvironment):
         except OSError as exc:
             raise CommandExecutionError(command, message=str(exc)) from exc
         argv = [executable, *command.arguments]
-        logger.info("Running %s command: %s", command.tool, argv)
-        if command.tool == "brush":
-            return self._execute_with_pty(
-                command, argv=argv, workspace=workspace, emit_log=emit_log
-            )
 
-        try:
-            process = subprocess.Popen(
-                argv,
-                cwd=workspace,
-                stdin=subprocess.DEVNULL,
-                stdout=settings.stdout,
-                stderr=settings.stderr,
-                bufsize=0,
-            )
-        except OSError as exc:
-            raise CommandExecutionError(command, message=str(exc)) from exc
+        # Release the execution only after waiting and closing every descriptor.
+        with ExitStack() as execution_cleanup, ExitStack() as resources:
+            master = slave = None
+            stdout, stderr = settings.stdout, settings.stderr
+            child_environment = None
+            if command.tool == "brush":
+                # Brush's progress display needs a terminal in headless runs too.
+                try:
+                    master, slave = pty.openpty()
+                except OSError as exc:
+                    raise CommandExecutionError(command, message=str(exc)) from exc
+                resources.callback(os.close, master)
+                stdout = slave if command.capture != "stderr" else subprocess.DEVNULL
+                stderr = slave if command.capture != "stdout" else subprocess.DEVNULL
+                child_environment = {**os.environ, "TERM": "xterm-256color"}
+                child_environment.pop("NO_COLOR", None)
 
-        try:
-            stream = (
-                process.stdout if settings.log_stream == "stdout" else process.stderr
-            )
-            if stream is None:
-                if process.poll() is None:
-                    process.terminate()
-                process.wait()
-                raise RuntimeError(f"{settings.log_stream} was not captured")
-            return _consume_output(command, process, stream, emit_log)
-        finally:
+            try:
+                process = self._start_process(
+                    command,
+                    argv=argv,
+                    workspace=workspace,
+                    stdout=stdout,
+                    stderr=stderr,
+                    environment=child_environment,
+                )
+            finally:
+                if slave is not None:
+                    os.close(slave)
+
+            execution_cleanup.callback(self._finish_execution, process)
             for pipe in (process.stdout, process.stderr):
                 if pipe is not None:
-                    pipe.close()
+                    resources.callback(pipe.close)
+            resources.callback(process.wait)
+
+            try:
+                with self._condition:
+                    cancelled = self._cancelled
+                if not cancelled:
+                    logger.info("Running %s command: %s", command.tool, argv)
+                if master is not None:
+                    stream: BinaryReadStream | None = _PtyStream(master)
+                elif settings.log_stream == "stdout":
+                    stream = process.stdout
+                else:
+                    stream = process.stderr
+                if stream is None:
+                    raise RuntimeError(f"{settings.log_stream} was not captured")
+                return self._consume_output(command, process, stream, emit_log)
+            except BaseException:
+                _kill_process_group(process)
+                raise

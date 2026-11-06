@@ -266,6 +266,7 @@ def test_workflow_runner_retains_flows_for_cancellation_hooks(
 def test_extract_frames_task_sends_ffmpeg_output_to_prefect_run_logger(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    environment = splat_workflow.LocalCommandExecutionEnvironment()
     records: list[tuple[str, str]] = []
 
     class FakeRunLogger:
@@ -274,10 +275,7 @@ def test_extract_frames_task_sends_ffmpeg_output_to_prefect_run_logger(
 
     def fake_run_frame_extraction(*args, on_log, **kwargs):
         assert kwargs["workspace_directory"] == tmp_path
-        assert (
-            kwargs["execution_environment"]
-            is splat_workflow.LOCAL_EXECUTION_ENVIRONMENT
-        )
+        assert kwargs["execution_environment"] is environment
         on_log("frame=1")
         on_log("frame=2")
         return tmp_path / "frames"
@@ -295,6 +293,7 @@ def test_extract_frames_task_sends_ffmpeg_output_to_prefect_run_logger(
             2,
             100,
             100,
+            execution_environment=environment,
         )
     )
 
@@ -379,6 +378,7 @@ def test_pick_frames_task_rejects_empty_selection(
 def test_reconstruct_with_colmap_task_sends_output_to_prefect_run_logger(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    environment = splat_workflow.LocalCommandExecutionEnvironment()
     records: list[tuple[str, str]] = []
     settings = ColmapSettings()
 
@@ -388,10 +388,7 @@ def test_reconstruct_with_colmap_task_sends_output_to_prefect_run_logger(
 
     def fake_run_colmap_reconstruction(*args, on_log, **kwargs):
         assert kwargs["workspace_directory"] == tmp_path
-        assert (
-            kwargs["execution_environment"]
-            is splat_workflow.LOCAL_EXECUTION_ENVIRONMENT
-        )
+        assert kwargs["execution_environment"] is environment
         on_log("feature extraction")
         on_log("mapping")
         return tmp_path / "colmap"
@@ -409,6 +406,7 @@ def test_reconstruct_with_colmap_task_sends_output_to_prefect_run_logger(
             str(tmp_path / "frames"),
             str(tmp_path / "colmap"),
             settings,
+            execution_environment=environment,
         )
     )
 
@@ -422,6 +420,7 @@ def test_reconstruct_with_colmap_task_sends_output_to_prefect_run_logger(
 def test_train_with_brush_task_sends_output_to_prefect_run_logger(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    environment = splat_workflow.LocalCommandExecutionEnvironment()
     records: list[tuple[str, str]] = []
     settings = BrushSettings()
 
@@ -432,10 +431,7 @@ def test_train_with_brush_task_sends_output_to_prefect_run_logger(
     def fake_run_brush_training(*args, on_log, **kwargs):
         assert args == (tmp_path, tmp_path / "splat.ply", settings)
         assert kwargs["workspace_directory"] == tmp_path
-        assert (
-            kwargs["execution_environment"]
-            is splat_workflow.LOCAL_EXECUTION_ENVIRONMENT
-        )
+        assert kwargs["execution_environment"] is environment
         on_log("step 1/10000")
         on_log("exporting")
         return tmp_path / "splat.ply"
@@ -453,6 +449,7 @@ def test_train_with_brush_task_sends_output_to_prefect_run_logger(
             str(tmp_path),
             str(tmp_path / "splat.ply"),
             settings,
+            execution_environment=environment,
         )
     )
 
@@ -535,10 +532,12 @@ def test_splat_generation_flow_selects_gpu_environment(
     )
 
     assert result == str(workspace / "splat.ply")
+    local_environment = calls[0][1]["execution_environment"]
+    assert isinstance(
+        local_environment, splat_workflow.LocalCommandExecutionEnvironment
+    )
     gpu_environment = (
-        splat_workflow.SCITAS_EXECUTION_ENVIRONMENT
-        if use_scitas
-        else splat_workflow.LOCAL_EXECUTION_ENVIRONMENT
+        splat_workflow.SCITAS_EXECUTION_ENVIRONMENT if use_scitas else local_environment
     )
     expected_calls: list[tuple[str, dict[str, object]]] = [
         (
@@ -552,7 +551,7 @@ def test_splat_generation_flow_selects_gpu_environment(
                 "fps": None if use_frame_picker else 2.0,
                 "fit_in_width": 1920,
                 "fit_in_height": 1920,
-                "execution_environment": splat_workflow.LOCAL_EXECUTION_ENVIRONMENT,
+                "execution_environment": local_environment,
             },
         ),
     ]
