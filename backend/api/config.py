@@ -60,10 +60,8 @@ class Config(BaseSettings):
     SCITAS_SSH_USERNAME: str = "enac-it-poh"
     SCITAS_SSH_KEY_PATH: str = "~/.ssh/id_ed25519"
     SCITAS_PARTITION_DEFAULT: str = "l40s"
-    SCITAS_PARTITION_COLMAP: str = "l40s"  # could be mig24gb but less availability
-    SCITAS_PARTITION_BRUSH: str = "l40s"
-    SCITAS_SBATCH_ARGS_COLMAP: str = ""
-    SCITAS_SBATCH_ARGS_BRUSH: str = ""
+    SCITAS_PARTITION_SPIRULA: str = "l40s"
+    SCITAS_SBATCH_ARGS_SPIRULA: str = ""
 
     # Host directory where the tusd container stores upload chunks and .info files.
     # Bind-mounted into the tusd container. Must stay on a local disk

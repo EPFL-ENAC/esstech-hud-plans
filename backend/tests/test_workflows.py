@@ -21,9 +21,10 @@ from api.lib.workflows import counter as counter_workflow
 from api.lib.workflows import splat_generation as splat_workflow
 from api.models.user import User
 from api.models.workflows import (
-    BrushSettings,
-    ColmapSettings,
     FramePickerSettings,
+    SpirulaGeometrySettings,
+    SpirulaSfmSettings,
+    SpirulaTrainSettings,
     SplatGenerationWorkflowSettings,
 )
 from api.services.auth import require_user
@@ -359,35 +360,35 @@ def test_pick_frames_task_rejects_empty_selection(
         )
 
 
-def test_reconstruct_with_colmap_task_sends_output_to_prefect_run_logger(
+def test_reconstruct_with_spirula_task_sends_output_to_prefect_run_logger(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     environment = splat_workflow.LocalCommandExecutionEnvironment()
     run = AsyncMock(wraps=environment.run)
     monkeypatch.setattr(environment, "run", run)
     records: list[tuple[str, str]] = []
-    settings = ColmapSettings()
+    settings = SpirulaSfmSettings()
 
     class FakeRunLogger:
         def info(self, message: str, record: str) -> None:
             records.append((message, record))
 
-    def fake_run_colmap_reconstruction(*args, on_log, **kwargs):
+    def fake_run_spirula_sfm(*args, on_log, **kwargs):
         assert kwargs["workspace_directory"] == tmp_path
         assert kwargs["execution_environment"] is environment
-        on_log("feature extraction")
-        on_log("mapping")
+        on_log("1/42   frame_00001.jpg   Features: 823")
+        on_log("RESULT: OK")
         return tmp_path / "colmap"
 
     monkeypatch.setattr(splat_workflow, "get_run_logger", lambda: FakeRunLogger())
     monkeypatch.setattr(
         splat_workflow,
-        "run_colmap_reconstruction",
-        fake_run_colmap_reconstruction,
+        "run_spirula_sfm",
+        fake_run_spirula_sfm,
     )
 
     result = asyncio.run(
-        splat_workflow.reconstruct_with_colmap_task.fn(
+        splat_workflow.reconstruct_with_spirula_task.fn(
             str(tmp_path),
             str(tmp_path / "frames"),
             str(tmp_path / "colmap"),
@@ -399,41 +400,41 @@ def test_reconstruct_with_colmap_task_sends_output_to_prefect_run_logger(
     run.assert_awaited_once()
     assert result == str(tmp_path / "colmap")
     assert records == [
-        ("colmap: %s", "feature extraction"),
-        ("colmap: %s", "mapping"),
+        ("spirula-sfm: %s", "1/42   frame_00001.jpg   Features: 823"),
+        ("spirula-sfm: %s", "RESULT: OK"),
     ]
 
 
-def test_train_with_brush_task_sends_output_to_prefect_run_logger(
+def test_train_with_spirula_task_sends_output_to_prefect_run_logger(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     environment = splat_workflow.LocalCommandExecutionEnvironment()
     run = AsyncMock(wraps=environment.run)
     monkeypatch.setattr(environment, "run", run)
     records: list[tuple[str, str]] = []
-    settings = BrushSettings()
+    settings = SpirulaTrainSettings()
 
     class FakeRunLogger:
         def info(self, message: str, record: str) -> None:
             records.append((message, record))
 
-    def fake_run_brush_training(*args, on_log, **kwargs):
+    def fake_run_spirula_train(*args, on_log, **kwargs):
         assert args == (tmp_path, tmp_path / "splat.ply", settings)
         assert kwargs["workspace_directory"] == tmp_path
         assert kwargs["execution_environment"] is environment
-        on_log("step 1/10000")
-        on_log("exporting")
+        on_log("step  15000/30000  ( 50%)")
+        on_log("saving splat")
         return tmp_path / "splat.ply"
 
     monkeypatch.setattr(splat_workflow, "get_run_logger", lambda: FakeRunLogger())
     monkeypatch.setattr(
         splat_workflow,
-        "run_brush_training",
-        fake_run_brush_training,
+        "run_spirula_train",
+        fake_run_spirula_train,
     )
 
     result = asyncio.run(
-        splat_workflow.train_with_brush_task.fn(
+        splat_workflow.train_with_spirula_task.fn(
             str(tmp_path),
             str(tmp_path),
             str(tmp_path / "splat.ply"),
@@ -445,11 +446,12 @@ def test_train_with_brush_task_sends_output_to_prefect_run_logger(
     run.assert_awaited_once()
     assert result == str(tmp_path / "splat.ply")
     assert records == [
-        ("brush: %s", "step 1/10000"),
-        ("brush: %s", "exporting"),
+        ("spirula-train: %s", "step  15000/30000  ( 50%)"),
+        ("spirula-train: %s", "saving splat"),
     ]
 
 
+@pytest.mark.parametrize("use_geometry", [False, True])
 @pytest.mark.parametrize("use_frame_picker", [False, True])
 @pytest.mark.parametrize("use_scitas", [False, True])
 def test_splat_generation_flow_selects_gpu_environment(
@@ -457,6 +459,7 @@ def test_splat_generation_flow_selects_gpu_environment(
     tmp_path: Path,
     use_scitas: bool,
     use_frame_picker: bool,
+    use_geometry: bool,
 ) -> None:
     calls: list[tuple] = []
     video_path = tmp_path / "uploads" / "source video.mov"
@@ -465,7 +468,10 @@ def test_splat_generation_flow_selects_gpu_environment(
     workspace = tmp_path / "workflow"
     workspace.mkdir()
     picker_settings = FramePickerSettings() if use_frame_picker else None
-    settings = SplatGenerationWorkflowSettings(frame_picker=picker_settings)
+    settings = SplatGenerationWorkflowSettings(
+        frame_picker=picker_settings,
+        spirula_geometry=SpirulaGeometrySettings(compute_depth=use_geometry),
+    )
 
     class FakeRunLogger:
         def info(self, *args) -> None:
@@ -482,12 +488,16 @@ def test_splat_generation_flow_selects_gpu_environment(
         calls.append(("frame-picker", kwargs))
         return str(workspace / "frames")
 
-    async def fake_colmap_task(**kwargs):
-        calls.append(("colmap", kwargs))
+    async def fake_sfm_task(**kwargs):
+        calls.append(("spirula-sfm", kwargs))
         return str(workspace / "colmap")
 
-    async def fake_brush_task(**kwargs):
-        calls.append(("brush", kwargs))
+    async def fake_geometry_task(**kwargs):
+        calls.append(("spirula-geometry", kwargs))
+        return kwargs["dataset_directory"]
+
+    async def fake_train_task(**kwargs):
+        calls.append(("spirula-train", kwargs))
         return str(workspace / "splat.ply")
 
     async def fake_point_cloud_task(**kwargs):
@@ -499,10 +509,15 @@ def test_splat_generation_flow_selects_gpu_environment(
     monkeypatch.setattr(splat_workflow, "pick_frames_task", fake_picker_task)
     monkeypatch.setattr(
         splat_workflow,
-        "reconstruct_with_colmap_task",
-        fake_colmap_task,
+        "reconstruct_with_spirula_task",
+        fake_sfm_task,
     )
-    monkeypatch.setattr(splat_workflow, "train_with_brush_task", fake_brush_task)
+    monkeypatch.setattr(
+        splat_workflow,
+        "predict_geometry_maps_task",
+        fake_geometry_task,
+    )
+    monkeypatch.setattr(splat_workflow, "train_with_spirula_task", fake_train_task)
     monkeypatch.setattr(
         splat_workflow, "generate_plan_point_cloud_task", fake_point_cloud_task
     )
@@ -561,22 +576,38 @@ def test_splat_generation_flow_selects_gpu_environment(
     expected_calls.extend(
         [
             (
-                "colmap",
+                "spirula-sfm",
                 {
                     "workspace_directory": str(workspace),
                     "frames_directory": str(workspace / "frames"),
                     "colmap_directory": str(workspace / "colmap"),
-                    "settings": settings.colmap,
+                    "settings": settings.spirula_sfm,
                     "execution_environment": gpu_environment,
                 },
             ),
+        ]
+    )
+    if use_geometry:
+        expected_calls.append(
             (
-                "brush",
+                "spirula-geometry",
+                {
+                    "workspace_directory": str(workspace),
+                    "dataset_directory": str(workspace),
+                    "settings": settings.spirula_geometry,
+                    "execution_environment": gpu_environment,
+                },
+            )
+        )
+    expected_calls.extend(
+        [
+            (
+                "spirula-train",
                 {
                     "workspace_directory": str(workspace),
                     "dataset_directory": str(workspace),
                     "splat_path": str(workspace / "splat.ply"),
-                    "settings": settings.brush,
+                    "settings": settings.spirula_train,
                     "execution_environment": gpu_environment,
                 },
             ),

@@ -2,10 +2,11 @@ import pytest
 from pydantic import ValidationError
 
 from api.models.workflows import (
-    BrushSettings,
-    ColmapSettings,
     FfmpegSettings,
     FramePickerSettings,
+    SpirulaGeometrySettings,
+    SpirulaSfmSettings,
+    SpirulaTrainSettings,
     SplatGenerationWorkflowSettings,
 )
 
@@ -19,26 +20,25 @@ def test_splat_generation_workflow_settings_defaults_are_grouped_by_tool() -> No
         fit_in_height=1920,
     )
     assert settings.frame_picker is None
-    assert settings.colmap == ColmapSettings(
+    assert settings.spirula_sfm == SpirulaSfmSettings(
         data_type="video",
+        pairs="exhaustive",
         quality="low",
-        camera_model="OPENCV",
+        camera_model="opencv",
         single_camera=True,
-        use_gpu=False,
-        use_global_mapper=False,
     )
-    assert settings.brush == BrushSettings(
-        total_steps=10_000,
-        render_mode="default",
+    assert settings.spirula_geometry == SpirulaGeometrySettings(
+        compute_depth=False,
+        compute_normals=False,
+    )
+    assert settings.spirula_train == SpirulaTrainSettings(
+        num_iterations=30_000,
+        quality="medium",
+        primitive="3dgs",
         sh_degree=3,
-        max_splats=10_000_000,
-        refine_every=200,
-        growth_grad_threshold=0.0025,
-        growth_stop_iter=15_000,
-        max_resolution=1920,
-        subsample_frames=1,
-        alpha_mode="transparent",
-        export_every=5_000,
+        cap_max=1_000_000,
+        floater_suppression=True,
+        meshing_preset=True,
     )
 
 
@@ -85,31 +85,29 @@ def test_frame_picker_settings_reject_invalid_values(field: str, value: object) 
     ("field", "value"),
     [
         ("data_type", "archive"),
+        ("pairs", "bruteforce"),
         ("quality", "maximum"),
         ("camera_model", "SIMPLE_RADIAL"),
     ],
 )
-def test_colmap_settings_reject_unsupported_values(field: str, value: str) -> None:
+def test_spirula_sfm_settings_reject_unsupported_values(field: str, value: str) -> None:
     with pytest.raises(ValidationError):
-        ColmapSettings(**{field: value})
+        SpirulaSfmSettings(**{field: value})
 
 
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("total_steps", 0),
-        ("render_mode", "cinematic"),
+        ("num_iterations", 0),
+        ("quality", "maximum"),
+        ("primitive", "2dgs"),
         ("sh_degree", 4),
-        ("max_splats", 0),
-        ("refine_every", 0),
-        ("growth_grad_threshold", 0),
-        ("growth_stop_iter", -1),
-        ("max_resolution", 0),
-        ("subsample_frames", 0),
-        ("alpha_mode", "opaque"),
-        ("export_every", 0),
+        ("sh_degree", -1),
+        ("cap_max", 0),
     ],
 )
-def test_brush_settings_reject_invalid_values(field: str, value: object) -> None:
+def test_spirula_train_settings_reject_invalid_values(
+    field: str, value: object
+) -> None:
     with pytest.raises(ValidationError):
-        BrushSettings.model_validate({field: value})
+        SpirulaTrainSettings.model_validate({field: value})

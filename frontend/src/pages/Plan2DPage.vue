@@ -24,39 +24,7 @@
         </div>
 
         <QueryStateSwitcher
-            v-if="reconstructionId && splatQuery"
-            class="splat-query"
-            :state="splatQuery.state"
-            :async-status="splatQuery.asyncStatus"
-            :retry="splatQuery.refetch"
-            :loading-message="t('plans.splat.loading')"
-            :error-message="t('plans.splat.unavailable')"
-        >
-            <template #pending>
-                <splat-download-progress role="presentation" />
-            </template>
-            <template #refreshing>
-                <splat-download-progress role="presentation" />
-            </template>
-            <template #success="{ data }">
-                <div v-if="showSplat" class="viewer-wrapper">
-                    <interactive-blueprint-viewer
-                        :splat-data="data"
-                        :fetch-geometry="
-                            () =>
-                                fetchReconstructionBlueprintGeometryJSON(
-                                    buildingId,
-                                    reconstructionId,
-                                )
-                        "
-                        :params="DEFAULT_BLUEPRINT_PARAMS"
-                        fill
-                    />
-                </div>
-            </template>
-        </QueryStateSwitcher>
-        <QueryStateSwitcher
-            v-else-if="reconstructionId && pointCloudQuery"
+            v-if="reconstructionId"
             class="splat-query"
             :state="pointCloudQuery.state"
             :async-status="pointCloudQuery.asyncStatus"
@@ -77,7 +45,7 @@
                 <div v-if="showPointCloud" class="viewer-wrapper">
                     <plan-point-cloud-viewer
                         :buffer="data.buffer"
-                        :meta="data.meta"
+                        :view-params="data.viewParams"
                         :reconstruction-id="reconstructionId"
                         fill
                     />
@@ -93,21 +61,11 @@ import { computed, defineAsyncComponent, reactive, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import PageHeader from 'src/components/PageHeader.vue';
 import { ApiError } from 'src/lib/buildings';
-import { plan2dView } from 'boot/api';
-import {
-    useReconstructionPointCloudQuery,
-    useReconstructionSplatQuery,
-} from 'src/queries/reconstructions';
-import { fetchReconstructionBlueprintGeometryJSON } from 'src/lib/maths/blueprintGeometry';
-import { DEFAULT_BLUEPRINT_PARAMS } from 'src/lib/blueprintParams';
+import { useReconstructionPointCloudQuery } from 'src/queries/reconstructions';
 import SplatDownloadProgress from 'src/components/SplatDownloadProgress.vue';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
-
-const InteractiveBlueprintViewer = defineAsyncComponent(
-    () => import('src/components/InteractiveBlueprintViewer.vue'),
-);
 
 const PlanPointCloudViewer = defineAsyncComponent(
     () => import('src/components/PlanPointCloudViewer.vue'),
@@ -118,31 +76,16 @@ const buildingId = computed(() => (typeof route.params.id === 'string' ? route.p
 const reconstructionId = computed(() =>
     typeof route.query.reconstruction === 'string' ? route.query.reconstruction : '',
 );
-// Only one renderer mode exists per deployment, so only one query is ever created.
-const splatQuery =
-    plan2dView === 'splat'
-        ? reactive(useReconstructionSplatQuery(buildingId, reconstructionId))
-        : null;
-const pointCloudQuery =
-    plan2dView === 'splat'
-        ? null
-        : reactive(useReconstructionPointCloudQuery(buildingId, reconstructionId));
+const pointCloudQuery = reactive(useReconstructionPointCloudQuery(buildingId, reconstructionId));
 
-const hasViewerError = (error: unknown) =>
-    error instanceof ApiError && [401, 403, 404].includes(error.status);
-const showSplat = computed(
-    () =>
-        splatQuery !== null &&
-        splatQuery.data !== undefined &&
-        reconstructionId.value !== '' &&
-        !hasViewerError(splatQuery.error),
-);
 const showPointCloud = computed(
     () =>
-        pointCloudQuery !== null &&
         pointCloudQuery.data !== undefined &&
         reconstructionId.value !== '' &&
-        !hasViewerError(pointCloudQuery.error),
+        !(
+            pointCloudQuery.error instanceof ApiError &&
+            [401, 403, 404].includes(pointCloudQuery.error.status)
+        ),
 );
 
 const activeTool = ref('measure');

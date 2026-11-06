@@ -3,12 +3,14 @@ from __future__ import annotations
 import codecs
 import logging
 import time
+from collections import deque
 from pathlib import Path, PurePosixPath
 from typing import Callable
 
 from api.lib.compute import scitas as scitas_compute
 
 from .base import (
+    ERROR_LOG_TAIL_RECORDS,
     Command,
     CommandExecutionEnvironment,
     CommandExecutionError,
@@ -137,14 +139,19 @@ class ScitasCommandExecutionEnvironment(CommandExecutionEnvironment):
         emit_log = on_log or (
             lambda record: logger.info("%s: %s", command.tool, record)
         )
+        log_tail: deque[str] = deque(maxlen=ERROR_LOG_TAIL_RECORDS)
+
+        def emit_and_buffer(record: str) -> None:
+            log_tail.append(record)
+            emit_log(record)
+
         job_name: str | None = None
         job_finished = False
 
         try:
             launchers = {
                 "ffmpeg": ["ffmpeg"],
-                "colmap": ["xvfb-run", "-a", "colmap"],
-                "brush": ["brush"],
+                "spirula": ["spirula"],
             }
             argv = [*launchers[command.tool], *command.arguments]
             job_name = scitas_compute.Scitas.submit_job(
@@ -154,7 +161,7 @@ class ScitasCommandExecutionEnvironment(CommandExecutionEnvironment):
                 capture=command.capture,
             )
             scitas_compute.register_job(job_name, workspace.name)
-            result = self._wait_for_result(command, job_name, emit_log)
+            result = self._wait_for_result(command, job_name, emit_and_buffer)
             job_finished = True
         except BaseException:
             if job_name is not None and not job_finished:
@@ -168,7 +175,11 @@ class ScitasCommandExecutionEnvironment(CommandExecutionEnvironment):
         if job_name is not None:
             scitas_compute.forget_job(job_name, workspace.name)
 
-        if result.return_code != 0:
-            raise CommandExecutionError(command, return_code=result.return_code)
+        if result.return_code != 0 and (
+            result.return_code not in command.acceptable_return_codes
+        ):
+            raise CommandExecutionError(
+                command, return_code=result.return_code, log_tail=log_tail
+            )
 
         return CommandResult(return_code=0)

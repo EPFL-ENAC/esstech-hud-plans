@@ -15,7 +15,7 @@ Setup your environment by running:
 make install
 ```
 
-Install the external FFmpeg, COLMAP, and Brush executables used by the local
+Install the external FFmpeg and spirula executables used by the local
 workflow runner:
 
 ```bash

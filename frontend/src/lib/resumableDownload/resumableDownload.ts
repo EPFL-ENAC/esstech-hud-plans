@@ -25,7 +25,7 @@ export class ResumableDownload {
     ) {}
 
     static async open(url: string | URL): Promise<ResumableDownload> {
-        const persistent = isPersistentStorageAvailable();
+        const persistent = await hasPersistentStorage();
         const urlText = String(url);
 
         return withDownloadLock(urlText, persistent, async () => {
@@ -307,10 +307,17 @@ function readTotalBytes(response: Response): number | null {
     return Number.isSafeInteger(total) && total >= 0 ? total : null;
 }
 
-function isPersistentStorageAvailable(): boolean {
-    return (
-        DiskDownloadFile.isAvailable() &&
-        DownloadsDatabase.isAvailable() &&
-        typeof navigator.locks?.request === 'function'
-    );
+function hasPersistentStorage(): Promise<boolean> {
+    if (
+        !DiskDownloadFile.isAvailable() ||
+        !DownloadsDatabase.isAvailable() ||
+        typeof navigator.locks?.request !== 'function'
+    ) {
+        return Promise.resolve(false);
+    }
+    // Firefox private windows expose the API and reject the call.
+    return navigator.storage
+        .getDirectory()
+        .then(() => true)
+        .catch(() => false);
 }

@@ -22,16 +22,19 @@ from starlette.concurrency import run_in_threadpool
 from api.config import config
 from api.db import get_engine
 from api.lib.compute import scitas as scitas_compute
-from api.lib.compute.brush import run_brush_training
-from api.lib.compute.colmap import run_colmap_reconstruction
 from api.lib.compute.evaluate_video_frame import pick_frames
 from api.lib.compute.ffmpeg import run_frame_extraction
 from api.lib.compute.point_cloud import generate_plan_point_cloud
 from api.lib.compute.progress import (
-    BrushProgressEstimator,
-    ColmapProgressEstimator,
     FfmpegProgressEstimator,
     ReportProgress,
+    SpirulaSfmProgressEstimator,
+    SpirulaTrainProgressEstimator,
+)
+from api.lib.compute.spirula import (
+    run_spirula_geometry,
+    run_spirula_sfm,
+    run_spirula_train,
 )
 from api.lib.utils.commands import (
     CommandExecutionEnvironment,
@@ -41,9 +44,10 @@ from api.lib.utils.commands import (
 from api.lib.workflows import common as workflow_common
 from api.models.reconstruction import Reconstruction, ReconstructionArtifactUpdate
 from api.models.workflows import (
-    BrushSettings,
-    ColmapSettings,
     FramePickerSettings,
+    SpirulaGeometrySettings,
+    SpirulaSfmSettings,
+    SpirulaTrainSettings,
     SplatGenerationWorkflowSettings,
 )
 from api.services.reconstructions import (
@@ -441,70 +445,100 @@ async def pick_frames_task(
 
 
 @task(
-    name="reconstruct-with-colmap",
+    name="reconstruct-with-spirula-sfm",
     cache_policy=DEFAULT - "report_progress" - "execution_environment",
 )
-async def reconstruct_with_colmap_task(
+async def reconstruct_with_spirula_task(
     workspace_directory: str,
     frames_directory: str,
     colmap_directory: str,
-    settings: ColmapSettings,
+    settings: SpirulaSfmSettings,
     execution_environment: CommandExecutionEnvironment,
     report_progress: ReportProgress | None = None,
 ) -> str:
     run_logger = get_run_logger()
-    estimator = ColmapProgressEstimator()
+    estimator = SpirulaSfmProgressEstimator()
 
-    def log_colmap(record: str) -> None:
-        run_logger.info("colmap: %s", record)
+    def log_spirula_sfm(record: str) -> None:
+        run_logger.info("spirula-sfm: %s", record)
         progress = estimator.feed(record)
         if progress is not None and report_progress is not None:
             report_progress(progress)
 
     output_directory = await execution_environment.run(
         partial(
-            run_colmap_reconstruction,
+            run_spirula_sfm,
             Path(frames_directory),
             Path(colmap_directory),
             settings,
             workspace_directory=Path(workspace_directory),
             execution_environment=execution_environment,
-            on_log=log_colmap,
+            on_log=log_spirula_sfm,
         ),
     )
     return str(output_directory)
 
 
 @task(
-    name="train-with-brush",
+    name="predict-geometry-maps",
     cache_policy=DEFAULT - "report_progress" - "execution_environment",
 )
-async def train_with_brush_task(
+async def predict_geometry_maps_task(
     workspace_directory: str,
     dataset_directory: str,
-    splat_path: str,
-    settings: BrushSettings,
+    settings: SpirulaGeometrySettings,
     execution_environment: CommandExecutionEnvironment,
     report_progress: ReportProgress | None = None,
 ) -> str:
     run_logger = get_run_logger()
-    estimator = BrushProgressEstimator()
 
-    def log_brush(record: str) -> None:
-        run_logger.info("brush: %s", record)
+    def log_spirula_geometry(record: str) -> None:
+        run_logger.info("spirula-geometry: %s", record)
+
+    output_directory = await execution_environment.run(
+        partial(
+            run_spirula_geometry,
+            Path(dataset_directory),
+            settings,
+            workspace_directory=Path(workspace_directory),
+            execution_environment=execution_environment,
+            on_log=log_spirula_geometry,
+        ),
+    )
+    run_logger.info("Predicted geometry maps for %s", output_directory)
+    return str(output_directory)
+
+
+@task(
+    name="train-with-spirula",
+    cache_policy=DEFAULT - "report_progress" - "execution_environment",
+)
+async def train_with_spirula_task(
+    workspace_directory: str,
+    dataset_directory: str,
+    splat_path: str,
+    settings: SpirulaTrainSettings,
+    execution_environment: CommandExecutionEnvironment,
+    report_progress: ReportProgress | None = None,
+) -> str:
+    run_logger = get_run_logger()
+    estimator = SpirulaTrainProgressEstimator()
+
+    def log_spirula_train(record: str) -> None:
+        run_logger.info("spirula-train: %s", record)
         progress = estimator.feed(record)
         if progress is not None and report_progress is not None:
             report_progress(progress)
 
     output_path = await execution_environment.run(
         partial(
-            run_brush_training,
+            run_spirula_train,
             Path(dataset_directory),
             Path(splat_path),
             settings,
             workspace_directory=Path(workspace_directory),
             execution_environment=execution_environment,
-            on_log=log_brush,
+            on_log=log_spirula_train,
         ),
     )
     return str(output_path)
@@ -594,14 +628,28 @@ async def splat_generation_flow(
             frames_directory=selected_frames_directory,
         ),
     )
-    reconstructed_colmap_directory = await reconstruct_with_colmap_task(
+    geometry_settings = settings.spirula_geometry
+    predicts_geometry_maps = (
+        geometry_settings.compute_depth or geometry_settings.compute_normals
+    )
+    sfm_progress_end = 0.65 if predicts_geometry_maps else 0.70
+    reconstructed_colmap_directory = await reconstruct_with_spirula_task(
         workspace_directory=workspace_directory,
         frames_directory=selected_frames_directory,
         colmap_directory=colmap_directory,
-        settings=settings.colmap,
+        settings=settings.spirula_sfm,
         execution_environment=gpu_execution_environment,
-        report_progress=_progress_callback(reconstruction_id, 0.40, 0.70),
+        report_progress=_progress_callback(reconstruction_id, 0.40, sfm_progress_end),
     )
+    if predicts_geometry_maps:
+        await _record_reconstruction_progress(reconstruction_id, progress=0.65)
+        await predict_geometry_maps_task(
+            workspace_directory=workspace_directory,
+            dataset_directory=str(Path(reconstructed_colmap_directory).parent),
+            settings=geometry_settings,
+            execution_environment=gpu_execution_environment,
+            report_progress=_progress_callback(reconstruction_id, 0.65, 0.70),
+        )
     await _record_reconstruction_progress(
         reconstruction_id,
         progress=0.70,
@@ -609,11 +657,11 @@ async def splat_generation_flow(
             colmap_directory=reconstructed_colmap_directory,
         ),
     )
-    generated_splat_path = await train_with_brush_task(
+    generated_splat_path = await train_with_spirula_task(
         workspace_directory=workspace_directory,
         dataset_directory=str(Path(reconstructed_colmap_directory).parent),
         splat_path=splat_path,
-        settings=settings.brush,
+        settings=settings.spirula_train,
         execution_environment=gpu_execution_environment,
         report_progress=_progress_callback(reconstruction_id, 0.70, 0.92),
     )

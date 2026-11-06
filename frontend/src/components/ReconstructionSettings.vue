@@ -35,60 +35,76 @@
         <frame-picker-settings v-model="settings.framePicker" embedded />
         <q-separator />
 
-        <div class="text-subtitle1 text-weight-bold">{{ t('settings.colmap.title') }}</div>
+        <div class="text-subtitle1 text-weight-bold">{{ t('settings.spirula.sfm.title') }}</div>
         <div class="row q-col-gutter-md">
             <q-select
-                v-model="settings.colmap.data_type"
+                v-model="settings.spirulaSfm.dataType"
                 class="col-12 col-sm-6"
                 outlined
                 emit-value
                 map-options
-                :options="colmapDataTypeOptions"
-                :label="t('settings.colmap.dataType')"
+                :options="sfmDataTypeOptions"
+                :label="t('settings.spirula.sfm.dataType')"
             />
             <q-select
-                v-model="settings.colmap.quality"
+                v-model="settings.spirulaSfm.pairs"
                 class="col-12 col-sm-6"
                 outlined
-                :options="colmapQualityOptions"
                 emit-value
                 map-options
-                :label="t('settings.colmap.quality')"
+                :options="sfmPairsOptions"
+                :label="t('settings.spirula.sfm.pairs')"
             />
             <q-select
-                v-model="settings.colmap.camera_model"
+                v-model="settings.spirulaSfm.quality"
                 class="col-12 col-sm-6"
                 outlined
-                :options="colmapCameraModelOptions"
-                :label="t('settings.colmap.cameraModel')"
+                :options="sfmQualityOptions"
+                emit-value
+                map-options
+                :label="t('settings.spirula.sfm.quality')"
             />
-        </div>
-        <div class="row q-col-gutter-md">
-            <q-toggle
-                v-model="settings.colmap.single_camera"
+            <q-select
+                v-model="settings.spirulaSfm.cameraModel"
                 class="col-12 col-sm-6"
-                :label="t('settings.colmap.sharedIntrinsics')"
+                outlined
+                :options="sfmCameraModelOptions"
+                emit-value
+                map-options
+                :label="t('settings.spirula.sfm.cameraModel')"
             />
             <q-toggle
-                v-model="settings.colmap.use_gpu"
+                v-model="settings.spirulaSfm.singleCamera"
                 class="col-12 col-sm-6"
-                :label="t('settings.colmap.useGpu')"
-            />
-            <q-toggle
-                v-model="settings.colmap.use_global_mapper"
-                class="col-12 col-sm-6"
-                :label="t('settings.colmap.globalMapper')"
+                :label="t('settings.spirula.sfm.sharedIntrinsics')"
             />
         </div>
 
         <q-separator />
-        <brush-settings v-model="settings.brush" embedded />
+        <div class="text-subtitle1 text-weight-bold">
+            {{ t('settings.spirula.geometry.title') }}
+        </div>
+        <div class="row q-col-gutter-md">
+            <q-toggle
+                v-model="settings.spirulaGeometry.computeDepth"
+                class="col-12 col-sm-6"
+                :label="t('settings.spirula.geometry.computeDepth')"
+            />
+            <q-toggle
+                v-model="settings.spirulaGeometry.computeNormals"
+                class="col-12 col-sm-6"
+                :label="t('settings.spirula.geometry.computeNormals')"
+            />
+        </div>
+
+        <q-separator />
+        <spirula-train-settings v-model="settings.spirulaTrain" embedded />
     </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import BrushSettings from 'src/components/BrushSettings.vue';
+import SpirulaTrainSettings from 'src/components/SpirulaTrainSettings.vue';
 import FramePickerSettings from 'src/components/FramePickerSettings.vue';
 import type { ReconstructionSettingsConfig } from 'src/lib/reconstruction-settings';
 import { useI18n } from 'vue-i18n';
@@ -97,18 +113,30 @@ const { t } = useI18n();
 
 const settings = defineModel<ReconstructionSettingsConfig>({ required: true });
 
-const colmapDataTypeOptions = computed(() => [
-    { label: t('settings.colmap.individual'), value: 'individual' },
-    { label: t('settings.colmap.video'), value: 'video' },
-    { label: t('settings.colmap.internet'), value: 'internet' },
+const sfmDataTypeOptions = computed(() => [
+    { label: t('settings.spirula.sfm.individual'), value: 'individual' },
+    { label: t('settings.spirula.sfm.video'), value: 'video' },
+    { label: t('settings.spirula.sfm.internet'), value: 'internet' },
 ]);
-const colmapQualityOptions = computed(() => [
-    { value: 'low', label: t('settings.colmap.qualities.low') },
-    { value: 'medium', label: t('settings.colmap.qualities.medium') },
-    { value: 'high', label: t('settings.colmap.qualities.high') },
-    { value: 'extreme', label: t('settings.colmap.qualities.extreme') },
+const sfmPairsOptions = computed(() => [
+    { value: 'auto', label: t('settings.spirula.sfm.pairsAuto') },
+    { value: 'exhaustive', label: t('settings.spirula.sfm.pairsExhaustive') },
+    { value: 'sequential', label: t('settings.spirula.sfm.pairsSequential') },
+    { value: 'prefilter', label: t('settings.spirula.sfm.pairsPrefilter') },
 ]);
-const colmapCameraModelOptions = ['PINHOLE', 'OPENCV', 'OPENCV_FISHEYE', 'RADIAL'];
+const sfmQualityOptions = computed(() => [
+    { value: 'low', label: t('settings.spirula.sfm.qualities.low') },
+    { value: 'medium', label: t('settings.spirula.sfm.qualities.medium') },
+    { value: 'high', label: t('settings.spirula.sfm.qualities.high') },
+    { value: 'extreme', label: t('settings.spirula.sfm.qualities.extreme') },
+]);
+const sfmCameraModelOptions = computed(() => [
+    { value: 'simple-pinhole', label: t('settings.spirula.sfm.cameraModels.simplePinhole') },
+    { value: 'pinhole', label: t('settings.spirula.sfm.cameraModels.pinhole') },
+    { value: 'radial', label: t('settings.spirula.sfm.cameraModels.radial') },
+    { value: 'opencv', label: t('settings.spirula.sfm.cameraModels.opencv') },
+    { value: 'opencv-fisheye', label: t('settings.spirula.sfm.cameraModels.opencvFisheye') },
+]);
 </script>
 
 <style scoped>

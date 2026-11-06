@@ -145,10 +145,8 @@ def _get_slurm_job_id(job_name: str) -> str | None:
 
 def _get_partition_for_tool(tool: CommandTool) -> str:
     """Return the Slurm partition to use for a given tool."""
-    if tool == "brush":
-        return config.SCITAS_PARTITION_BRUSH
-    elif tool == "colmap":
-        return config.SCITAS_PARTITION_COLMAP
+    if tool == "spirula":
+        return config.SCITAS_PARTITION_SPIRULA
     else:
         return config.SCITAS_PARTITION_DEFAULT
 
@@ -357,7 +355,7 @@ class Scitas:
 #SBATCH --time=12:00:00
 #SBATCH --output={shlex.quote(stdout_path)}
 #SBATCH --error={shlex.quote(stderr_path)}
-{config.SCITAS_SBATCH_ARGS_BRUSH if tool == "brush" else config.SCITAS_SBATCH_ARGS_COLMAP}
+{config.SCITAS_SBATCH_ARGS_SPIRULA if tool == "spirula" else ""}
 
 set -e
 EXPORT_ROOT={shlex.quote(export_root)}

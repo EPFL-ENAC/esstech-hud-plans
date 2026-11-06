@@ -1,4 +1,12 @@
 import type { Page } from 'src/lib/pagination';
+import type {
+    SpirulaSfmCameraModel,
+    SpirulaSfmDataType,
+    SpirulaSfmPairs,
+    SpirulaSfmQuality,
+    SpirulaTrainPrimitive,
+    SpirulaTrainQuality,
+} from 'src/lib/splats/spirula';
 import { i18n } from 'src/i18n/instance';
 import { baseUrl } from 'boot/api';
 import { ApiError, requestJson } from 'src/lib/api';
@@ -115,34 +123,35 @@ export interface FramePickerWorkflowSettings {
     outlier_sharpness_ratio: number;
 }
 
-export interface ColmapWorkflowSettings {
-    data_type: 'individual' | 'video' | 'internet';
-    quality: 'low' | 'medium' | 'high' | 'extreme';
-    camera_model: 'PINHOLE' | 'OPENCV' | 'OPENCV_FISHEYE' | 'RADIAL';
+export interface SpirulaSfmWorkflowSettings {
+    data_type: SpirulaSfmDataType;
+    pairs: SpirulaSfmPairs;
+    quality: SpirulaSfmQuality;
+    camera_model: SpirulaSfmCameraModel;
     single_camera: boolean;
-    use_gpu: boolean;
-    use_global_mapper: boolean;
 }
 
-export interface BrushWorkflowSettings {
-    total_steps: number;
-    render_mode: 'default' | 'mip';
+export interface SpirulaGeometryWorkflowSettings {
+    compute_depth: boolean;
+    compute_normals: boolean;
+}
+
+export interface SpirulaTrainWorkflowSettings {
+    num_iterations: number;
+    quality: SpirulaTrainQuality;
+    floater_suppression: boolean;
+    meshing_preset: boolean;
+    primitive: SpirulaTrainPrimitive;
     sh_degree: number;
-    max_splats: number;
-    refine_every: number;
-    growth_grad_threshold: number;
-    growth_stop_iter: number;
-    max_resolution: number;
-    subsample_frames: number;
-    alpha_mode: 'masked' | 'transparent';
-    export_every: number;
+    cap_max: number;
 }
 
 export interface SplatGenerationSettings {
     ffmpeg: FfmpegSettings;
     frame_picker: FramePickerWorkflowSettings | null;
-    colmap: ColmapWorkflowSettings;
-    brush: BrushWorkflowSettings;
+    spirula_sfm: SpirulaSfmWorkflowSettings;
+    spirula_geometry: SpirulaGeometryWorkflowSettings;
+    spirula_train: SpirulaTrainWorkflowSettings;
 }
 
 export interface Reconstruction {
@@ -306,10 +315,13 @@ export async function getReconstructionSplat(
     return blob.arrayBuffer();
 }
 
-export interface ReconstructionPointCloudMeta {
-    count: number;
-    bounds: [[number, number, number], [number, number, number]];
-    cm_per_unit: number | null;
+export interface ReconstructionViewParams {
+    /** Rigid splat-space to plan-frame transform, row-major 4x4. */
+    matrix: number[][];
+    /** Centimetres per plan unit, null when the cameras cannot give a height. */
+    scale: number | null;
+    /** Camera envelope radius in plan units, used to frame the splat view. */
+    radius: number;
 }
 
 export async function getReconstructionPointCloud(
@@ -328,15 +340,15 @@ export async function getReconstructionPointCloud(
     return blob.arrayBuffer();
 }
 
-export function getReconstructionPointCloudMeta(
+export function getReconstructionViewParams(
     buildingId: string,
     reconstructionId: string,
     signal?: AbortSignal | null,
-): Promise<ReconstructionPointCloudMeta> {
+): Promise<ReconstructionViewParams> {
     const init: RequestInit = {};
     if (signal !== undefined && signal !== null) init.signal = signal;
     return requestJson(
-        `/buildings/${encodeURIComponent(buildingId)}/reconstructions/${encodeURIComponent(reconstructionId)}/point-cloud/meta`,
+        `/buildings/${encodeURIComponent(buildingId)}/reconstructions/${encodeURIComponent(reconstructionId)}/view-params`,
         init,
     );
 }

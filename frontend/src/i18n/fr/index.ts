@@ -448,24 +448,6 @@ export default {
             width: 'Largeur maximale',
             height: 'Hauteur maximale',
         },
-        colmap: {
-            title: 'Reconstruction des caméras (COLMAP)',
-            dataType: 'Type de données',
-            quality: 'Qualité',
-            cameraModel: 'Modèle de caméra',
-            sharedIntrinsics: 'Utiliser des paramètres intrinsèques de caméra communs',
-            useGpu: 'Utiliser le GPU',
-            globalMapper: 'Utiliser le reconstructeur global',
-            individual: 'Images individuelles',
-            video: 'Images vidéo',
-            internet: 'Images provenant d’Internet',
-            qualities: {
-                low: 'faible',
-                medium: 'moyenne',
-                high: 'élevée',
-                extreme: 'extrême',
-            },
-        },
         framePicker: {
             title: 'Sélection des images',
             description:
@@ -483,46 +465,70 @@ export default {
                 'Écarter une image lorsque sa netteté est inférieure à cette fraction de celle de ses voisines',
             reset: 'Rétablir les valeurs par défaut',
         },
-        brush: {
-            title: 'Reconstruction 3D par splats gaussiens avec Brush',
-            description: 'Entraîner un modèle de splats gaussiens 3D pour reconstruire la scène.',
-            coreTraining: 'Entraînement principal',
-            totalSteps: 'Nombre total d’étapes',
-            renderMode: 'Mode de rendu',
-            shDegree: 'Degré SH (harmoniques sphériques)',
-            refinement: 'Affinement et densité',
-            maxSplats: 'Nombre maximal de splats',
-            growthThreshold: 'Seuil du gradient de croissance',
-            growthHint: 'Plus bas = densification plus forte',
-            refineEvery: 'Affiner toutes les N étapes',
-            stopGrowth: 'Arrêter la croissance à l’étape',
-            dataset: 'Jeu de données et performances',
-            alphaMode: 'Mode du canal alpha',
-            maxResolution: 'Résolution maximale',
-            subsampleFrames: 'Conserver une image sur N',
-            exports: 'Exportations',
-            exportEvery: 'Exporter toutes les N étapes',
-            reset: 'Rétablir les valeurs par défaut',
-            renderModes: {
-                default: {
-                    label: 'Par défaut',
-                    description: 'Rastérisation standard ; performances les plus rapides.',
+        spirula: {
+            sfm: {
+                title: 'Reconstruction des caméras (spirula)',
+                dataType: 'Type de données',
+                pairs: 'Génération de paires',
+                pairsAuto: 'Automatique',
+                pairsExhaustive: 'Appariement exhaustif',
+                pairsSequential: 'Séquentiel',
+                pairsPrefilter: 'Préfiltrage par arbre de vocabulaire',
+                quality: 'Qualité',
+                cameraModel: 'Modèle de caméra',
+                sharedIntrinsics: 'Utiliser des paramètres intrinsèques de caméra communs',
+                individual: 'Images individuelles',
+                video: 'Images vidéo',
+                internet: 'Images provenant d’Internet',
+                cameraModels: {
+                    simplePinhole: 'Sténopé simple',
+                    pinhole: 'Sténopé',
+                    radial: 'Radial',
+                    opencv: 'OpenCV',
+                    opencvFisheye: 'OpenCV fisheye',
                 },
-                mip: {
-                    label: 'Mip',
-                    description:
-                        'Rendu avec anticrénelage ; réduit le scintillement des petits détails.',
+                qualities: {
+                    low: 'faible',
+                    medium: 'moyenne',
+                    high: 'élevée',
+                    extreme: 'extrême',
                 },
             },
-            alphaModes: {
-                transparent: {
-                    label: 'Transparent',
-                    description: 'Utilise le canal alpha pour la semi-transparence (verre, fumée).',
+            geometry: {
+                title: 'Cartes de géométrie (spirula)',
+                computeDepth: 'Calculer les cartes de profondeur',
+                computeNormals: 'Calculer les cartes de normales',
+            },
+            train: {
+                title: 'Entraînement des splats gaussiens (spirula)',
+                description:
+                    'Entraîner un modèle de splats gaussiens 3D pour reconstruire la scène.',
+                numIterations: 'Itérations d’entraînement',
+                quality: 'Qualité',
+                floaterSuppression: 'Suppression des artefacts flottants',
+                meshingPreset: 'Préréglage de maillage',
+                primitive: 'Primitive de splat',
+                shDegree: 'Degré SH (harmoniques sphériques)',
+                capMax: 'Nombre maximal de splats',
+                capMaxHint: 'Limite supérieure du nombre de splats pendant la densification',
+                reset: 'Rétablir les valeurs par défaut',
+                qualities: {
+                    low: 'faible',
+                    medium: 'moyenne',
+                    high: 'élevée',
+                    ultra: 'ultra',
                 },
-                masked: {
-                    label: 'Masqué',
-                    description:
-                        'Visibilité binaire ; traite l’alpha comme un masque à bords nets.',
+                primitives: {
+                    '3dgs': {
+                        label: '3DGS',
+                        description:
+                            'Splats gaussiens 3D standard ; les plus rapides et compatibles.',
+                    },
+                    mip: {
+                        label: 'Mip-Splatting',
+                        description:
+                            'Splats avec anticrénelage ; réduit le scintillement des petits détails.',
+                    },
                 },
             },
         },

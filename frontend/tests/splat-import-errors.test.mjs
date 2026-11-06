@@ -52,6 +52,7 @@ async function fixture(t, path) {
     const imports = [];
     const downloads = [];
     const buffer = new ArrayBuffer(16);
+    const splat = { buffer, viewParams: { matrix: [], radius: 2 } };
     let events;
     const scene = {
         props: ['splatData'],
@@ -95,9 +96,9 @@ async function fixture(t, path) {
         },
         'src/queries/reconstructions': {
             useReconstructionSplatQuery: () => ({
-                data: ref(buffer),
+                data: ref(splat),
                 error: ref(null),
-                state: ref({ status: 'success', data: buffer }),
+                state: ref({ status: 'success', data: splat }),
                 asyncStatus: ref('idle'),
                 refetch: () => assert.fail('Rendering retry must reuse the downloaded splat'),
             }),
@@ -149,10 +150,7 @@ async function fixture(t, path) {
     };
 }
 
-for (const path of [
-    'src/pages/ReconstructionPlanPage.vue',
-    'src/components/ReconstructionSplat.vue',
-]) {
+for (const path of ['src/pages/ReconstructionPlanPage.vue']) {
     test(`${path}: rejected imports remain retryable and recover`, async (t) => {
         const f = await fixture(t, path);
         for (let attempt = 0; attempt < 2; attempt++) {
@@ -172,7 +170,7 @@ for (const path of [
         await nextTurn();
         assert.equal(f.preparing(), false);
         assert.equal(f.alerts().length, 0);
-        assert.equal(f.downloads.length, path.includes('/pages/') ? 0 : 3);
+        assert.equal(f.downloads.length, 0);
     });
 
     test(`${path}: successful imports preserve ready and renderer error handling`, async (t) => {

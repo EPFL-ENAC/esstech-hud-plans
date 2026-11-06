@@ -9,7 +9,7 @@ export interface ZDistribution {
     /** Points per bin over `axis`, index 0 at the bottom. */
     counts: Uint32Array;
     maxCount: number;
-    /** Centre of the first density peak from the bottom, null on an empty cloud. */
+    /** Centre of the lowest density peak tall enough to be the floor, null on an empty cloud. */
     floorZ: number | null;
 }
 
@@ -22,6 +22,8 @@ export interface HeightTick {
 export const Z_BIN_COUNT = 300;
 /** Share of the points trimmed at each end of the axis. */
 export const AXIS_PERCENTILE = 0.005;
+/** Share of the tallest bin a peak must reach before it counts as the floor. */
+export const FLOOR_PEAK_MIN_FRACTION = 0.5;
 export const DEFAULT_SLAB_METERS = 2;
 export const DEFAULT_SLAB_FRACTION = 0.1;
 /** The default band starts above the floor, so floor points never clip by accident. */
@@ -32,7 +34,8 @@ const HEIGHT_TICK_STEPS = [0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100];
 const MAX_HEIGHT_TICKS = 5;
 const PERCENT_STEPS = [0.05, 0.1, 0.2, 0.25, 0.5, 1];
 
-function scanZRange(positions: Float32Array): ZAxisRange {
+/** Z extent of the cloud, or a zero range when the buffer holds no point. */
+export function scanZRange(positions: Float32Array): ZAxisRange {
     let min = Infinity;
     let max = -Infinity;
     for (let i = 2; i < positions.length; i += 3) {
@@ -40,7 +43,7 @@ function scanZRange(positions: Float32Array): ZAxisRange {
         if (z < min) min = z;
         if (z > max) max = z;
     }
-    return { min, max };
+    return min > max ? { min: 0, max: 0 } : { min, max };
 }
 
 function binCounts(positions: Float32Array, axis: ZAxisRange): Uint32Array {
@@ -88,13 +91,16 @@ function trimAxis(raw: ZAxisRange, counts: Uint32Array): ZAxisRange {
 }
 
 /**
- * Index of the first bin higher than both its neighbours, or -1 when the
- * histogram has no such bin. Missing neighbours count as empty bins.
+ * Index of the first bin higher than both its neighbours and at least
+ * `minCount`, or -1 when the histogram has no such bin. Missing neighbours
+ * count as empty bins.
  */
-export function firstLocalMaximumIndex(counts: ArrayLike<number>): number {
+export function firstLocalMaximumIndex(counts: ArrayLike<number>, minCount = 0): number {
     for (let i = 0; i < counts.length; i++) {
         const count = counts[i]!;
-        if (count > (counts[i - 1] ?? 0) && count > (counts[i + 1] ?? 0)) return i;
+        if (count >= minCount && count > (counts[i - 1] ?? 0) && count > (counts[i + 1] ?? 0)) {
+            return i;
+        }
     }
     return -1;
 }
@@ -139,7 +145,10 @@ export function computeZDistribution(
     for (const count of counts) if (count > maxCount) maxCount = count;
     if (maxCount === 0) return { ...empty, axis };
 
-    const localMaximum = firstLocalMaximumIndex(counts);
+    // Thin bumps near the bottom are noise, so the floor is the first peak that
+    // reaches half of the tallest bin.
+    const floorPeak = Math.ceil(maxCount * FLOOR_PEAK_MIN_FRACTION);
+    const localMaximum = firstLocalMaximumIndex(counts, floorPeak);
     const floorIndex = localMaximum >= 0 ? localMaximum : densestBinIndex(counts);
     const binWidth = (axis.max - axis.min) / Z_BIN_COUNT;
     return { axis, counts, maxCount, floorZ: axis.min + (floorIndex + 0.5) * binWidth };
