@@ -6,9 +6,12 @@ import shutil
 import signal
 import subprocess
 import threading
+from collections.abc import Callable
 from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
+
+from anyio import CancelScope, to_thread
 
 from ..common import BinaryReadStream, CommandTool, iter_command_log_records
 from .base import (
@@ -81,6 +84,16 @@ class LocalCommandExecutionEnvironment(CommandExecutionEnvironment):
         self._condition = threading.Condition()
         self._cancelled = False
         self._running: set[subprocess.Popen[bytes]] = set()
+
+    async def run[T](self, operation: Callable[[], T]) -> T:
+        try:
+            return await to_thread.run_sync(operation, abandon_on_cancel=True)
+        except BaseException:
+            # Cancelling the await does not stop the synchronous output reader.
+            # Keep the event loop available until its callbacks have finished.
+            with CancelScope(shield=True):
+                await to_thread.run_sync(self.cancel)
+            raise
 
     def cancel(self) -> None:
         """Kill command groups and wait for their output handling to finish.

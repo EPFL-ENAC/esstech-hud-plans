@@ -2,7 +2,7 @@ import logging
 import math
 import shutil
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from functools import partial
@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Literal, Self
 from uuid import UUID, uuid4
 
-from anyio import CancelScope, from_thread, to_thread
+from anyio import from_thread
 from prefect import flow, get_run_logger, task
 from prefect.cache_policies import DEFAULT
 from prefect.client.schemas.objects import FlowRun
@@ -362,24 +362,6 @@ class SplatGenerationArtifact:
         shutil.rmtree(self.root_directory, ignore_errors=True)
 
 
-async def _run_command_compute[T](
-    operation: Callable[[], T],
-    *,
-    execution_environment: CommandExecutionEnvironment,
-) -> T:
-    if not isinstance(execution_environment, LocalCommandExecutionEnvironment):
-        return await run_in_threadpool(operation)
-
-    try:
-        return await to_thread.run_sync(operation, abandon_on_cancel=True)
-    except BaseException:
-        # Cancelling the await does not stop the synchronous output reader.
-        # Keep the event loop available until its callbacks have finished.
-        with CancelScope(shield=True):
-            await to_thread.run_sync(execution_environment.cancel)
-        raise
-
-
 # Reporting and process ownership are execution details, not cached inputs.
 @task(
     name="extract-video-frames",
@@ -404,7 +386,7 @@ async def extract_frames_task(
         if progress is not None and report_progress is not None:
             report_progress(progress)
 
-    output_directory = await _run_command_compute(
+    output_directory = await execution_environment.run(
         partial(
             run_frame_extraction,
             Path(video_path),
@@ -416,7 +398,6 @@ async def extract_frames_task(
             fit_in_height=fit_in_height,
             on_log=log_ffmpeg,
         ),
-        execution_environment=execution_environment,
     )
     return str(output_directory)
 
@@ -480,7 +461,7 @@ async def reconstruct_with_colmap_task(
         if progress is not None and report_progress is not None:
             report_progress(progress)
 
-    output_directory = await _run_command_compute(
+    output_directory = await execution_environment.run(
         partial(
             run_colmap_reconstruction,
             Path(frames_directory),
@@ -490,7 +471,6 @@ async def reconstruct_with_colmap_task(
             execution_environment=execution_environment,
             on_log=log_colmap,
         ),
-        execution_environment=execution_environment,
     )
     return str(output_directory)
 
@@ -516,7 +496,7 @@ async def train_with_brush_task(
         if progress is not None and report_progress is not None:
             report_progress(progress)
 
-    output_path = await _run_command_compute(
+    output_path = await execution_environment.run(
         partial(
             run_brush_training,
             Path(dataset_directory),
@@ -526,7 +506,6 @@ async def train_with_brush_task(
             execution_environment=execution_environment,
             on_log=log_brush,
         ),
-        execution_environment=execution_environment,
     )
     return str(output_path)
 

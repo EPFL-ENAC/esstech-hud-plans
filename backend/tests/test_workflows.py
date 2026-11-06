@@ -248,6 +248,8 @@ def test_extract_frames_task_sends_ffmpeg_output_to_prefect_run_logger(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     environment = splat_workflow.LocalCommandExecutionEnvironment()
+    run = AsyncMock(wraps=environment.run)
+    monkeypatch.setattr(environment, "run", run)
     records: list[tuple[str, str]] = []
 
     class FakeRunLogger:
@@ -278,6 +280,7 @@ def test_extract_frames_task_sends_ffmpeg_output_to_prefect_run_logger(
         )
     )
 
+    run.assert_awaited_once()
     assert result == str(tmp_path / "frames")
     assert records == [
         ("ffmpeg: %s", "frame=1"),
@@ -360,6 +363,8 @@ def test_reconstruct_with_colmap_task_sends_output_to_prefect_run_logger(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     environment = splat_workflow.LocalCommandExecutionEnvironment()
+    run = AsyncMock(wraps=environment.run)
+    monkeypatch.setattr(environment, "run", run)
     records: list[tuple[str, str]] = []
     settings = ColmapSettings()
 
@@ -391,6 +396,7 @@ def test_reconstruct_with_colmap_task_sends_output_to_prefect_run_logger(
         )
     )
 
+    run.assert_awaited_once()
     assert result == str(tmp_path / "colmap")
     assert records == [
         ("colmap: %s", "feature extraction"),
@@ -402,6 +408,8 @@ def test_train_with_brush_task_sends_output_to_prefect_run_logger(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     environment = splat_workflow.LocalCommandExecutionEnvironment()
+    run = AsyncMock(wraps=environment.run)
+    monkeypatch.setattr(environment, "run", run)
     records: list[tuple[str, str]] = []
     settings = BrushSettings()
 
@@ -434,6 +442,7 @@ def test_train_with_brush_task_sends_output_to_prefect_run_logger(
         )
     )
 
+    run.assert_awaited_once()
     assert result == str(tmp_path / "splat.ply")
     assert records == [
         ("brush: %s", "step 1/10000"),

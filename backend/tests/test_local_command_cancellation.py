@@ -15,7 +15,6 @@ import pytest
 
 from api.lib.utils.commands import Command, CommandExecutionError
 from api.lib.utils.commands.environments import local
-from api.lib.workflows import splat_generation as workflow
 
 
 def _command(tool: local.CommandTool = "ffmpeg", *, streaming: bool = False) -> Command:
@@ -313,11 +312,7 @@ def test_async_cancellation_waits_for_output_cleanup(
             workspace=tmp_path,
             on_log=lambda record: anyio.from_thread.run(record_log, record),
         )
-        compute = partial(
-            workflow._run_command_compute,
-            operation,
-            execution_environment=environment,
-        )
+        compute = partial(environment.run, operation)
         with anyio.fail_after(5):
             if cancellation == "asyncio":
                 task = asyncio.create_task(compute())
@@ -350,7 +345,6 @@ def test_prefect_sigterm_cleans_up_before_interpreter_shutdown(tmp_path: Path) -
         from prefect.exceptions import TerminationSignal
         from prefect.utilities.engine import capture_sigterm
         from api.lib.utils.commands import Command, LocalCommandExecutionEnvironment
-        from api.lib.workflows.splat_generation import _run_command_compute
 
         ready_path = Path(sys.argv[1])
         environment = LocalCommandExecutionEnvironment()
@@ -368,14 +362,13 @@ def test_prefect_sigterm_cleans_up_before_interpreter_shutdown(tmp_path: Path) -
             assert not threading._SHUTTING_DOWN, 'Log emitted during shutdown'
 
         async def main():
-            await _run_command_compute(
+            await environment.run(
                 partial(
                     environment.execute,
                     Command('colmap', ('-c', child_script, str(ready_path)), 'combined'),
                     workspace=ready_path.parent,
                     on_log=on_log,
                 ),
-                execution_environment=environment,
             )
 
         try:

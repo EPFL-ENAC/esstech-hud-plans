@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Literal
 
+from anyio import to_thread
+
 from ..common import CommandLogCapture, CommandTool
 
 type LogCallback = Callable[[str], None]
@@ -44,6 +46,9 @@ class CommandExecutionError(RuntimeError):
 
 
 class CommandExecutionEnvironment(ABC):
+    async def run[T](self, operation: Callable[[], T]) -> T:
+        return await to_thread.run_sync(operation)
+
     @abstractmethod
     def execute(
         self,
