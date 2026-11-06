@@ -160,7 +160,7 @@ async def _reconstruction_failed_hook(
 
 
 async def _reconstruction_cancelled_hook(
-    _flow: Any,
+    flow: Any,
     flow_run: FlowRun,
     state: State,
 ) -> None:
@@ -189,7 +189,7 @@ async def _reconstruction_cancelled_hook(
 
 
 async def _reconstruction_crashed_hook(
-    _flow: Any,
+    flow: Any,
     flow_run: FlowRun,
     state: State,
 ) -> None:

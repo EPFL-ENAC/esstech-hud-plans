@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid4
 
 import pytest
@@ -289,6 +289,51 @@ def test_reconstruction_lifecycle_preserves_progress_and_partial_artifacts() -> 
             assert completed.status == ReconstructionStatus.COMPLETED
             assert completed.progress == 1.0
             assert completed.splat_path == "/data/splat.ply"
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("read_method", ["get", "list"])
+def test_reconstruction_reads_are_read_only(
+    monkeypatch: pytest.MonkeyPatch,
+    read_method: str,
+) -> None:
+    async def run() -> None:
+        async with reconstruction_service() as (service, session, _, building, _):
+            row = Reconstruction(
+                building_id=building.id,
+                settings={},
+                status=ReconstructionStatus.CANCELLING,
+                prefect_workflow_id=WORKFLOW_ID,
+                error_message="Cancellation requested",
+            )
+            session.add(row)
+            await session.commit()
+            await session.refresh(row)
+            expected = ReconstructionRead.model_validate(row).model_dump()
+            commit = AsyncMock(wraps=session.commit)
+            prefect_client = Mock(
+                side_effect=AssertionError(
+                    "Reconstruction reads must not contact Prefect"
+                )
+            )
+            monkeypatch.setattr(session, "commit", commit)
+            monkeypatch.setattr(workflow_common, "get_client", prefect_client)
+
+            if read_method == "get":
+                result = await service.get(row.id, building_id=building.id)
+            else:
+                page = await service.list(building_id=building.id)
+                assert page.total == 1
+                result = page.items[0]
+
+            assert result is not None
+            assert ReconstructionRead.model_validate(result).model_dump() == expected
+            assert not session.dirty
+            commit.assert_not_awaited()
+            prefect_client.assert_not_called()
+            await session.refresh(row)
+            assert ReconstructionRead.model_validate(row).model_dump() == expected
 
     asyncio.run(run())
 

@@ -4,13 +4,16 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
+from unittest.mock import call as mock_call
 from uuid import UUID, uuid4
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from prefect.client.schemas.objects import Log, StateType
+from prefect.runner import runner as prefect_runner
+from prefect.states import Cancelling, Crashed, State
 
 from api.config import config
 from api.lib.workflows import __main__ as workflow_runner
@@ -212,12 +215,13 @@ def test_schedule_counter_returns_prefect_run_id(
 def test_workflow_runner_serves_both_deployments(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    reconstruction = Mock(spec=["to_deployment"])
-    cleanup = Mock(spec=["to_deployment"])
-    serve = Mock()
+    reconstruction = Mock()
+    cleanup = Mock()
+    runner = SimpleNamespace(aadd_flow=AsyncMock(), start=AsyncMock())
+    runner_factory = Mock(return_value=runner)
     monkeypatch.setattr(workflow_runner, "splat_generation_flow", reconstruction)
     monkeypatch.setattr(workflow_runner, "tus_cleanup_flow", cleanup)
-    monkeypatch.setattr(workflow_runner, "serve", serve)
+    monkeypatch.setattr(workflow_runner, "Runner", runner_factory)
     monkeypatch.setattr(
         workflow_runner,
         "config",
@@ -226,19 +230,36 @@ def test_workflow_runner_serves_both_deployments(
         ),
     )
 
-    workflow_runner.serve_workflows()
+    asyncio.run(workflow_runner.serve_workflows())
 
-    reconstruction.to_deployment.assert_called_once_with(
-        name="default", concurrency_limit=8
+    runner_factory.assert_called_once_with(pause_on_shutdown=False, limit=9)
+    assert runner.aadd_flow.await_args_list == [
+        mock_call(reconstruction, name="default", concurrency_limit=8),
+        mock_call(cleanup, name="tus-cleanup", interval=86400, concurrency_limit=1),
+    ]
+    runner.start.assert_awaited_once_with()
+
+
+def test_workflow_runner_retains_flows_for_cancellation_hooks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = prefect_runner.Runner(pause_on_shutdown=False)
+    deployment_ids = [uuid4(), uuid4()]
+    monkeypatch.setattr(
+        runner,
+        "aadd_deployment",
+        AsyncMock(side_effect=deployment_ids),
     )
-    cleanup.to_deployment.assert_called_once_with(
-        name="tus-cleanup", interval=86400, concurrency_limit=1
+    monkeypatch.setattr(runner, "start", AsyncMock())
+    monkeypatch.setattr(workflow_runner, "Runner", lambda **_: runner)
+
+    asyncio.run(workflow_runner.serve_workflows())
+
+    assert runner._deployment_registry.get_flow(deployment_ids[0]) is (
+        workflow_runner.splat_generation_flow
     )
-    serve.assert_called_once_with(
-        reconstruction.to_deployment.return_value,
-        cleanup.to_deployment.return_value,
-        pause_on_shutdown=False,
-        limit=9,
+    assert runner._deployment_registry.get_flow(deployment_ids[1]) is (
+        workflow_runner.tus_cleanup_flow
     )
 
 
@@ -1206,6 +1227,47 @@ def test_reconstruction_cancelled_hook_cancels_registered_scitas_jobs(
         assert cancelled_workspaces == [reconstruction_id.hex]
     else:
         assert cancelled_workspaces == []
+
+
+@pytest.mark.parametrize(
+    ("hook_attribute", "mark_method_name", "state"),
+    [
+        ("on_cancellation_hooks", "mark_cancelled", Cancelling(message="Cancelled")),
+        ("on_crashed_hooks", "mark_crashed", Crashed(message="Crashed")),
+    ],
+)
+def test_reconstruction_hooks_accept_prefect_runner_keyword_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+    hook_attribute: str,
+    mark_method_name: str,
+    state: State,
+) -> None:
+    reconstruction_id = uuid4()
+    flow_run = SimpleNamespace(
+        id=uuid4(),
+        parameters={"reconstruction_id": str(reconstruction_id)},
+    )
+    service = SimpleNamespace(mark_cancelled=AsyncMock(), mark_crashed=AsyncMock())
+    logger = Mock()
+
+    @asynccontextmanager
+    async def fake_service_context():
+        yield service
+
+    monkeypatch.setattr(splat_workflow, "_reconstruction_service", fake_service_context)
+    monkeypatch.setattr(config, "USE_SCITAS", False)
+    monkeypatch.setattr(prefect_runner, "flow_run_logger", lambda *_: logger)
+
+    flow = splat_workflow.splat_generation_flow
+    asyncio.run(
+        prefect_runner._run_hooks(getattr(flow, hook_attribute), flow_run, flow, state)
+    )
+
+    getattr(service, mark_method_name).assert_awaited_once_with(
+        reconstruction_id,
+        error_message=state.message,
+    )
+    logger.error.assert_not_called()
 
 
 # A delete request removes the reconstruction row before the runner runs the

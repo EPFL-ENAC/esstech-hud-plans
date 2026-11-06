@@ -446,6 +446,11 @@ class ReconstructionService:
     ) -> Reconstruction:
         try:
             reconstruction = await self._get_for_update(reconstruction_id)
+            print("\n\n\n\n\n\n\n\n\n\n")
+            print(reconstruction)
+            print(reconstruction.id)
+            print(reconstruction.status)
+            print("\n\n\n\n\n\n\n\n\n\n")
             changed = reconstruction.mark_terminal_in_memory(
                 ReconstructionStatus.CANCELLED,
                 error_message,
