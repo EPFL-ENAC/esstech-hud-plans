@@ -4,13 +4,15 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid4
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from prefect.client.schemas.objects import Log, StateType
+from prefect.runner import _hook_runner as prefect_hook_runner
+from prefect.states import Cancelling, Crashed, State
 
 from api.config import config
 from api.lib.workflows import __main__ as workflow_runner
@@ -245,6 +247,9 @@ def test_workflow_runner_serves_both_deployments(
 def test_extract_frames_task_sends_ffmpeg_output_to_prefect_run_logger(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    environment = splat_workflow.LocalCommandExecutionEnvironment()
+    run = AsyncMock(wraps=environment.run)
+    monkeypatch.setattr(environment, "run", run)
     records: list[tuple[str, str]] = []
 
     class FakeRunLogger:
@@ -253,10 +258,7 @@ def test_extract_frames_task_sends_ffmpeg_output_to_prefect_run_logger(
 
     def fake_run_frame_extraction(*args, on_log, **kwargs):
         assert kwargs["workspace_directory"] == tmp_path
-        assert (
-            kwargs["execution_environment"]
-            is splat_workflow.LOCAL_EXECUTION_ENVIRONMENT
-        )
+        assert kwargs["execution_environment"] is environment
         on_log("frame=1")
         on_log("frame=2")
         return tmp_path / "frames"
@@ -274,9 +276,11 @@ def test_extract_frames_task_sends_ffmpeg_output_to_prefect_run_logger(
             2,
             100,
             100,
+            execution_environment=environment,
         )
     )
 
+    run.assert_awaited_once()
     assert result == str(tmp_path / "frames")
     assert records == [
         ("ffmpeg: %s", "frame=1"),
@@ -358,6 +362,9 @@ def test_pick_frames_task_rejects_empty_selection(
 def test_reconstruct_with_colmap_task_sends_output_to_prefect_run_logger(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    environment = splat_workflow.LocalCommandExecutionEnvironment()
+    run = AsyncMock(wraps=environment.run)
+    monkeypatch.setattr(environment, "run", run)
     records: list[tuple[str, str]] = []
     settings = ColmapSettings()
 
@@ -367,10 +374,7 @@ def test_reconstruct_with_colmap_task_sends_output_to_prefect_run_logger(
 
     def fake_run_colmap_reconstruction(*args, on_log, **kwargs):
         assert kwargs["workspace_directory"] == tmp_path
-        assert (
-            kwargs["execution_environment"]
-            is splat_workflow.LOCAL_EXECUTION_ENVIRONMENT
-        )
+        assert kwargs["execution_environment"] is environment
         on_log("feature extraction")
         on_log("mapping")
         return tmp_path / "colmap"
@@ -388,9 +392,11 @@ def test_reconstruct_with_colmap_task_sends_output_to_prefect_run_logger(
             str(tmp_path / "frames"),
             str(tmp_path / "colmap"),
             settings,
+            execution_environment=environment,
         )
     )
 
+    run.assert_awaited_once()
     assert result == str(tmp_path / "colmap")
     assert records == [
         ("colmap: %s", "feature extraction"),
@@ -401,6 +407,9 @@ def test_reconstruct_with_colmap_task_sends_output_to_prefect_run_logger(
 def test_train_with_brush_task_sends_output_to_prefect_run_logger(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    environment = splat_workflow.LocalCommandExecutionEnvironment()
+    run = AsyncMock(wraps=environment.run)
+    monkeypatch.setattr(environment, "run", run)
     records: list[tuple[str, str]] = []
     settings = BrushSettings()
 
@@ -411,10 +420,7 @@ def test_train_with_brush_task_sends_output_to_prefect_run_logger(
     def fake_run_brush_training(*args, on_log, **kwargs):
         assert args == (tmp_path, tmp_path / "splat.ply", settings)
         assert kwargs["workspace_directory"] == tmp_path
-        assert (
-            kwargs["execution_environment"]
-            is splat_workflow.LOCAL_EXECUTION_ENVIRONMENT
-        )
+        assert kwargs["execution_environment"] is environment
         on_log("step 1/10000")
         on_log("exporting")
         return tmp_path / "splat.ply"
@@ -432,9 +438,11 @@ def test_train_with_brush_task_sends_output_to_prefect_run_logger(
             str(tmp_path),
             str(tmp_path / "splat.ply"),
             settings,
+            execution_environment=environment,
         )
     )
 
+    run.assert_awaited_once()
     assert result == str(tmp_path / "splat.ply")
     assert records == [
         ("brush: %s", "step 1/10000"),
@@ -514,10 +522,12 @@ def test_splat_generation_flow_selects_gpu_environment(
     )
 
     assert result == str(workspace / "splat.ply")
+    local_environment = calls[0][1]["execution_environment"]
+    assert isinstance(
+        local_environment, splat_workflow.LocalCommandExecutionEnvironment
+    )
     gpu_environment = (
-        splat_workflow.SCITAS_EXECUTION_ENVIRONMENT
-        if use_scitas
-        else splat_workflow.LOCAL_EXECUTION_ENVIRONMENT
+        splat_workflow.SCITAS_EXECUTION_ENVIRONMENT if use_scitas else local_environment
     )
     expected_calls: list[tuple[str, dict[str, object]]] = [
         (
@@ -531,7 +541,7 @@ def test_splat_generation_flow_selects_gpu_environment(
                 "fps": None if use_frame_picker else 2.0,
                 "fit_in_width": 1920,
                 "fit_in_height": 1920,
-                "execution_environment": splat_workflow.LOCAL_EXECUTION_ENVIRONMENT,
+                "execution_environment": local_environment,
             },
         ),
     ]
@@ -1206,6 +1216,49 @@ def test_reconstruction_cancelled_hook_cancels_registered_scitas_jobs(
         assert cancelled_workspaces == [reconstruction_id.hex]
     else:
         assert cancelled_workspaces == []
+
+
+@pytest.mark.parametrize(
+    ("hook_method_name", "mark_method_name", "state"),
+    [
+        ("run_cancellation_hooks", "mark_cancelled", Cancelling(message="Cancelled")),
+        ("run_crashed_hooks", "mark_crashed", Crashed(message="Crashed")),
+    ],
+)
+def test_reconstruction_hooks_accept_prefect_runner_keyword_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+    hook_method_name: str,
+    mark_method_name: str,
+    state: State,
+) -> None:
+    reconstruction_id = uuid4()
+    flow_run = SimpleNamespace(
+        id=uuid4(),
+        parameters={"reconstruction_id": str(reconstruction_id)},
+    )
+    service = SimpleNamespace(mark_cancelled=AsyncMock(), mark_crashed=AsyncMock())
+    logger = Mock()
+
+    @asynccontextmanager
+    async def fake_service_context():
+        yield service
+
+    monkeypatch.setattr(splat_workflow, "_reconstruction_service", fake_service_context)
+    monkeypatch.setattr(config, "USE_SCITAS", False)
+    monkeypatch.setattr(prefect_hook_runner, "flow_run_logger", lambda *_: logger)
+
+    flow = splat_workflow.splat_generation_flow
+    resolve_flow = AsyncMock(return_value=flow)
+    hook_runner = prefect_hook_runner.HookRunner(resolve_flow=resolve_flow)
+    asyncio.run(getattr(hook_runner, hook_method_name)(flow_run, state))
+
+    resolve_flow.assert_awaited_once_with(flow_run)
+    getattr(service, mark_method_name).assert_awaited_once_with(
+        reconstruction_id,
+        error_message=state.message,
+    )
+    logger.error.assert_not_called()
+    logger.warning.assert_not_called()
 
 
 # A delete request removes the reconstruction row before the runner runs the

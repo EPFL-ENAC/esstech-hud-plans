@@ -1,6 +1,8 @@
+import asyncio
 import os
 import shlex
 import subprocess
+import threading
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -9,6 +11,27 @@ from api.lib.compute import scitas as scitas_compute
 from api.lib.compute.progress import BrushProgressEstimator
 from api.lib.utils import commands
 from api.lib.utils.commands.environments import scitas as scitas_commands
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_scitas_run_offloads_operation_and_preserves_outcome(fails: bool) -> None:
+    environment = scitas_commands.ScitasCommandExecutionEnvironment()
+    event_loop_thread = threading.get_ident()
+    result = object()
+    failure = RuntimeError("Operation failed")
+
+    def operation() -> object:
+        assert threading.get_ident() != event_loop_thread
+        if fails:
+            raise failure
+        return result
+
+    if fails:
+        with pytest.raises(RuntimeError) as error:
+            asyncio.run(environment.run(operation))
+        assert error.value is failure
+    else:
+        assert asyncio.run(environment.run(operation)) is result
 
 
 def test_scitas_log_tail_feeds_incremental_progress_across_polls(

@@ -52,7 +52,6 @@ from api.services.reconstructions import (
 )
 
 SPLAT_GENERATION_DEPLOYMENT = "splat-generation/default"
-LOCAL_EXECUTION_ENVIRONMENT = LocalCommandExecutionEnvironment()
 SCITAS_EXECUTION_ENVIRONMENT = ScitasCommandExecutionEnvironment()
 
 logger = logging.getLogger(__name__)
@@ -160,7 +159,7 @@ async def _reconstruction_failed_hook(
 
 
 async def _reconstruction_cancelled_hook(
-    _flow: Any,
+    flow: Any,
     flow_run: FlowRun,
     state: State,
 ) -> None:
@@ -189,7 +188,7 @@ async def _reconstruction_cancelled_hook(
 
 
 async def _reconstruction_crashed_hook(
-    _flow: Any,
+    flow: Any,
     flow_run: FlowRun,
     state: State,
 ) -> None:
@@ -363,8 +362,11 @@ class SplatGenerationArtifact:
         shutil.rmtree(self.root_directory, ignore_errors=True)
 
 
-# Reporting is an execution detail, not an input to the cached computation.
-@task(name="extract-video-frames", cache_policy=DEFAULT - "report_progress")
+# Reporting and process ownership are execution details, not cached inputs.
+@task(
+    name="extract-video-frames",
+    cache_policy=DEFAULT - "report_progress" - "execution_environment",
+)
 async def extract_frames_task(
     workspace_directory: str,
     video_path: str,
@@ -372,7 +374,7 @@ async def extract_frames_task(
     fps: float | None,
     fit_in_width: int,
     fit_in_height: int,
-    execution_environment: CommandExecutionEnvironment = LOCAL_EXECUTION_ENVIRONMENT,
+    execution_environment: CommandExecutionEnvironment,
     report_progress: ReportProgress | None = None,
 ) -> str:
     run_logger = get_run_logger()
@@ -384,16 +386,18 @@ async def extract_frames_task(
         if progress is not None and report_progress is not None:
             report_progress(progress)
 
-    output_directory = await run_in_threadpool(
-        run_frame_extraction,
-        Path(video_path),
-        Path(frames_directory),
-        workspace_directory=Path(workspace_directory),
-        execution_environment=execution_environment,
-        fps=fps,
-        fit_in_width=fit_in_width,
-        fit_in_height=fit_in_height,
-        on_log=log_ffmpeg,
+    output_directory = await execution_environment.run(
+        partial(
+            run_frame_extraction,
+            Path(video_path),
+            Path(frames_directory),
+            workspace_directory=Path(workspace_directory),
+            execution_environment=execution_environment,
+            fps=fps,
+            fit_in_width=fit_in_width,
+            fit_in_height=fit_in_height,
+            on_log=log_ffmpeg,
+        ),
     )
     return str(output_directory)
 
@@ -436,13 +440,16 @@ async def pick_frames_task(
     return str(Path(frames_directory).resolve())
 
 
-@task(name="reconstruct-with-colmap", cache_policy=DEFAULT - "report_progress")
+@task(
+    name="reconstruct-with-colmap",
+    cache_policy=DEFAULT - "report_progress" - "execution_environment",
+)
 async def reconstruct_with_colmap_task(
     workspace_directory: str,
     frames_directory: str,
     colmap_directory: str,
     settings: ColmapSettings,
-    execution_environment: CommandExecutionEnvironment = LOCAL_EXECUTION_ENVIRONMENT,
+    execution_environment: CommandExecutionEnvironment,
     report_progress: ReportProgress | None = None,
 ) -> str:
     run_logger = get_run_logger()
@@ -454,25 +461,30 @@ async def reconstruct_with_colmap_task(
         if progress is not None and report_progress is not None:
             report_progress(progress)
 
-    output_directory = await run_in_threadpool(
-        run_colmap_reconstruction,
-        Path(frames_directory),
-        Path(colmap_directory),
-        settings,
-        workspace_directory=Path(workspace_directory),
-        execution_environment=execution_environment,
-        on_log=log_colmap,
+    output_directory = await execution_environment.run(
+        partial(
+            run_colmap_reconstruction,
+            Path(frames_directory),
+            Path(colmap_directory),
+            settings,
+            workspace_directory=Path(workspace_directory),
+            execution_environment=execution_environment,
+            on_log=log_colmap,
+        ),
     )
     return str(output_directory)
 
 
-@task(name="train-with-brush", cache_policy=DEFAULT - "report_progress")
+@task(
+    name="train-with-brush",
+    cache_policy=DEFAULT - "report_progress" - "execution_environment",
+)
 async def train_with_brush_task(
     workspace_directory: str,
     dataset_directory: str,
     splat_path: str,
     settings: BrushSettings,
-    execution_environment: CommandExecutionEnvironment = LOCAL_EXECUTION_ENVIRONMENT,
+    execution_environment: CommandExecutionEnvironment,
     report_progress: ReportProgress | None = None,
 ) -> str:
     run_logger = get_run_logger()
@@ -484,14 +496,16 @@ async def train_with_brush_task(
         if progress is not None and report_progress is not None:
             report_progress(progress)
 
-    output_path = await run_in_threadpool(
-        run_brush_training,
-        Path(dataset_directory),
-        Path(splat_path),
-        settings,
-        workspace_directory=Path(workspace_directory),
-        execution_environment=execution_environment,
-        on_log=log_brush,
+    output_path = await execution_environment.run(
+        partial(
+            run_brush_training,
+            Path(dataset_directory),
+            Path(splat_path),
+            settings,
+            workspace_directory=Path(workspace_directory),
+            execution_environment=execution_environment,
+            on_log=log_brush,
+        ),
     )
     return str(output_path)
 
@@ -531,10 +545,9 @@ async def splat_generation_flow(
     run_logger = get_run_logger()
     run_logger.info("Starting splat generation for artifact %s", artifact_id)
 
+    local_environment = LocalCommandExecutionEnvironment()
     gpu_execution_environment = (
-        SCITAS_EXECUTION_ENVIRONMENT
-        if config.USE_SCITAS
-        else LOCAL_EXECUTION_ENVIRONMENT
+        SCITAS_EXECUTION_ENVIRONMENT if config.USE_SCITAS else local_environment
     )
 
     frame_picker_settings = settings.frame_picker
@@ -548,7 +561,7 @@ async def splat_generation_flow(
         fps=None if frame_picker_settings is not None else settings.ffmpeg.fps,
         fit_in_width=settings.ffmpeg.fit_in_width,
         fit_in_height=settings.ffmpeg.fit_in_height,
-        execution_environment=LOCAL_EXECUTION_ENVIRONMENT,
+        execution_environment=local_environment,
         report_progress=_progress_callback(reconstruction_id, 0.05, 0.25),
     )
     await _record_reconstruction_progress(

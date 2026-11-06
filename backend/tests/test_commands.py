@@ -61,6 +61,19 @@ class _FailingStream:
         pass
 
 
+@pytest.fixture(autouse=True)
+def mock_process_groups(monkeypatch: pytest.MonkeyPatch) -> None:
+    kill_process_group = local_commands._kill_process_group
+
+    def kill(process) -> None:
+        if isinstance(process, _FakeProcess):
+            process.terminate()
+        else:
+            kill_process_group(process)
+
+    monkeypatch.setattr(local_commands, "_kill_process_group", kill)
+
+
 def test_iter_command_log_records_normalizes_stream_boundaries() -> None:
     stream = _ChunkedStream(
         [
@@ -149,7 +162,9 @@ def test_local_environment_configures_capture_and_streams_before_waiting(
         "stdin": subprocess.DEVNULL,
         "stdout": expected_stdout,
         "stderr": expected_stderr,
+        "env": None,
         "bufsize": 0,
+        "start_new_session": True,
     }
 
 
