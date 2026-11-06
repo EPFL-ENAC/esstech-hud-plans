@@ -322,8 +322,6 @@ export interface ReconstructionViewParams {
     scale: number | null;
     /** Camera envelope radius in plan units, used to frame the splat view. */
     radius: number;
-    bounds: [[number, number, number], [number, number, number]];
-    count: number;
 }
 
 export async function getReconstructionPointCloud(

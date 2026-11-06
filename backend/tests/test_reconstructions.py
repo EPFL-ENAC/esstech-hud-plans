@@ -1,7 +1,6 @@
 import asyncio
 import errno
 import json
-import struct
 import threading
 from collections.abc import AsyncIterator, Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -1654,7 +1653,6 @@ def _fake_point_cloud_colmap(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "api.lib.compute.colmap_geometric_data.colmap_compute_geometric_data", fake
     )
-    monkeypatch.setattr(reconstruction_views, "colmap_compute_geometric_data", fake)
 
 
 def _create_sparse_model(splat_path: Path) -> None:
@@ -1703,20 +1701,24 @@ def test_missing_point_cloud_artifacts_are_generated_on_request(
     binary_path = splat_path.with_name(POINT_CLOUD_BINARY_FILENAME)
     meta_path = splat_path.with_name(POINT_CLOUD_META_FILENAME)
     assert binary_response.content == binary_path.read_bytes()
-    assert binary_path.read_bytes() == struct.pack("<6f", 1.0, 2.0, 2.0, -4.0, 0.5, 2.0)
     meta = json.loads(meta_path.read_text())
-    assert meta["count"] == 2
     assert sorted(item.name for item in splat_path.parent.iterdir()) == sorted(
         ["colmap", "splat.ply", POINT_CLOUD_BINARY_FILENAME, POINT_CLOUD_META_FILENAME]
     )
 
-    view = view_response.json()
+    # The view params are the baked plan frame, so the response is the meta.
     assert view_response.status_code == 200
-    assert view["matrix"] == np.eye(4).tolist()
-    assert view["radius"] == pytest.approx(2.0)
-    assert view["scale"] == pytest.approx(170.0 * 0.9 / 3.0)
-    assert view["bounds"] == [[-4.0, 0.5, 2.0], [1.0, 2.0, 2.0]]
-    assert view["count"] == 2
+    assert view_response.json() == meta
+    assert meta["radius"] == pytest.approx(2.0)
+    assert meta["scale"] == pytest.approx(170.0 * 0.9 / 3.0)
+    baked = np.frombuffer(binary_path.read_bytes(), dtype="<f4").reshape(-1, 3)
+    expected = (
+        np.array([[1.0, 2.0, 2.0], [-4.0, 0.5, 2.0]])
+        @ np.array(meta["matrix"])[:3, :3].T
+        + np.array(meta["matrix"])[:3, 3]
+    )
+    np.testing.assert_allclose(baked, expected, atol=1e-5)
+    assert len(baked) == 2
 
 
 def test_view_params_require_a_completed_splat(
@@ -1748,7 +1750,7 @@ def test_view_params_require_a_colmap_model(
     assert response.json() == {"detail": "COLMAP sparse reconstruction not found"}
 
 
-def test_view_params_answer_without_scale_when_generation_fails(
+def test_view_params_are_not_found_when_generation_fails(
     reconstruction_api: tuple[TestClient, UUID],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1769,9 +1771,8 @@ def test_view_params_answer_without_scale_when_generation_fails(
         f"/buildings/{BUILDING_ID}/reconstructions/{reconstruction_id}/view-params"
     )
 
-    assert response.status_code == 200
-    assert response.json()["scale"] is None
-    assert response.json()["count"] == 0
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Reconstruction view parameters not found"}
 
 
 def test_point_cloud_artifacts_are_generated_once_across_requests(

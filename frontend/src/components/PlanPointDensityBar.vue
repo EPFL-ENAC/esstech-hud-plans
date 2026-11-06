@@ -146,9 +146,7 @@ function draw(): void {
 }
 
 function rebuild(): void {
-    const bounds = props.viewParams.bounds;
-    const raw = { min: bounds[0][2], max: bounds[1][2] };
-    const next = computeZDistribution(new Float32Array(props.buffer), raw);
+    const next = computeZDistribution(new Float32Array(props.buffer));
     distribution.value = next;
     // A flat or empty cloud has no axis to select on: no range means "keep every point".
     range.value =

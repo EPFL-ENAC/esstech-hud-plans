@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import mimetypes
 from collections.abc import AsyncIterator
@@ -8,21 +7,16 @@ from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
-import numpy as np
 from fastapi import Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.routing import APIRouter
 from sqlalchemy.exc import SQLAlchemyError
 
 from api.config import config
-from api.lib.compute.colmap_geometric_data import colmap_compute_geometric_data
 from api.lib.compute.point_cloud import (
     POINT_CLOUD_BINARY_FILENAME,
-    POINT_CLOUD_META_FILENAME,
     generate_plan_point_cloud_if_missing,
-    plan_scale,
-    read_plan_positions,
-    transform_points,
+    read_point_cloud_meta,
 )
 from api.lib.workflows import common as workflow_common
 from api.lib.workflows.common import (
@@ -129,9 +123,8 @@ def get_reconstruction_view_params(
     """Plan frame, scale and framing radius shared by both plan viewers.
 
     The 3D view applies ``matrix`` to the raw splat and the 2D view reads the
-    baked point cloud, so both come from this single response. ``scale`` needs
-    the plan-frame floor, which only the baked positions give, hence the point
-    cloud artifact generation below.
+    baked point cloud, so both come from the single set of values stored next to
+    the splat when it was baked.
     """
     if (
         reconstruction.status != ReconstructionStatus.COMPLETED
@@ -161,31 +154,15 @@ def get_reconstruction_view_params(
                 reconstruction.id,
             )
 
-        geometric_data = colmap_compute_geometric_data(
-            str(artifact.colmap_sparse_directory)
+        meta = read_point_cloud_meta(artifact.splat_path)
+
+    if "matrix" not in meta:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Reconstruction view parameters not found",
         )
-        plan_cameras = transform_points(
-            np.asarray(geometric_data.positions), geometric_data.matrix
-        )
-        meta = _read_point_cloud_meta(artifact.splat_path)
-        positions = read_plan_positions(artifact.splat_path)
 
-    return JSONResponse(
-        content={
-            "matrix": geometric_data.matrix,
-            "scale": plan_scale(positions, plan_cameras),
-            "radius": geometric_data.radius,
-            "bounds": meta["bounds"],
-            "count": meta["count"],
-        }
-    )
-
-
-def _read_point_cloud_meta(splat_path: Path) -> dict:
-    meta_path = splat_path.with_name(POINT_CLOUD_META_FILENAME)
-    if not meta_path.is_file():
-        return {"count": 0, "bounds": [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]}
-    return json.loads(meta_path.read_text())
+    return JSONResponse(content=meta)
 
 
 @router.get("/{reconstruction_id}/splat", response_class=FileResponse)

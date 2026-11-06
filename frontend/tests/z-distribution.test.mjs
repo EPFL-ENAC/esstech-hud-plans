@@ -47,19 +47,55 @@ test('computes the same distribution with and without a known raw range', async 
     assert.deepEqual([...given.counts], [...scanned.counts]);
 });
 
+test('scans the Z extent, and reports a zero range when empty', async (t) => {
+    const z = await load(t);
+    assert.deepEqual(
+        z.scanZRange(
+            cloud([
+                [0, 3],
+                [2.5, 9],
+                [-1, 4],
+            ]),
+        ),
+        { min: -1, max: 2.5 },
+    );
+    assert.deepEqual(z.scanZRange(new Float32Array()), { min: 0, max: 0 });
+});
+
 test('reports no floor on an empty or flat cloud', async (t) => {
     const z = await load(t);
     assert.equal(z.computeZDistribution(new Float32Array()).floorZ, null);
     assert.equal(z.computeZDistribution(cloud([[1.5, 40]])).floorZ, null);
 });
 
-test('takes the first local maximum from the bottom, noise included', async (t) => {
+test('takes the first local maximum from the bottom', async (t) => {
     const z = await load(t);
     assert.equal(z.firstLocalMaximumIndex([0, 0, 7, 3, 9, 0]), 2);
     assert.equal(z.firstLocalMaximumIndex([7, 0, 0, 0]), 0);
     assert.equal(z.firstLocalMaximumIndex([1, 2, 3]), 2);
     assert.equal(z.firstLocalMaximumIndex([0, 0, 0]), -1);
     assert.equal(z.firstLocalMaximumIndex([4, 4, 4]), -1);
+});
+
+test('ignores peaks below the minimum count', async (t) => {
+    const z = await load(t);
+    assert.equal(z.firstLocalMaximumIndex([3, 1, 9, 1, 2], 5), 2);
+    assert.equal(z.firstLocalMaximumIndex([5, 1, 9, 1, 2], 5), 0);
+    assert.equal(z.firstLocalMaximumIndex([4, 1, 2], 5), -1);
+});
+
+test('skips a floor peak under half of the tallest bin', async (t) => {
+    const z = await load(t);
+    assert.equal(z.FLOOR_PEAK_MIN_FRACTION, 0.5);
+
+    const distribution = z.computeZDistribution(
+        cloud([
+            [0, 5],
+            [1, 200],
+        ]),
+    );
+
+    assert.ok(Math.abs(distribution.floorZ - 1) < 0.02);
 });
 
 test('scales bars with a square root or linearly', async (t) => {

@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n';
 import { useAsyncResultCollection } from 'unwrapped/vue';
 import { AsyncResult } from 'unwrapped/core';
 import type { ReconstructionViewParams } from 'src/lib/buildings';
-import type { ZAxisRange } from 'src/lib/maths/zDistribution';
+import { scanZRange, type ZAxisRange } from 'src/lib/maths/zDistribution';
 import PlanPointDensityBar from 'src/components/PlanPointDensityBar.vue';
 
 const PAN_MARGIN = 0.2;
@@ -114,8 +114,8 @@ function framingRadius(): number {
 
 function applyBoundsAndCamera(): void {
     if (!camera) return;
-    // Framing comes from the camera radius; the cloud bounds only give the depth.
-    const [[, , minZ], [, , maxZ]] = props.viewParams.bounds;
+    // Framing comes from the camera radius; the cloud only gives the depth.
+    const { min: minZ, max: maxZ } = scanZRange(new Float32Array(props.buffer));
     const depth = Math.max(maxZ - minZ, MIN_SPAN);
     frustumSize = 2 * framingRadius();
     const distance = maxZ + depth * 0.5 + 1;

@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from api.config import config
+from api.lib.compute.plan_orientation import align_plan_frame
 
 CAMERAMAN_HEIGHT_CM = 170.0
 # Assume the camera sits at 90% of the cameraman height
@@ -139,9 +140,14 @@ def generate_plan_point_cloud(splat_path: Path, colmap_directory: Path) -> None:
         geometric_data.radius,
         config.PLAN_DENSITY_THRESHOLD,
     )
+    # The camera poses put the scene level but leave the heading open; the point
+    # layout decides it, so both viewers get walls aligned with the plan axes.
+    rotation = align_plan_frame(positions[:, :2])
+    positions = transform_points(positions, rotation)
+    matrix = rotation @ np.asarray(geometric_data.matrix, dtype=np.float64)
+    plan_cameras = transform_points(np.asarray(geometric_data.positions), matrix)
 
     if positions.shape[0] == 0:
-        bounds = [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
         logger.warning(
             "Plan point cloud for %s is empty: every splat was filtered out "
             "(threshold=%g, %d splats considered)",
@@ -149,14 +155,10 @@ def generate_plan_point_cloud(splat_path: Path, colmap_directory: Path) -> None:
             config.PLAN_DENSITY_THRESHOLD * geometric_data.radius**3,
             len(means),
         )
-    else:
-        bounds = [
-            [float(value) for value in positions.min(axis=0)],
-            [float(value) for value in positions.max(axis=0)],
-        ]
     meta = {
-        "count": int(positions.shape[0]),
-        "bounds": bounds,
+        "matrix": matrix.tolist(),
+        "scale": plan_scale(positions, plan_cameras),
+        "radius": float(geometric_data.radius),
     }
 
     _atomic_write(
@@ -169,11 +171,21 @@ def generate_plan_point_cloud(splat_path: Path, colmap_directory: Path) -> None:
     )
 
 
+def read_point_cloud_meta(splat_path: Path) -> dict:
+    """Plan frame values baked next to the splat; empty when not baked."""
+    path = splat_path.with_name(POINT_CLOUD_META_FILENAME)
+    if not path.is_file():
+        return {}
+    return json.loads(path.read_text())
+
+
 def plan_point_cloud_artifacts_exist(splat_path: Path) -> bool:
     """Both artifacts are written together, so their joint presence means done."""
     return (
         splat_path.with_name(POINT_CLOUD_BINARY_FILENAME).is_file()
         and splat_path.with_name(POINT_CLOUD_META_FILENAME).is_file()
+        # Artifacts baked before the plan frame was stored must be rebuilt.
+        and "matrix" in read_point_cloud_meta(splat_path)
     )
 
 

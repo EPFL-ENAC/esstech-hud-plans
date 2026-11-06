@@ -188,15 +188,19 @@ def test_generate_plan_point_cloud_writes_artifacts_next_to_splat(
     binary_path = splat_path.with_name(POINT_CLOUD_BINARY_FILENAME)
     meta_path = splat_path.with_name(POINT_CLOUD_META_FILENAME)
 
-    expected = np.array([[1.0, 2.0, 2.0], [-4.0, 0.5, 2.0]], dtype="<f4")
-    assert binary_path.read_bytes() == expected.tobytes()
     assert sorted(path.name for path in tmp_path.iterdir()) == sorted(
         ["splat.ply", POINT_CLOUD_BINARY_FILENAME, POINT_CLOUD_META_FILENAME]
     )
 
     meta = json.loads(meta_path.read_text())
-    assert meta["count"] == 2
-    assert meta["bounds"] == [[-4.0, 0.5, 2.0], [1.0, 2.0, 2.0]]
+    assert sorted(meta) == ["matrix", "radius", "scale"]
+    assert meta["radius"] == 2.0
+    # The baked positions are the kept splats seen through the stored matrix.
+    matrix = np.array(meta["matrix"])
+    expected = np.array([[1.0, 2.0, 2.0], [-4.0, 0.5, 2.0]])
+    expected = expected @ matrix[:3, :3].T + matrix[:3, 3]
+    baked = np.frombuffer(binary_path.read_bytes(), dtype="<f4").reshape(-1, 3)
+    np.testing.assert_allclose(baked, expected, atol=1e-5)
 
 
 def _setup_generation(
@@ -227,13 +231,17 @@ def test_generate_plan_point_cloud_if_missing_generates_when_missing(
     assert splat_path.with_name(POINT_CLOUD_META_FILENAME).is_file()
 
 
+def _write_baked_artifacts(splat_path: Path, meta: dict) -> None:
+    splat_path.with_name(POINT_CLOUD_BINARY_FILENAME).write_bytes(b"bin")
+    splat_path.with_name(POINT_CLOUD_META_FILENAME).write_text(json.dumps(meta))
+
+
 def test_generate_plan_point_cloud_if_missing_skips_existing_artifacts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     splat_path = tmp_path / "splat.ply"
-    splat_path.with_name(POINT_CLOUD_BINARY_FILENAME).write_bytes(b"bin")
-    splat_path.with_name(POINT_CLOUD_META_FILENAME).write_bytes(b"{}")
+    _write_baked_artifacts(splat_path, {"matrix": np.eye(4).tolist()})
 
     def fail(splat_path: Path, colmap_directory: Path) -> None:
         raise AssertionError("must not regenerate existing artifacts")
@@ -241,6 +249,19 @@ def test_generate_plan_point_cloud_if_missing_skips_existing_artifacts(
     monkeypatch.setattr(point_cloud_compute, "generate_plan_point_cloud", fail)
 
     generate_plan_point_cloud_if_missing(splat_path, tmp_path / "colmap")
+
+
+def test_generate_plan_point_cloud_if_missing_rebuilds_artifacts_without_a_matrix(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    splat_path, colmap_directory = _setup_generation(tmp_path, monkeypatch)
+    _write_baked_artifacts(splat_path, {"radius": 1.0})
+
+    generate_plan_point_cloud_if_missing(splat_path, colmap_directory)
+
+    meta = json.loads(splat_path.with_name(POINT_CLOUD_META_FILENAME).read_text())
+    assert "matrix" in meta
 
 
 def test_generate_plan_point_cloud_if_missing_propagates_generation_errors(
