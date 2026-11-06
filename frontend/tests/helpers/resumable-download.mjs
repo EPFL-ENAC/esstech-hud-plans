@@ -4,7 +4,10 @@ import { deferred, importTypeScript } from './typescript.mjs';
 export const BLOCK_BYTES = 8 * 1024 * 1024;
 export const DOWNLOAD_URL = 'https://hud.test/reconstruction/splat';
 
-export async function downloadFixture(t, { persistent = false, locksAvailable = true } = {}) {
+export async function downloadFixture(
+    t,
+    { persistent = false, locksAvailable = true, storageAvailable = true } = {},
+) {
     const files = new Map();
     const records = new Map();
     const locks = new Set();
@@ -91,12 +94,19 @@ export async function downloadFixture(t, { persistent = false, locksAvailable = 
         navigator: {
             ...(persistent && {
                 storage: {
-                    getDirectory: async () => ({
-                        getDirectoryHandle: async (name) => {
-                            if (name !== 'resumable-downloads') throw new Error('Wrong directory');
-                            return directory;
-                        },
-                    }),
+                    getDirectory: async () => {
+                        if (!storageAvailable) {
+                            throw new DOMException('Storage is unavailable', 'UnknownError');
+                        }
+                        return {
+                            getDirectoryHandle: async (name) => {
+                                if (name !== 'resumable-downloads') {
+                                    throw new Error('Wrong directory');
+                                }
+                                return directory;
+                            },
+                        };
+                    },
                 },
             }),
             ...(locksAvailable && { locks: lockManager }),

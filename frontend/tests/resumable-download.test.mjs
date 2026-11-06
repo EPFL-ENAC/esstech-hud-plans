@@ -216,6 +216,14 @@ for (const persistent of [false, true]) {
     });
 }
 
+test('unavailable OPFS falls back to isolated memory storage', async (t) => {
+    const f = await downloadFixture(t, { persistent: true, storageAvailable: false });
+    f.setFetch(() => response(new Uint8Array([1, 2])));
+    assert.deepEqual(await contents(await (await f.open()).download()), [1, 2]);
+    assert.equal(f.files.size, 0);
+    assert.equal(f.records.size, 0);
+});
+
 test('missing Web Locks falls back to isolated memory storage', async (t) => {
     const f = await downloadFixture(t, { persistent: true, locksAvailable: false });
     f.setFetch(() => response(new Uint8Array([1])));
