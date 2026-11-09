@@ -127,7 +127,13 @@ export default {
         reconstructionSettings: 'Reconstruction settings',
         newCapture: 'New Capture',
         draft: {
+            createFailed: 'Could not save the new capture draft on this device.',
+            loading: 'Loading capture draft…',
+            loadFailed: 'Could not load the capture draft.',
             unavailable: 'This capture draft is no longer available.',
+            saving: 'Saving draft…',
+            saved: 'Draft saved on this device.',
+            saveFailed: 'Could not save your draft changes.',
             video: 'Captured video',
         },
         tipsTitle: 'Tips for best results',

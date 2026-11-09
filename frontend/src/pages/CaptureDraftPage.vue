@@ -13,7 +13,14 @@
             />
         </page-header>
 
-        <div v-if="!draft">
+        <p v-if="loadStatus === 'loading'" role="status">{{ t('capture.draft.loading') }}</p>
+        <q-banner v-else-if="loadStatus === 'error'" class="bg-red-1 text-negative" role="alert">
+            {{ t('capture.draft.loadFailed') }}
+            <template #action>
+                <q-btn flat no-caps :label="t('common.retry')" @click="retryLoad" />
+            </template>
+        </q-banner>
+        <div v-else-if="loadStatus === 'missing'">
             <p role="status">{{ t('capture.draft.unavailable') }}</p>
             <q-btn
                 outline
@@ -33,8 +40,8 @@
             :error-message="loadError"
         />
 
-        <template v-if="upload || video">
-            <q-card flat bordered class="upload-summary q-mb-xl">
+        <template v-if="draft">
+            <q-card v-if="upload || video" flat bordered class="upload-summary q-mb-xl">
                 <q-card-section>
                     <div class="text-weight-medium">{{ filename }}</div>
                     <div class="text-caption text-grey-7">
@@ -58,7 +65,7 @@
             <section class="q-mb-xl">
                 <h2 class="text-h6 text-weight-bold">{{ t('capture.destinationBuilding') }}</h2>
                 <building-picker
-                    v-model="buildingSelection"
+                    v-model="draft.form.buildingSelection"
                     :disable="upload?.status === 'failed'"
                     class="q-mb-md"
                 />
@@ -67,7 +74,7 @@
             <section class="q-mb-xl">
                 <h2 class="text-h6 text-weight-bold">{{ t('capture.reconstructionSettings') }}</h2>
                 <q-select
-                    v-model="preset"
+                    v-model="draft.form.preset"
                     outlined
                     :options="presetOptions"
                     emit-value
@@ -77,16 +84,30 @@
                     class="q-mb-xl"
                 />
                 <section
-                    v-if="preset === 'advanced'"
+                    v-if="draft.form.preset === 'advanced'"
                     class="q-mb-xl"
                     :aria-label="t('capture.advancedSettings')"
                 >
-                    <reconstruction-settings v-model="advancedSettings" />
+                    <reconstruction-settings v-model="draft.form.advancedSettings" />
                     <p v-if="!hasValidSettings" class="text-negative q-mt-md" role="alert">
                         {{ t('capture.invalidSettings') }}
                     </p>
                 </section>
             </section>
+
+            <q-banner
+                v-if="saveStatus === 'error'"
+                class="bg-red-1 text-negative q-mb-md"
+                role="alert"
+            >
+                {{ t('capture.draft.saveFailed') }}
+                <template #action>
+                    <q-btn flat no-caps :label="t('common.retry')" @click="retrySave" />
+                </template>
+            </q-banner>
+            <p v-else class="text-caption text-grey-7" role="status">
+                {{ t(saveStatus === 'saving' ? 'capture.draft.saving' : 'capture.draft.saved') }}
+            </p>
 
             <q-btn
                 :label="t('capture.startProcessing')"
@@ -101,7 +122,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 import BuildingPicker from 'src/components/BuildingPicker.vue';
@@ -109,27 +130,22 @@ import PageHeader from 'src/components/PageHeader.vue';
 import QueryStateSwitcher from 'src/components/QueryStateSwitcher.vue';
 import ReconstructionSettings from 'src/components/ReconstructionSettings.vue';
 import UploadTransferProgress from 'src/components/UploadTransferProgress.vue';
+import { useCaptureDraft } from 'src/composables/useCaptureDraft';
 import { ApiError } from 'src/lib/api';
-import type { BuildingSelection } from 'src/lib/buildings';
-import {
-    type ReconstructionPreset,
-    isValidReconstructionSettings,
-    makeDefaultReconstructionSettings,
-} from 'src/lib/reconstruction-settings';
+import { isValidReconstructionSettings } from 'src/lib/reconstruction-settings';
 import { formatFileSize } from 'src/lib/utils/formatFileSize';
 import { useUploadQuery } from 'src/queries/uploads';
-import { useCaptureDraftsStore } from 'src/stores/captureDrafts';
 
 const props = defineProps<{ draftId: string }>();
 const { t, locale } = useI18n();
 const route = useRoute();
-const store = useCaptureDraftsStore();
-const draft = computed(() => store.drafts.get(props.draftId));
+const { draft, loadStatus, saveStatus, retryLoad, retrySave } = useCaptureDraft(props.draftId);
+const source = computed(() => draft.value?.source);
 const uploadId = computed(() =>
-    draft.value && 'uploadId' in draft.value ? draft.value.uploadId : '',
+    source.value && 'uploadId' in source.value ? source.value.uploadId : '',
 );
 const video = computed(() =>
-    draft.value && 'video' in draft.value ? draft.value.video : undefined,
+    source.value && 'video' in source.value ? source.value.video : undefined,
 );
 
 const { data: upload, state, asyncStatus, isLoading, refetch } = useUploadQuery(uploadId);
@@ -145,35 +161,14 @@ const filename = computed(
         (video.value instanceof File ? video.value.name : t('capture.draft.video')),
 );
 
-function defaultBuildingSelection(): BuildingSelection {
-    const buildingId = route.query.buildingId;
-    if (typeof buildingId === 'string') return { buildingId };
-
-    return {
-        buildingId: null,
-        building: {
-            name: t('buildings.defaultName', { number: 1 }),
-            latitude: null,
-            longitude: null,
-        },
-    };
-}
-
-const buildingSelection = ref<BuildingSelection>(defaultBuildingSelection());
-watch(
-    () => route.query.buildingId,
-    () => {
-        buildingSelection.value = defaultBuildingSelection();
-    },
-);
-const preset = ref<ReconstructionPreset>('indoors');
 const presetOptions = computed(() => [
     { value: 'indoors', label: t('capture.presets.indoors') },
     { value: 'outdoors', label: t('capture.presets.outdoors') },
     { value: 'advanced', label: t('capture.presets.advanced') },
 ]);
-const advancedSettings = ref(makeDefaultReconstructionSettings('advanced'));
-const hasValidSettings = computed(() => isValidReconstructionSettings(advancedSettings.value));
+const hasValidSettings = computed(
+    () => draft.value && isValidReconstructionSettings(draft.value.form.advancedSettings),
+);
 </script>
 
 <style scoped>

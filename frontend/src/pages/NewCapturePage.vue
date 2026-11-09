@@ -16,6 +16,7 @@
             <file-picker-button
                 :model-value="null"
                 accept="video/*"
+                :disable="busy"
                 @update:model-value="selectFile"
             />
             <q-btn
@@ -24,8 +25,12 @@
                 color="primary"
                 icon="videocam"
                 :label="t('capture.video.takeVideo')"
+                :disable="busy"
                 :to="{ name: 'capture-record', query: { buildingId: route.query.buildingId } }"
             />
+            <q-banner v-if="errorMessage" class="full-width bg-red-1 text-negative" role="alert">
+                {{ errorMessage }}
+            </q-banner>
         </section>
 
         <my-uploads-list ref="uploadsList" :activate="selectUpload">
@@ -38,6 +43,7 @@
                     icon="add"
                     :label="$q.screen.lt.sm ? undefined : t('reconstructions.new')"
                     :aria-label="t('reconstructions.new')"
+                    :disable="busy"
                     @click.stop="selectUpload(upload)"
                 />
             </template>
@@ -46,36 +52,62 @@
 </template>
 
 <script setup lang="ts">
-import { useTemplateRef } from 'vue';
+import { computed, ref, useTemplateRef, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 import FilePickerButton from 'src/components/FilePickerButton.vue';
 import MyUploadsList from 'src/components/MyUploadsList.vue';
 import PageHeader from 'src/components/PageHeader.vue';
+import type { CaptureDraftSource } from 'src/lib/captureDraftService';
 import type { UserUpload } from 'src/lib/uploads';
-import { useCaptureDraftsStore, type CaptureDraftSource } from 'src/stores/captureDrafts';
+import { useCreateCaptureDraftMutation } from 'src/mutations/captureDrafts';
 
 const { t } = useI18n();
-const router = useRouter();
 const route = useRoute();
-const { createDraft } = useCaptureDraftsStore();
+const router = useRouter();
 const uploadsList = useTemplateRef<InstanceType<typeof MyUploadsList>>('uploadsList');
+const { mutate, data: draftId, isLoading, error } = useCreateCaptureDraftMutation();
+const navigating = ref(false);
+const navigationFailed = ref(false);
+const busy = computed(() => isLoading.value || navigating.value);
+const errorMessage = computed(() => {
+    if (navigationFailed.value) return t('capture.openFailed');
+    return error.value ? t('capture.draft.createFailed') : '';
+});
 
-function openDraft(source: CaptureDraftSource): void {
-    const draftId = createDraft(source);
-    void router.push({
-        name: 'capture-draft',
-        params: { draftId },
-        query: { buildingId: route.query.buildingId },
-    });
+watch(draftId, (id) => {
+    if (id) void openDraft(id);
+});
+
+async function openDraft(id: string): Promise<void> {
+    navigating.value = true;
+    try {
+        const failure = await router.push({
+            name: 'capture-draft',
+            params: { draftId: id },
+            query: { buildingId: route.query.buildingId },
+        });
+        navigationFailed.value = !!failure;
+    } catch {
+        navigationFailed.value = true;
+    } finally {
+        navigating.value = false;
+    }
+}
+
+function selectSource(source: CaptureDraftSource): void {
+    if (busy.value) return;
+    navigationFailed.value = false;
+    const buildingId = route.query.buildingId;
+    mutate({ source, buildingId: typeof buildingId === 'string' ? buildingId : null });
 }
 
 function selectUpload(upload: UserUpload): void {
-    openDraft({ uploadId: upload.id });
+    selectSource({ uploadId: upload.id });
 }
 
 function selectFile(file: File | null): void {
-    if (file) openDraft({ video: file });
+    if (file) selectSource({ video: file });
 }
 </script>
 

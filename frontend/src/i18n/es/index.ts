@@ -131,7 +131,13 @@ export default {
         reconstructionSettings: 'Ajustes de reconstrucción',
         newCapture: 'Nueva captura',
         draft: {
+            createFailed: 'No se pudo guardar el nuevo borrador de captura en este dispositivo.',
+            loading: 'Cargando el borrador de captura…',
+            loadFailed: 'No se pudo cargar el borrador de captura.',
             unavailable: 'Este borrador de captura ya no está disponible.',
+            saving: 'Guardando el borrador…',
+            saved: 'Borrador guardado en este dispositivo.',
+            saveFailed: 'No se pudieron guardar los cambios del borrador.',
             video: 'Vídeo grabado',
         },
         tipsTitle: 'Consejos para obtener mejores resultados',

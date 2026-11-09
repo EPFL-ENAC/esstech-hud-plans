@@ -132,7 +132,14 @@ export default {
         reconstructionSettings: 'Paramètres de reconstruction',
         newCapture: 'Nouvelle capture',
         draft: {
+            createFailed:
+                'Impossible d’enregistrer le nouveau brouillon de capture sur cet appareil.',
+            loading: 'Chargement du brouillon de capture…',
+            loadFailed: 'Impossible de charger le brouillon de capture.',
             unavailable: 'Ce brouillon de capture n’est plus disponible.',
+            saving: 'Enregistrement du brouillon…',
+            saved: 'Brouillon enregistré sur cet appareil.',
+            saveFailed: 'Impossible d’enregistrer les modifications du brouillon.',
             video: 'Vidéo enregistrée',
         },
         tipsTitle: 'Conseils pour de meilleurs résultats',
