@@ -131,6 +131,10 @@ export default {
         destinationBuilding: 'Bâtiment de destination',
         reconstructionSettings: 'Paramètres de reconstruction',
         newCapture: 'Nouvelle capture',
+        draft: {
+            unavailable: 'Ce brouillon de capture n’est plus disponible.',
+            video: 'Vidéo enregistrée',
+        },
         tipsTitle: 'Conseils pour de meilleurs résultats',
         doNotShowTipsAgain: 'Ne plus afficher',
         wideAngleTip: 'Utilisez un objectif grand-angle',

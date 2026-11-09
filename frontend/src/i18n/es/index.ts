@@ -130,6 +130,10 @@ export default {
         destinationBuilding: 'Edificio de destino',
         reconstructionSettings: 'Ajustes de reconstrucción',
         newCapture: 'Nueva captura',
+        draft: {
+            unavailable: 'Este borrador de captura ya no está disponible.',
+            video: 'Vídeo grabado',
+        },
         tipsTitle: 'Consejos para obtener mejores resultados',
         doNotShowTipsAgain: 'No volver a mostrar',
         wideAngleTip: 'Usa un objetivo gran angular',

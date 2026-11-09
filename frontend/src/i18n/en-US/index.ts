@@ -126,6 +126,10 @@ export default {
         destinationBuilding: 'Destination building',
         reconstructionSettings: 'Reconstruction settings',
         newCapture: 'New Capture',
+        draft: {
+            unavailable: 'This capture draft is no longer available.',
+            video: 'Captured video',
+        },
         tipsTitle: 'Tips for best results',
         doNotShowTipsAgain: 'Do not show again',
         wideAngleTip: 'Use a wide-angle lens',
