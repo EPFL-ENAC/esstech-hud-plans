@@ -94,6 +94,30 @@ export class CaptureDraftService {
         });
     }
 
+    async attachUpload(
+        draftId: string,
+        {
+            ownerId,
+            uploadId,
+            completed = false,
+        }: { ownerId: string; uploadId: string; completed?: boolean },
+    ): Promise<void> {
+        const key = [ownerId, draftId];
+        await this.transact(['drafts', 'videos'], 'readwrite', (transaction) => {
+            const drafts = transaction.objectStore('drafts');
+            const request = drafts.get(key);
+            request.onsuccess = () => {
+                const metadata = request.result as DraftMetadata | undefined;
+                if (!metadata) {
+                    transaction.abort();
+                    return;
+                }
+                drafts.put({ ...metadata, source: { uploadId } }, key);
+                if (completed) transaction.objectStore('videos').delete(key);
+            };
+        });
+    }
+
     private openDatabase(): Promise<IDBDatabase> {
         return new Promise((resolve, reject) => {
             const request = indexedDB.open(CaptureDraftService.databaseName, 1);

@@ -138,6 +138,7 @@ export default {
             saving: 'Guardando el borrador…',
             saved: 'Borrador guardado en este dispositivo.',
             saveFailed: 'No se pudieron guardar los cambios del borrador.',
+            uploadFailed: 'No se pudo completar la subida del vídeo de este borrador.',
             video: 'Vídeo grabado',
         },
         tipsTitle: 'Consejos para obtener mejores resultados',

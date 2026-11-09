@@ -58,9 +58,11 @@ import { useRoute, useRouter } from 'vue-router';
 import FilePickerButton from 'src/components/FilePickerButton.vue';
 import MyUploadsList from 'src/components/MyUploadsList.vue';
 import PageHeader from 'src/components/PageHeader.vue';
-import type { CaptureDraftSource } from 'src/lib/captureDraftService';
 import type { UserUpload } from 'src/lib/uploads';
-import { useCreateCaptureDraftMutation } from 'src/mutations/captureDrafts';
+import {
+    useCreateCaptureDraftMutation,
+    type CreateCaptureDraftSource,
+} from 'src/mutations/captureDrafts';
 
 const { t } = useI18n();
 const route = useRoute();
@@ -95,7 +97,7 @@ async function openDraft(id: string): Promise<void> {
     }
 }
 
-function selectSource(source: CaptureDraftSource): void {
+function selectSource(source: CreateCaptureDraftSource): void {
     if (busy.value) return;
     navigationFailed.value = false;
     const buildingId = route.query.buildingId;

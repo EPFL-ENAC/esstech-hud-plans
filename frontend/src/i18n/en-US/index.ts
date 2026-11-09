@@ -134,6 +134,7 @@ export default {
             saving: 'Saving draft…',
             saved: 'Draft saved on this device.',
             saveFailed: 'Could not save your draft changes.',
+            uploadFailed: 'Could not complete the video upload for this draft.',
             video: 'Captured video',
         },
         tipsTitle: 'Tips for best results',

@@ -1,4 +1,5 @@
-import { readonly, ref, shallowReadonly } from 'vue';
+import { useQueryCache } from '@pinia/colada';
+import { computed, readonly, ref, shallowReadonly, watch } from 'vue';
 import { onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
 import { getAuthSubject } from 'src/lib/auth';
 import {
@@ -6,13 +7,26 @@ import {
     type CaptureDraft,
     type CaptureDraftForm,
 } from 'src/lib/captureDraftService';
+import { captureDraftUploadKey, type CaptureDraftUploadState } from 'src/queries/captureDrafts';
 import { useDebouncedAutosave } from './useDebouncedAutosave';
 
 export function useCaptureDraft(draftId: string) {
     const ownerId = getAuthSubject();
     const service = new CaptureDraftService();
+    const queryCache = useQueryCache();
     const draft = ref<CaptureDraft | null>(null);
     const loadStatus = ref<'loading' | 'ready' | 'missing' | 'error'>('loading');
+    const uploadState = computed(() =>
+        ownerId
+            ? queryCache.getQueryData<CaptureDraftUploadState>(
+                  captureDraftUploadKey(ownerId, draftId),
+              )
+            : undefined,
+    );
+
+    watch([draft, uploadState], ([record, transfer]) => {
+        if (record && transfer?.uploadId) record.source = { uploadId: transfer.uploadId };
+    });
 
     async function retryLoad(): Promise<void> {
         loadStatus.value = 'loading';
@@ -46,6 +60,7 @@ export function useCaptureDraft(draftId: string) {
     return {
         draft: shallowReadonly(draft),
         loadStatus: readonly(loadStatus),
+        uploadState,
         saveStatus,
         retryLoad,
         retrySave,

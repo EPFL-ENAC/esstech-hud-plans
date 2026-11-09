@@ -50,25 +50,31 @@
                             · {{ t(`uploads.status.${upload.status}`) }}
                         </template>
                     </div>
+                    <div
+                        v-if="video && uploadState?.phase === 'uploading'"
+                        class="text-caption text-grey-7"
+                        role="status"
+                    >
+                        {{ t('uploads.new.starting') }}
+                    </div>
                     <upload-transfer-progress
-                        v-if="upload?.status === 'pending'"
+                        v-if="upload?.status === 'pending' && uploadState?.phase !== 'failed'"
                         class="q-mt-md"
                         :progress="{ loaded: upload.uploaded_bytes, total: upload.size_bytes }"
                         :resumed="false"
                     />
                 </q-card-section>
             </q-card>
-            <p v-if="upload?.status === 'failed'" class="text-negative" role="alert">
+            <p v-if="uploadState?.phase === 'failed'" class="text-negative" role="alert">
+                {{ t('capture.draft.uploadFailed') }}
+            </p>
+            <p v-else-if="upload?.status === 'failed'" class="text-negative" role="alert">
                 {{ t('reconstructions.fromUpload.failedUpload') }}
             </p>
 
             <section class="q-mb-xl">
                 <h2 class="text-h6 text-weight-bold">{{ t('capture.destinationBuilding') }}</h2>
-                <building-picker
-                    v-model="draft.form.buildingSelection"
-                    :disable="upload?.status === 'failed'"
-                    class="q-mb-md"
-                />
+                <building-picker v-model="draft.form.buildingSelection" class="q-mb-md" />
             </section>
 
             <section class="q-mb-xl">
@@ -80,7 +86,6 @@
                     emit-value
                     map-options
                     :label="t('capture.preset')"
-                    :disable="upload?.status === 'failed'"
                     class="q-mb-xl"
                 />
                 <section
@@ -139,7 +144,9 @@ import { useUploadQuery } from 'src/queries/uploads';
 const props = defineProps<{ draftId: string }>();
 const { t, locale } = useI18n();
 const route = useRoute();
-const { draft, loadStatus, saveStatus, retryLoad, retrySave } = useCaptureDraft(props.draftId);
+const { draft, loadStatus, uploadState, saveStatus, retryLoad, retrySave } = useCaptureDraft(
+    props.draftId,
+);
 const source = computed(() => draft.value?.source);
 const uploadId = computed(() =>
     source.value && 'uploadId' in source.value ? source.value.uploadId : '',

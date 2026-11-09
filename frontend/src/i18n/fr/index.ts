@@ -140,6 +140,7 @@ export default {
             saving: 'Enregistrement du brouillon…',
             saved: 'Brouillon enregistré sur cet appareil.',
             saveFailed: 'Impossible d’enregistrer les modifications du brouillon.',
+            uploadFailed: 'Impossible de terminer l’envoi de la vidéo de ce brouillon.',
             video: 'Vidéo enregistrée',
         },
         tipsTitle: 'Conseils pour de meilleurs résultats',
