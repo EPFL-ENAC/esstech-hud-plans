@@ -21,48 +21,52 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { computed, ref } from 'vue';
+import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import VideoRecorder from 'src/components/VideoRecorder.vue';
 import LoadingOverlay from 'src/components/LoadingOverlay.vue';
+import { useRouteNavigation } from 'src/composables/useRouteNavigation';
 import { useUploadForReconstruction } from 'src/composables/useUploadForReconstruction';
 import { type RecordedVideo, toCapturedVideo } from 'src/lib/captured-video';
 
 const { t } = useI18n();
-const router = useRouter();
 const route = useRoute();
 const { startUpload, retry, busy, uploadId, errorMessage } = useUploadForReconstruction();
+const {
+    navigating: closing,
+    navigationFailed,
+    clearNavigationFailure,
+    replace,
+} = useRouteNavigation();
 const accepted = ref(false);
-const closing = ref(false);
-const localError = ref('');
+const recordingError = ref('');
+const localError = computed(
+    () =>
+        recordingError.value ||
+        (navigationFailed.value ? t('reconstructions.fromUpload.pickerNavigationFailed') : ''),
+);
 
 function uploadRecording(recording: RecordedVideo): void {
     if (accepted.value || busy.value || closing.value) return;
-    localError.value = '';
+    recordingError.value = '';
+    clearNavigationFailure();
     try {
         const file = toCapturedVideo(recording, null).file;
         accepted.value = true;
         startUpload(file);
     } catch (error) {
-        localError.value = error instanceof Error ? error.message : t('capture.openFailed');
+        recordingError.value = error instanceof Error ? error.message : t('capture.openFailed');
     }
 }
 
 async function openPicker(): Promise<void> {
     if (busy.value || closing.value) return;
-    closing.value = true;
-    localError.value = '';
-    try {
-        const failure = await router.replace({
-            name: 'reconstruction-upload-picker',
-            query: { buildingId: route.query.buildingId },
-        });
-        if (failure) localError.value = t('reconstructions.fromUpload.pickerNavigationFailed');
-    } catch {
-        localError.value = t('reconstructions.fromUpload.pickerNavigationFailed');
-    } finally {
-        closing.value = false;
-    }
+    recordingError.value = '';
+    clearNavigationFailure();
+    await replace({
+        name: 'reconstruction-upload-picker',
+        query: { buildingId: route.query.buildingId },
+    });
 }
 </script>

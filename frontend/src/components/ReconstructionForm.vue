@@ -11,27 +11,12 @@
         </section>
 
         <section class="q-mb-xl">
-            <h2 class="text-h6 text-weight-bold">{{ t('capture.reconstructionSettings') }}</h2>
-            <q-select
-                v-model="preset"
-                outlined
-                :options="presetOptions"
-                emit-value
-                map-options
-                :label="t('capture.preset')"
-                :disable="disabled || locked"
-                class="q-mb-xl"
+            <reconstruction-preset-settings
+                v-model:preset="preset"
+                v-model:advanced-settings="advancedSettings"
+                :disable-preset="disabled || locked"
+                @valid="hasValidSettings = $event"
             />
-            <section
-                v-if="preset === 'advanced'"
-                class="q-mb-xl"
-                :aria-label="t('capture.advancedSettings')"
-            >
-                <reconstruction-settings v-model="advancedSettings" />
-                <p v-if="!hasValidSettings" class="text-negative q-mt-md" role="alert">
-                    {{ t('capture.invalidSettings') }}
-                </p>
-            </section>
             <q-banner v-if="submissionError" class="bg-red-1 text-negative q-mb-md" role="alert">
                 {{ submissionError }}
                 <template v-if="destinationBuildingId" #action>
@@ -67,16 +52,15 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import { useI18n } from 'vue-i18n';
 import BuildingPicker from 'src/components/BuildingPicker.vue';
-import ReconstructionSettings from 'src/components/ReconstructionSettings.vue';
+import ReconstructionPresetSettings from 'src/components/ReconstructionPresetSettings.vue';
+import { useRouteNavigation } from 'src/composables/useRouteNavigation';
 import type { BuildingSelection } from 'src/lib/buildings';
 import {
     type ReconstructionPreset,
     type ReconstructionSettingsConfig,
-    isValidReconstructionSettings,
     makeDefaultReconstructionSettings,
     toSplatGenerationSettings,
 } from 'src/lib/reconstruction-settings';
@@ -93,7 +77,6 @@ const advancedSettings = defineModel<ReconstructionSettingsConfig>('advancedSett
     required: true,
 });
 const { t } = useI18n();
-const router = useRouter();
 const ui = useUiStore();
 const $q = useQuasar();
 const {
@@ -102,17 +85,12 @@ const {
     destinationBuildingId,
     errorMessage: mutationError,
 } = useSubmitReconstructionMutation();
-const navigationError = ref('');
-const submissionError = computed(() => navigationError.value || mutationError.value);
-const hasValidBuilding = ref(false);
-const presetOptions = computed(() => [
-    { value: 'indoors', label: t('capture.presets.indoors') },
-    { value: 'outdoors', label: t('capture.presets.outdoors') },
-    { value: 'advanced', label: t('capture.presets.advanced') },
-]);
-const hasValidSettings = computed(
-    () => preset.value !== 'advanced' || isValidReconstructionSettings(advancedSettings.value),
+const { navigationFailed, clearNavigationFailure, push } = useRouteNavigation();
+const submissionError = computed(() =>
+    navigationFailed.value ? t('buildings.savedNavigationFailed') : mutationError.value,
 );
+const hasValidBuilding = ref(false);
+const hasValidSettings = ref(false);
 const locked = computed(() => submitting.value || destinationBuildingId.value !== null);
 const canSubmit = computed(
     () => !props.disabled && !locked.value && hasValidSettings.value && hasValidBuilding.value,
@@ -126,7 +104,7 @@ async function startProcessing(): Promise<void> {
             ? advancedSettings.value
             : makeDefaultReconstructionSettings(preset.value),
     );
-    navigationError.value = '';
+    clearNavigationFailure();
     // Colada exposes submission errors through mutationError, including retained IDs.
     await submitReconstruction({
         uploadId: props.uploadId,
@@ -143,16 +121,9 @@ async function startProcessing(): Promise<void> {
     await openBuilding(destinationBuildingId.value);
 }
 
-async function openBuilding(buildingId: string): Promise<void> {
+function openBuilding(buildingId: string): Promise<void> {
     ui.setBackground('library');
-    try {
-        const failure = await router.push(`/building/${encodeURIComponent(buildingId)}`);
-        if (failure) {
-            navigationError.value = t('buildings.savedNavigationFailed');
-        }
-    } catch {
-        navigationError.value = t('buildings.savedNavigationFailed');
-    }
+    return push(`/building/${encodeURIComponent(buildingId)}`);
 }
 defineExpose({ locked });
 </script>

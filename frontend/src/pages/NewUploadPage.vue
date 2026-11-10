@@ -49,25 +49,25 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onUnmounted, ref, shallowRef, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { computed, onUnmounted, shallowRef, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import PageHeader from 'src/components/PageHeader.vue';
 import FilePickerButton from 'src/components/FilePickerButton.vue';
 import UploadTransferProgress from 'src/components/UploadTransferProgress.vue';
+import { useRouteNavigation } from 'src/composables/useRouteNavigation';
 import { ApiError } from 'src/lib/api';
 import { getAuthSubject } from 'src/lib/auth';
 import { formatFileSize } from 'src/lib/utils/formatFileSize';
 import { useUploadVideoMutation } from 'src/mutations/uploads';
 
 const { t, locale } = useI18n();
-const router = useRouter();
 const route = useRoute();
 const $q = useQuasar();
 const subject = getAuthSubject();
 const file = shallowRef<File | null>(null);
-const navigationError = ref('');
+const { navigationFailed, clearNavigationFailure, replace } = useRouteNavigation();
 const {
     mutateAsync,
     isLoading: uploading,
@@ -79,7 +79,7 @@ const {
 const uploaded = computed(() => data.value !== undefined);
 const canUpload = computed(() => !!file.value?.size && !uploading.value && !uploaded.value);
 const errorMessage = computed(() => {
-    if (navigationError.value) return navigationError.value;
+    if (navigationFailed.value) return t('uploads.new.navigationFailed');
     if (!error.value) return '';
     if (error.value instanceof ApiError && [401, 403].includes(error.value.status)) {
         return t('uploads.new.authFailed');
@@ -97,16 +97,11 @@ onUnmounted(() => {
 });
 watch(file, () => {
     reset();
-    navigationError.value = '';
+    clearNavigationFailure();
 });
 
-async function openUploads(): Promise<void> {
-    try {
-        const failure = await router.replace({ name: 'uploads' });
-        if (failure && pageMounted) navigationError.value = t('uploads.new.navigationFailed');
-    } catch {
-        if (pageMounted) navigationError.value = t('uploads.new.navigationFailed');
-    }
+function openUploads(): Promise<void> {
+    return replace({ name: 'uploads' });
 }
 
 async function startUpload(): Promise<void> {

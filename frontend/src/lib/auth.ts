@@ -5,6 +5,7 @@ import {
     keycloakRealm,
     keycloakRedirectUri,
 } from 'boot/api';
+import { CaptureDraftService } from './captureDraftService';
 
 const TOKEN_KEY = 'access_token';
 
@@ -86,11 +87,14 @@ export async function clearLocalData(): Promise<void> {
         const names = await caches.keys();
         await Promise.all(names.map((name) => caches.delete(name)));
     }
-    if (typeof indexedDB.databases === 'function') {
-        const names = (await indexedDB.databases())
-            .map(({ name }) => name)
-            .filter((name): name is string => !!name);
-        await Promise.all(names.map(deleteIndexedDatabase));
+    if (typeof indexedDB !== 'undefined') {
+        const names = new Set<string>([CaptureDraftService.databaseName]);
+        if (typeof indexedDB.databases === 'function') {
+            for (const { name } of await indexedDB.databases()) {
+                if (name) names.add(name);
+            }
+        }
+        await Promise.all([...names].map(deleteIndexedDatabase));
     }
 }
 
