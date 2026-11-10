@@ -1,4 +1,5 @@
 import { useMutation, useQueryCache } from '@pinia/colada';
+import { onScopeDispose } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { getAuthSubject } from 'src/lib/auth';
 import { CaptureDraftService } from 'src/lib/captureDraftService';
@@ -12,12 +13,19 @@ interface CreateCaptureDraftVariables {
     buildingId: string | null;
 }
 
-export function useCreateCaptureDraftMutation() {
+export function useCreateCaptureDraftMutation({
+    onCreate,
+}: { onCreate?: (draftId: string) => void } = {}) {
     const { t } = useI18n();
     const ownerId = getAuthSubject();
     const service = new CaptureDraftService();
     const queryCache = useQueryCache();
     const { mutateAsync: uploadVideo } = useUploadVideoMutation();
+    let disposed = false;
+
+    onScopeDispose(() => {
+        disposed = true;
+    });
 
     async function uploadDraftVideo(ownerId: string, draftId: string, file: File): Promise<void> {
         const key = captureDraftUploadKey(ownerId, draftId);
@@ -79,6 +87,9 @@ export function useCreateCaptureDraftMutation() {
             });
             if ('video' in source) void uploadDraftVideo(ownerId, draftId, source.video);
             return draftId;
+        },
+        onSuccess(draftId) {
+            if (!disposed && getAuthSubject() === ownerId) onCreate?.(draftId);
         },
     });
 }

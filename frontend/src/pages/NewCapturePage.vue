@@ -52,7 +52,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, useTemplateRef, watch } from 'vue';
+import { computed, useTemplateRef } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 import FilePickerButton from 'src/components/FilePickerButton.vue';
@@ -68,21 +68,20 @@ import {
 const { t } = useI18n();
 const route = useRoute();
 const uploadsList = useTemplateRef<InstanceType<typeof MyUploadsList>>('uploadsList');
-const { mutate, data: draftId, isLoading, error } = useCreateCaptureDraftMutation();
 const { navigating, navigationFailed, clearNavigationFailure, push } = useRouteNavigation();
+const { mutate, isLoading, error } = useCreateCaptureDraftMutation({
+    onCreate(draftId) {
+        void push({
+            name: 'capture-draft',
+            params: { draftId },
+            query: { buildingId: route.query.buildingId },
+        });
+    },
+});
 const busy = computed(() => isLoading.value || navigating.value);
 const errorMessage = computed(() => {
     if (navigationFailed.value) return t('capture.openFailed');
     return error.value ? t('capture.draft.createFailed') : '';
-});
-
-watch(draftId, (id) => {
-    if (!id) return;
-    void push({
-        name: 'capture-draft',
-        params: { draftId: id },
-        query: { buildingId: route.query.buildingId },
-    });
 });
 
 function selectSource(source: CreateCaptureDraftSource): void {
