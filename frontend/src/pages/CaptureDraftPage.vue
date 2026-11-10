@@ -44,26 +44,10 @@
             </section>
 
             <section class="q-mb-xl">
-                <h2 class="text-h6 text-weight-bold">{{ t('capture.reconstructionSettings') }}</h2>
-                <q-select
-                    v-model="draft.form.preset"
-                    outlined
-                    :options="presetOptions"
-                    emit-value
-                    map-options
-                    :label="t('capture.preset')"
-                    class="q-mb-xl"
+                <reconstruction-preset-settings
+                    v-model:preset="draft.form.preset"
+                    v-model:advanced-settings="draft.form.advancedSettings"
                 />
-                <section
-                    v-if="draft.form.preset === 'advanced'"
-                    class="q-mb-xl"
-                    :aria-label="t('capture.advancedSettings')"
-                >
-                    <reconstruction-settings v-model="draft.form.advancedSettings" />
-                    <p v-if="!hasValidSettings" class="text-negative q-mt-md" role="alert">
-                        {{ t('capture.invalidSettings') }}
-                    </p>
-                </section>
             </section>
 
             <q-banner
@@ -93,15 +77,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, useTemplateRef } from 'vue';
+import { useTemplateRef } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 import BuildingPicker from 'src/components/BuildingPicker.vue';
 import CaptureDraftSourcePanel from 'src/components/CaptureDraftSourcePanel.vue';
 import PageHeader from 'src/components/PageHeader.vue';
-import ReconstructionSettings from 'src/components/ReconstructionSettings.vue';
+import ReconstructionPresetSettings from 'src/components/ReconstructionPresetSettings.vue';
 import { useCaptureDraft } from 'src/composables/useCaptureDraft';
-import { isValidReconstructionSettings } from 'src/lib/reconstruction-settings';
 
 const props = defineProps<{ draftId: string }>();
 const { t } = useI18n();
@@ -109,14 +92,6 @@ const route = useRoute();
 const draftSource = useTemplateRef<InstanceType<typeof CaptureDraftSourcePanel>>('draftSource');
 const { draft, loadStatus, uploadState, saveStatus, retryLoad, retrySave } = useCaptureDraft(
     props.draftId,
-);
-const presetOptions = computed(() => [
-    { value: 'indoors', label: t('capture.presets.indoors') },
-    { value: 'outdoors', label: t('capture.presets.outdoors') },
-    { value: 'advanced', label: t('capture.presets.advanced') },
-]);
-const hasValidSettings = computed(
-    () => draft.value && isValidReconstructionSettings(draft.value.form.advancedSettings),
 );
 </script>
 
