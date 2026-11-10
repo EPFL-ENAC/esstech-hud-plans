@@ -2,14 +2,14 @@
     <q-page class="capture-draft-page">
         <page-header :title="t('reconstructions.new')">
             <q-btn
-                v-if="uploadId"
+                v-if="draftSource?.hasUpload"
                 flat
                 no-caps
                 color="primary"
                 icon="refresh"
                 :label="t('uploads.refresh')"
-                :disable="isLoading"
-                @click="refetch()"
+                :disable="draftSource?.isLoading"
+                @click="draftSource?.refetch()"
             />
         </page-header>
 
@@ -31,46 +31,12 @@
             />
         </div>
 
-        <query-state-switcher
-            v-if="uploadId"
-            :state="state"
-            :async-status="asyncStatus"
-            :retry="refetch"
-            :loading-message="t('uploads.loading')"
-            :error-message="loadError"
-        />
-
         <template v-if="draft">
-            <q-card v-if="upload || video" flat bordered class="upload-summary q-mb-xl">
-                <q-card-section>
-                    <div class="text-weight-medium">{{ filename }}</div>
-                    <div class="text-caption text-grey-7">
-                        {{ formatFileSize(upload?.size_bytes ?? video?.size ?? 0, locale) }}
-                        <template v-if="upload">
-                            · {{ t(`uploads.status.${upload.status}`) }}
-                        </template>
-                    </div>
-                    <div
-                        v-if="video && uploadState?.phase === 'uploading'"
-                        class="text-caption text-grey-7"
-                        role="status"
-                    >
-                        {{ t('uploads.new.starting') }}
-                    </div>
-                    <upload-transfer-progress
-                        v-if="upload?.status === 'pending' && uploadState?.phase !== 'failed'"
-                        class="q-mt-md"
-                        :progress="{ loaded: upload.uploaded_bytes, total: upload.size_bytes }"
-                        :resumed="false"
-                    />
-                </q-card-section>
-            </q-card>
-            <p v-if="uploadState?.phase === 'failed'" class="text-negative" role="alert">
-                {{ t('capture.draft.uploadFailed') }}
-            </p>
-            <p v-else-if="upload?.status === 'failed'" class="text-negative" role="alert">
-                {{ t('reconstructions.fromUpload.failedUpload') }}
-            </p>
+            <capture-draft-source-panel
+                ref="draftSource"
+                :draft="draft"
+                :upload-state="uploadState"
+            />
 
             <section class="q-mb-xl">
                 <h2 class="text-h6 text-weight-bold">{{ t('capture.destinationBuilding') }}</h2>
@@ -127,47 +93,23 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, useTemplateRef } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 import BuildingPicker from 'src/components/BuildingPicker.vue';
+import CaptureDraftSourcePanel from 'src/components/CaptureDraftSourcePanel.vue';
 import PageHeader from 'src/components/PageHeader.vue';
-import QueryStateSwitcher from 'src/components/QueryStateSwitcher.vue';
 import ReconstructionSettings from 'src/components/ReconstructionSettings.vue';
-import UploadTransferProgress from 'src/components/UploadTransferProgress.vue';
 import { useCaptureDraft } from 'src/composables/useCaptureDraft';
-import { ApiError } from 'src/lib/api';
 import { isValidReconstructionSettings } from 'src/lib/reconstruction-settings';
-import { formatFileSize } from 'src/lib/utils/formatFileSize';
-import { useUploadQuery } from 'src/queries/uploads';
 
 const props = defineProps<{ draftId: string }>();
-const { t, locale } = useI18n();
+const { t } = useI18n();
 const route = useRoute();
+const draftSource = useTemplateRef<InstanceType<typeof CaptureDraftSourcePanel>>('draftSource');
 const { draft, loadStatus, uploadState, saveStatus, retryLoad, retrySave } = useCaptureDraft(
     props.draftId,
 );
-const source = computed(() => draft.value?.source);
-const uploadId = computed(() =>
-    source.value && 'uploadId' in source.value ? source.value.uploadId : '',
-);
-const video = computed(() =>
-    source.value && 'video' in source.value ? source.value.video : undefined,
-);
-
-const { data: upload, state, asyncStatus, isLoading, refetch } = useUploadQuery(uploadId);
-const loadError = computed(() => {
-    const error = state.value.error;
-    return error instanceof ApiError && [404, 422].includes(error.status)
-        ? t('reconstructions.fromUpload.unavailable')
-        : t('reconstructions.fromUpload.loadFailed');
-});
-const filename = computed(
-    () =>
-        upload.value?.filename ??
-        (video.value instanceof File ? video.value.name : t('capture.draft.video')),
-);
-
 const presetOptions = computed(() => [
     { value: 'indoors', label: t('capture.presets.indoors') },
     { value: 'outdoors', label: t('capture.presets.outdoors') },
@@ -183,9 +125,5 @@ const hasValidSettings = computed(
     padding: 64px 16px 48px;
     background: #fff;
     color: var(--q-dark);
-}
-
-.upload-summary {
-    overflow-wrap: anywhere;
 }
 </style>
