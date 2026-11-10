@@ -18,6 +18,21 @@ async function fixture(t, buildingId) {
     let unmount;
     let subject = 'owner';
     let navigationFails = false;
+    const { useRouteNavigation } = await importTypeScript(
+        t,
+        'src/composables/useRouteNavigation.ts',
+        {
+            vue: { onScopeDispose: vue.onScopeDispose, readonly: vue.readonly, ref: vue.ref },
+            'vue-router': {
+                useRouter: () => ({
+                    replace(to) {
+                        navigations.push(to);
+                        return Promise.resolve(navigationFails ? { type: 'aborted' } : undefined);
+                    },
+                }),
+            },
+        },
+    );
     const { useUploadForReconstruction } = await importTypeScript(
         t,
         'src/composables/useUploadForReconstruction.ts',
@@ -32,13 +47,8 @@ async function fixture(t, buildingId) {
             },
             'vue-router': {
                 useRoute: () => ({ query: { buildingId } }),
-                useRouter: () => ({
-                    replace(to) {
-                        navigations.push(to);
-                        return Promise.resolve(navigationFails ? { type: 'aborted' } : undefined);
-                    },
-                }),
             },
+            './useRouteNavigation': { useRouteNavigation },
             'vue-i18n': {
                 useI18n: () => ({
                     t: (key, params) => (params ? `${key}:${params.filename}` : key),
@@ -60,13 +70,18 @@ async function fixture(t, buildingId) {
             },
         },
     );
-    const uploader = useUploadForReconstruction();
+    const scope = vue.effectScope();
+    t.after(() => scope.stop());
+    const uploader = scope.run(useUploadForReconstruction);
     return {
         uploader,
         uploads,
         navigations,
         notifications,
-        unmount: () => unmount(),
+        unmount: () => {
+            unmount();
+            scope.stop();
+        },
         setSubject: (value) => {
             subject = value;
         },

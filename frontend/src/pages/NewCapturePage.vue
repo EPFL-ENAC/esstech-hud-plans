@@ -52,12 +52,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, useTemplateRef, watch } from 'vue';
+import { computed, useTemplateRef, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useRoute, useRouter } from 'vue-router';
+import { useRoute } from 'vue-router';
 import FilePickerButton from 'src/components/FilePickerButton.vue';
 import MyUploadsList from 'src/components/MyUploadsList.vue';
 import PageHeader from 'src/components/PageHeader.vue';
+import { useRouteNavigation } from 'src/composables/useRouteNavigation';
 import type { UserUpload } from 'src/lib/uploads';
 import {
     useCreateCaptureDraftMutation,
@@ -66,11 +67,9 @@ import {
 
 const { t } = useI18n();
 const route = useRoute();
-const router = useRouter();
 const uploadsList = useTemplateRef<InstanceType<typeof MyUploadsList>>('uploadsList');
 const { mutate, data: draftId, isLoading, error } = useCreateCaptureDraftMutation();
-const navigating = ref(false);
-const navigationFailed = ref(false);
+const { navigating, navigationFailed, clearNavigationFailure, push } = useRouteNavigation();
 const busy = computed(() => isLoading.value || navigating.value);
 const errorMessage = computed(() => {
     if (navigationFailed.value) return t('capture.openFailed');
@@ -78,28 +77,17 @@ const errorMessage = computed(() => {
 });
 
 watch(draftId, (id) => {
-    if (id) void openDraft(id);
+    if (!id) return;
+    void push({
+        name: 'capture-draft',
+        params: { draftId: id },
+        query: { buildingId: route.query.buildingId },
+    });
 });
-
-async function openDraft(id: string): Promise<void> {
-    navigating.value = true;
-    try {
-        const failure = await router.push({
-            name: 'capture-draft',
-            params: { draftId: id },
-            query: { buildingId: route.query.buildingId },
-        });
-        navigationFailed.value = !!failure;
-    } catch {
-        navigationFailed.value = true;
-    } finally {
-        navigating.value = false;
-    }
-}
 
 function selectSource(source: CreateCaptureDraftSource): void {
     if (busy.value) return;
-    navigationFailed.value = false;
+    clearNavigationFailure();
     const buildingId = route.query.buildingId;
     mutate({ source, buildingId: typeof buildingId === 'string' ? buildingId : null });
 }

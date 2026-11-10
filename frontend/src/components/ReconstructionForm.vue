@@ -67,11 +67,11 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import { useI18n } from 'vue-i18n';
 import BuildingPicker from 'src/components/BuildingPicker.vue';
 import ReconstructionSettings from 'src/components/ReconstructionSettings.vue';
+import { useRouteNavigation } from 'src/composables/useRouteNavigation';
 import type { BuildingSelection } from 'src/lib/buildings';
 import {
     type ReconstructionPreset,
@@ -93,7 +93,6 @@ const advancedSettings = defineModel<ReconstructionSettingsConfig>('advancedSett
     required: true,
 });
 const { t } = useI18n();
-const router = useRouter();
 const ui = useUiStore();
 const $q = useQuasar();
 const {
@@ -102,8 +101,10 @@ const {
     destinationBuildingId,
     errorMessage: mutationError,
 } = useSubmitReconstructionMutation();
-const navigationError = ref('');
-const submissionError = computed(() => navigationError.value || mutationError.value);
+const { navigationFailed, clearNavigationFailure, push } = useRouteNavigation();
+const submissionError = computed(() =>
+    navigationFailed.value ? t('buildings.savedNavigationFailed') : mutationError.value,
+);
 const hasValidBuilding = ref(false);
 const presetOptions = computed(() => [
     { value: 'indoors', label: t('capture.presets.indoors') },
@@ -126,7 +127,7 @@ async function startProcessing(): Promise<void> {
             ? advancedSettings.value
             : makeDefaultReconstructionSettings(preset.value),
     );
-    navigationError.value = '';
+    clearNavigationFailure();
     // Colada exposes submission errors through mutationError, including retained IDs.
     await submitReconstruction({
         uploadId: props.uploadId,
@@ -143,16 +144,9 @@ async function startProcessing(): Promise<void> {
     await openBuilding(destinationBuildingId.value);
 }
 
-async function openBuilding(buildingId: string): Promise<void> {
+function openBuilding(buildingId: string): Promise<void> {
     ui.setBackground('library');
-    try {
-        const failure = await router.push(`/building/${encodeURIComponent(buildingId)}`);
-        if (failure) {
-            navigationError.value = t('buildings.savedNavigationFailed');
-        }
-    } catch {
-        navigationError.value = t('buildings.savedNavigationFailed');
-    }
+    return push(`/building/${encodeURIComponent(buildingId)}`);
 }
 defineExpose({ locked });
 </script>

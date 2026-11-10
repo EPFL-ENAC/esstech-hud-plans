@@ -12,6 +12,7 @@ import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 import VideoRecorder from 'src/components/VideoRecorder.vue';
+import { useRouteNavigation } from 'src/composables/useRouteNavigation';
 import { type RecordedVideo, toCapturedVideo } from 'src/lib/captured-video';
 import { useCreateCaptureDraftMutation } from 'src/mutations/captureDrafts';
 
@@ -19,8 +20,7 @@ const { t } = useI18n();
 const router = useRouter();
 const route = useRoute();
 const { mutate, data: draftId, isLoading, error } = useCreateCaptureDraftMutation();
-const navigating = ref(false);
-const navigationFailed = ref(false);
+const { navigating, navigationFailed, clearNavigationFailure, replace } = useRouteNavigation();
 const recordingError = ref('');
 const busy = computed(() => isLoading.value || navigating.value);
 const errorMessage = computed(() => {
@@ -30,29 +30,18 @@ const errorMessage = computed(() => {
 });
 
 watch(draftId, (id) => {
-    if (id) void openDraft(id);
+    if (!id) return;
+    void replace({
+        name: 'capture-draft',
+        params: { draftId: id },
+        query: { buildingId: route.query.buildingId },
+    });
 });
-
-async function openDraft(id: string): Promise<void> {
-    navigating.value = true;
-    try {
-        const failure = await router.replace({
-            name: 'capture-draft',
-            params: { draftId: id },
-            query: { buildingId: route.query.buildingId },
-        });
-        navigationFailed.value = !!failure;
-    } catch {
-        navigationFailed.value = true;
-    } finally {
-        navigating.value = false;
-    }
-}
 
 function saveRecording(recording: RecordedVideo): void {
     if (busy.value) return;
     recordingError.value = '';
-    navigationFailed.value = false;
+    clearNavigationFailure();
     const buildingId = route.query.buildingId;
     try {
         const { file } = toCapturedVideo(recording, null);

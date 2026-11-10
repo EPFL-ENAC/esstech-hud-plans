@@ -1,22 +1,27 @@
 import { computed, onBeforeUnmount, readonly, ref } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import { ApiError } from 'src/lib/api';
 import { getAuthSubject } from 'src/lib/auth';
 import { useUploadVideoMutation } from 'src/mutations/uploads';
+import { useRouteNavigation } from './useRouteNavigation';
 
 export function useUploadForReconstruction() {
-    const router = useRouter();
     const route = useRoute();
     const { t } = useI18n();
     const $q = useQuasar();
     const subject = getAuthSubject();
     const { mutateAsync } = useUploadVideoMutation();
+    const { navigating, navigationFailed, clearNavigationFailure, replace } = useRouteNavigation();
     const starting = ref(false);
-    const navigating = ref(false);
     const uploadId = ref<string | null>(null);
-    const errorMessage = ref('');
+    const transferError = ref('');
+    const errorMessage = computed(() =>
+        navigationFailed.value
+            ? t('reconstructions.fromUpload.navigationFailed')
+            : transferError.value,
+    );
     const busy = computed(() => starting.value || navigating.value);
     let retainedFile: File | null = null;
     let transferActive = false;
@@ -33,22 +38,13 @@ export function useUploadForReconstruction() {
 
     async function openReconstruction(): Promise<void> {
         if (!mounted || !sameAccount() || !uploadId.value || navigating.value) return;
-        navigating.value = true;
-        errorMessage.value = '';
-        try {
-            const failure = await router.replace({
-                name: 'reconstruction-from-upload',
-                params: { uploadId: uploadId.value },
-                query: { buildingId: route.query.buildingId },
-            });
-            if (failure && mounted) {
-                errorMessage.value = t('reconstructions.fromUpload.navigationFailed');
-            }
-        } catch {
-            if (mounted) errorMessage.value = t('reconstructions.fromUpload.navigationFailed');
-        } finally {
-            navigating.value = false;
-        }
+        transferError.value = '';
+        clearNavigationFailure();
+        await replace({
+            name: 'reconstruction-from-upload',
+            params: { uploadId: uploadId.value },
+            query: { buildingId: route.query.buildingId },
+        });
     }
 
     function onUploadAvailable(id: string): void {
@@ -74,7 +70,7 @@ export function useUploadForReconstruction() {
         } catch (error) {
             if (!sameAccount()) return;
             if (mounted && uploadId.value === null) {
-                errorMessage.value = uploadError(error);
+                transferError.value = uploadError(error);
             } else {
                 $q.notify({
                     type: 'negative',
@@ -97,13 +93,13 @@ export function useUploadForReconstruction() {
     function startUpload(file: File): void {
         if (!mounted || busy.value || transferActive || uploadId.value !== null) return;
         retainedFile = file;
-        errorMessage.value = '';
+        transferError.value = '';
         if (!sameAccount()) {
-            errorMessage.value = t('uploads.new.authFailed');
+            transferError.value = t('uploads.new.authFailed');
             return;
         }
         if (file.size <= 0) {
-            errorMessage.value = t('uploads.new.emptyFile');
+            transferError.value = t('uploads.new.emptyFile');
             return;
         }
         starting.value = true;
@@ -121,6 +117,6 @@ export function useUploadForReconstruction() {
         retry,
         busy,
         uploadId: readonly(uploadId),
-        errorMessage: readonly(errorMessage),
+        errorMessage,
     };
 }
