@@ -32,11 +32,7 @@
         </div>
 
         <template v-if="draft">
-            <capture-draft-source-panel
-                ref="draftSource"
-                :draft="draft"
-                :upload-state="uploadState"
-            />
+            <capture-draft-source-panel ref="draftSource" :draft="draft" />
 
             <section class="q-mb-xl">
                 <h2 class="text-h6 text-weight-bold">{{ t('capture.destinationBuilding') }}</h2>
@@ -90,9 +86,7 @@ const props = defineProps<{ draftId: string }>();
 const { t } = useI18n();
 const route = useRoute();
 const draftSource = useTemplateRef<InstanceType<typeof CaptureDraftSourcePanel>>('draftSource');
-const { draft, loadStatus, uploadState, saveStatus, retryLoad, retrySave } = useCaptureDraft(
-    props.draftId,
-);
+const { draft, loadStatus, saveStatus, retryLoad, retrySave } = useCaptureDraft(props.draftId);
 </script>
 
 <style scoped>

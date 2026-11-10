@@ -1,9 +1,8 @@
-import { useMutation, useQueryCache } from '@pinia/colada';
+import { useMutation } from '@pinia/colada';
 import { onScopeDispose } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { getAuthSubject } from 'src/lib/auth';
-import { CaptureDraftService } from 'src/lib/captureDraftService';
-import { captureDraftUploadKey, type CaptureDraftUploadState } from 'src/queries/captureDrafts';
+import { CaptureDraftService, type CaptureDraftUploadChange } from 'src/lib/captureDraftService';
 import { useUploadVideoMutation } from './uploads';
 
 export type CreateCaptureDraftSource = { uploadId: string } | { video: File };
@@ -19,7 +18,6 @@ export function useCreateCaptureDraftMutation({
     const { t } = useI18n();
     const ownerId = getAuthSubject();
     const service = new CaptureDraftService();
-    const queryCache = useQueryCache();
     const { mutateAsync: uploadVideo } = useUploadVideoMutation();
     let disposed = false;
 
@@ -28,38 +26,29 @@ export function useCreateCaptureDraftMutation({
     });
 
     async function uploadDraftVideo(ownerId: string, draftId: string, file: File): Promise<void> {
-        const key = captureDraftUploadKey(ownerId, draftId);
-        let attachedId: string | null = null;
-        let lastReportedId: string | undefined;
+        const update = (change: CaptureDraftUploadChange) =>
+            service.updateUpload(draftId, { ownerId, change });
         let attachment = Promise.resolve();
 
-        function publish(phase: CaptureDraftUploadState['phase']): void {
-            queryCache.setQueryData<CaptureDraftUploadState>(key, { phase, uploadId: attachedId });
-        }
-
-        async function attach(uploadId: string, completed = false): Promise<void> {
-            await service.attachUpload(draftId, { ownerId, uploadId, completed });
-            attachedId = uploadId;
-            publish(completed ? 'uploaded' : 'uploading');
-        }
-
-        publish('uploading');
         try {
-            const result = await uploadVideo({
+            await update({ phase: 'uploading' });
+            const { uploadId } = await uploadVideo({
                 file,
                 onUploadAvailable(uploadId) {
-                    if (uploadId === lastReportedId) return;
-                    lastReportedId = uploadId;
                     attachment = attachment
-                        .then(() => attach(uploadId))
-                        .catch(() => publish('failed'));
+                        .then(() => update({ phase: 'uploading', uploadId }))
+                        .catch((error: unknown) => {
+                            console.warn('Could not attach upload to draft', error);
+                        });
                 },
             });
             await attachment;
-            await attach(result.uploadId, true);
+            await update({ phase: 'uploaded', uploadId });
         } catch {
             await attachment;
-            publish('failed');
+            await update({ phase: 'failed' }).catch((error: unknown) => {
+                console.warn('Could not save draft upload failure', error);
+            });
         }
     }
 

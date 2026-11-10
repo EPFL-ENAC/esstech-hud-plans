@@ -1,41 +1,50 @@
-import { useQueryCache } from '@pinia/colada';
-import { computed, readonly, ref, shallowReadonly, watch } from 'vue';
+import { onScopeDispose, readonly, ref, shallowReadonly } from 'vue';
 import { onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
 import { getAuthSubject } from 'src/lib/auth';
 import {
     CaptureDraftService,
     type CaptureDraft,
     type CaptureDraftForm,
+    type CaptureDraftSourceInfo,
 } from 'src/lib/captureDraftService';
-import { captureDraftUploadKey, type CaptureDraftUploadState } from 'src/queries/captureDrafts';
 import { useDebouncedAutosave } from './useDebouncedAutosave';
 
 export function useCaptureDraft(draftId: string) {
     const ownerId = getAuthSubject();
     const service = new CaptureDraftService();
-    const queryCache = useQueryCache();
     const draft = ref<CaptureDraft | null>(null);
     const loadStatus = ref<'loading' | 'ready' | 'missing' | 'error'>('loading');
-    const uploadState = computed(() =>
-        ownerId
-            ? queryCache.getQueryData<CaptureDraftUploadState>(
-                  captureDraftUploadKey(ownerId, draftId),
-              )
-            : undefined,
-    );
+    let disposed = false;
+    let sourceDuringRead: CaptureDraftSourceInfo | undefined;
 
-    watch([draft, uploadState], ([record, transfer]) => {
-        if (record && transfer?.uploadId) record.source = { uploadId: transfer.uploadId };
+    const unsubscribe = ownerId
+        ? service.listenForUploadChanges(draftId, { ownerId }, (source) => {
+              if (getAuthSubject() !== ownerId) return;
+              if (draft.value) applySource(draft.value, source);
+              else sourceDuringRead = source;
+          })
+        : undefined;
+
+    onScopeDispose(() => {
+        disposed = true;
+        unsubscribe?.();
     });
 
     async function retryLoad(): Promise<void> {
         loadStatus.value = 'loading';
+        sourceDuringRead = undefined;
+
         try {
             const record = ownerId ? await service.get(draftId, { ownerId }) : null;
-            draft.value = ownerId === getAuthSubject() ? record : null;
-            loadStatus.value = draft.value ? 'ready' : 'missing';
+            if (disposed) return;
+
+            const loaded = ownerId === getAuthSubject() ? record : null;
+            if (loaded && sourceDuringRead) applySource(loaded, sourceDuringRead);
+            sourceDuringRead = undefined;
+            draft.value = loaded;
+            loadStatus.value = loaded ? 'ready' : 'missing';
         } catch {
-            loadStatus.value = 'error';
+            if (!disposed) loadStatus.value = 'error';
         }
     }
 
@@ -60,11 +69,19 @@ export function useCaptureDraft(draftId: string) {
     return {
         draft: shallowReadonly(draft),
         loadStatus: readonly(loadStatus),
-        uploadState,
         saveStatus,
         retryLoad,
         retrySave,
     };
+}
+
+function applySource(draft: CaptureDraft, source: CaptureDraftSourceInfo): void {
+    if ('uploadId' in source) {
+        draft.source = source;
+    } else if ('video' in draft.source) {
+        const { video } = draft.source;
+        draft.source = source.phase ? { video, phase: source.phase } : { video };
+    }
 }
 
 function snapshotForm(form: CaptureDraftForm): CaptureDraftForm {

@@ -16,21 +16,21 @@
                 <template v-if="upload"> · {{ t(`uploads.status.${upload.status}`) }} </template>
             </div>
             <div
-                v-if="video && uploadState?.phase === 'uploading'"
+                v-if="video && source.phase === 'uploading'"
                 class="text-caption text-grey-7"
                 role="status"
             >
                 {{ t('uploads.new.starting') }}
             </div>
             <upload-transfer-progress
-                v-if="upload?.status === 'pending' && uploadState?.phase !== 'failed'"
+                v-if="upload?.status === 'pending' && source.phase !== 'failed'"
                 class="q-mt-md"
                 :progress="{ loaded: upload.uploaded_bytes, total: upload.size_bytes }"
                 :resumed="false"
             />
         </q-card-section>
     </q-card>
-    <p v-if="uploadState?.phase === 'failed'" class="text-negative" role="alert">
+    <p v-if="source.phase === 'failed'" class="text-negative" role="alert">
         {{ t('capture.draft.uploadFailed') }}
     </p>
     <p v-else-if="upload?.status === 'failed'" class="text-negative" role="alert">
@@ -46,13 +46,9 @@ import UploadTransferProgress from 'src/components/UploadTransferProgress.vue';
 import { ApiError } from 'src/lib/api';
 import type { CaptureDraft } from 'src/lib/captureDraftService';
 import { formatFileSize } from 'src/lib/utils/formatFileSize';
-import type { CaptureDraftUploadState } from 'src/queries/captureDrafts';
 import { useUploadQuery } from 'src/queries/uploads';
 
-const props = defineProps<{
-    draft: CaptureDraft;
-    uploadState?: CaptureDraftUploadState | undefined;
-}>();
+const props = defineProps<{ draft: CaptureDraft }>();
 const { t, locale } = useI18n();
 const source = computed(() => props.draft.source);
 const uploadId = computed(() => ('uploadId' in source.value ? source.value.uploadId : ''));

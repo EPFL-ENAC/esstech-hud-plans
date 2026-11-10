@@ -12,7 +12,7 @@ async function fixture(t) {
     const transfer = deferred();
     const onCreate = t.mock.fn();
     const upload = t.mock.fn(() => transfer.promise);
-    const attach = t.mock.fn(async () => {});
+    const updateUpload = t.mock.fn(async () => {});
     const { useCreateCaptureDraftMutation } = await importTypeScript(
         t,
         'src/mutations/captureDrafts.ts',
@@ -24,11 +24,8 @@ async function fixture(t) {
             'src/lib/captureDraftService': {
                 CaptureDraftService: class {
                     create = () => commit.promise;
-                    attachUpload = attach;
+                    updateUpload = updateUpload;
                 },
-            },
-            'src/queries/captureDrafts': {
-                captureDraftUploadKey: (ownerId, id) => ['capture-drafts', ownerId, id, 'upload'],
             },
             './uploads': { useUploadVideoMutation: () => ({ mutateAsync: upload }) },
         },
@@ -52,7 +49,7 @@ async function fixture(t) {
         transfer,
         onCreate,
         upload,
-        attach,
+        updateUpload,
         dispose: () => scope.stop(),
         changeAccount: () => (subject = 'other-owner'),
     };
@@ -75,11 +72,26 @@ test('onCreate fires once after the local commit and before upload completion', 
         f.onCreate.mock.calls.map(({ arguments: args }) => args),
         [['draft-id']],
     );
-    assert.equal(f.attach.mock.callCount(), 0);
+    assert.equal(f.updateUpload.mock.callCount(), 1);
+
+    f.upload.mock.calls[0].arguments[0].onUploadAvailable('upload-id');
 
     f.transfer.resolve({ uploadId: 'upload-id' });
     await nextTurn();
-    assert.equal(f.attach.mock.callCount(), 1);
+    assert.deepEqual(
+        f.updateUpload.mock.calls.map(({ arguments: [id, input] }) => [id, input]),
+        [
+            ['draft-id', { ownerId: 'owner', change: { phase: 'uploading' } }],
+            [
+                'draft-id',
+                { ownerId: 'owner', change: { phase: 'uploading', uploadId: 'upload-id' } },
+            ],
+            [
+                'draft-id',
+                { ownerId: 'owner', change: { phase: 'uploaded', uploadId: 'upload-id' } },
+            ],
+        ],
+    );
     assert.equal(f.onCreate.mock.callCount(), 1);
 });
 

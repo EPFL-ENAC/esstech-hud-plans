@@ -5,7 +5,22 @@ import {
     type ReconstructionSettingsConfig,
 } from './reconstruction-settings';
 
-export type CaptureDraftSource = { uploadId: string } | { video: Blob };
+type UploadActivity = { phase?: 'uploading' | 'failed' };
+
+type LinkedDraftSource = { uploadId: string } & (
+    | (UploadActivity & { completed?: never })
+    | { completed: true; phase?: never }
+);
+
+type LocalDraftSourceInfo = { localVideo: true } & UploadActivity;
+
+export type CaptureDraftSourceInfo = LinkedDraftSource | LocalDraftSourceInfo;
+export type CaptureDraftSource = LinkedDraftSource | ({ video: Blob } & UploadActivity);
+
+export type CaptureDraftUploadChange =
+    | { phase: 'uploading'; uploadId?: string }
+    | { phase: 'uploaded'; uploadId: string }
+    | { phase: 'failed' };
 
 export interface CaptureDraftForm {
     buildingSelection: BuildingSelection;
@@ -20,12 +35,26 @@ export interface CaptureDraft {
 }
 
 interface DraftMetadata {
-    source: { uploadId: string } | { localVideo: true };
+    source: CaptureDraftSourceInfo;
     form: CaptureDraftForm;
 }
 
 export class CaptureDraftService {
     static readonly databaseName = 'hud-capture-drafts';
+    private static readonly uploadEvents = new EventTarget();
+
+    listenForUploadChanges(
+        draftId: string,
+        { ownerId }: { ownerId: string },
+        listener: (source: CaptureDraftSourceInfo) => void,
+    ): () => void {
+        const key = JSON.stringify([ownerId, draftId]);
+        const receive = (event: Event) => {
+            listener((event as CustomEvent<CaptureDraftSourceInfo>).detail);
+        };
+        CaptureDraftService.uploadEvents.addEventListener(key, receive);
+        return () => CaptureDraftService.uploadEvents.removeEventListener(key, receive);
+    }
 
     async create({
         ownerId,
@@ -72,7 +101,7 @@ export class CaptureDraftService {
 
         const video = videoRequest.result as Blob | undefined;
         if (!video) throw new Error('Capture draft video is missing.');
-        return { id, source: { video }, form };
+        return { id, source: source.phase ? { video, phase: source.phase } : { video }, form };
     }
 
     async updateForm(
@@ -94,15 +123,13 @@ export class CaptureDraftService {
         });
     }
 
-    async attachUpload(
+    async updateUpload(
         draftId: string,
-        {
-            ownerId,
-            uploadId,
-            completed = false,
-        }: { ownerId: string; uploadId: string; completed?: boolean },
+        { ownerId, change }: { ownerId: string; change: CaptureDraftUploadChange },
     ): Promise<void> {
         const key = [ownerId, draftId];
+        let updatedSource: CaptureDraftSourceInfo | undefined;
+
         await this.transact(['drafts', 'videos'], 'readwrite', (transaction) => {
             const drafts = transaction.objectStore('drafts');
             const request = drafts.get(key);
@@ -112,10 +139,29 @@ export class CaptureDraftService {
                     transaction.abort();
                     return;
                 }
-                drafts.put({ ...metadata, source: { uploadId } }, key);
-                if (completed) transaction.objectStore('videos').delete(key);
+
+                const current = metadata.source;
+                if (change.phase === 'uploaded') {
+                    updatedSource = { uploadId: change.uploadId, completed: true };
+                    transaction.objectStore('videos').delete(key);
+                } else {
+                    if ('uploadId' in current && current.completed) return;
+
+                    updatedSource =
+                        change.phase === 'uploading' && change.uploadId !== undefined
+                            ? { uploadId: change.uploadId, phase: 'uploading' }
+                            : { ...current, phase: change.phase };
+                }
+
+                drafts.put({ ...metadata, source: updatedSource }, key);
             };
         });
+
+        if (updatedSource) {
+            CaptureDraftService.uploadEvents.dispatchEvent(
+                new CustomEvent(JSON.stringify(key), { detail: updatedSource }),
+            );
+        }
     }
 
     private openDatabase(): Promise<IDBDatabase> {
