@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n';
 import { useAsyncResultCollection } from 'unwrapped/vue';
 import { AsyncResult } from 'unwrapped/core';
 import type { ReconstructionViewParams } from 'src/lib/buildings';
-import { scanZRange, type ZAxisRange } from 'src/lib/maths/zDistribution';
+import { scanZRange, type ZClip } from 'src/lib/maths/zDistribution';
 import PlanPointDensityBar from 'src/components/PlanPointDensityBar.vue';
 
 const PAN_MARGIN = 0.2;
@@ -24,6 +24,10 @@ const POINT_OPACITY_MAX = 0.5;
 const POINT_OPACITY_STEP = 0.01;
 const DEFAULT_POINT_SIZE = 0.5;
 const DEFAULT_POINT_OPACITY = 0.15;
+const FADE_OPACITY_MIN = 0;
+const FADE_OPACITY_MAX = 1;
+const FADE_OPACITY_STEP = 0.05;
+const DEFAULT_FADE_OPACITY = 0.2;
 const FIXED_VIEWER_SIZE = 700;
 const MIN_SPAN = 1e-6;
 /** Clip plane constant that keeps every point; the plane count must stay fixed. */
@@ -43,18 +47,50 @@ const container = useTemplateRef<HTMLDivElement>('container');
 let renderer: THREE.WebGLRenderer | null = null;
 let camera: THREE.OrthographicCamera | null = null;
 let scene: THREE.Scene | null = null;
-let points: THREE.Points | null = null;
 let geometry: THREE.BufferGeometry | null = null;
-let material: THREE.PointsMaterial | null = null;
 const group = new THREE.Group();
 
-// Points outside the selected height range are discarded on the GPU. The group only
-// rotates around Z and translates in X/Y, so local Z is world Z here; transform the
-// planes by group.matrixWorld if that ever changes.
-const minPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), CLIP_OPEN);
-const maxPlane = new THREE.Plane(new THREE.Vector3(0, 0, -1), CLIP_OPEN);
-const clipPlanes = [minPlane, maxPlane];
-const zRange = ref<ZAxisRange | null>(null);
+interface Slab {
+    /** Points kept: `low` clips from below, `high` from above. */
+    low: THREE.Plane;
+    high: THREE.Plane;
+    /** Outside the kept band, the slab draws at the fade opacity. */
+    faded: boolean;
+    material: THREE.PointsMaterial | null;
+    points: THREE.Points | null;
+}
+
+// Points outside A-D are discarded on the GPU, and A-B / C-D draw faded, so the same
+// geometry is drawn once per slab with its own clip planes. The group only rotates
+// around Z and translates in X/Y, so local Z is world Z here; transform the planes by
+// group.matrixWorld if that ever changes.
+function clipPlane(normal: number, constant: number): THREE.Plane {
+    return new THREE.Plane(new THREE.Vector3(0, 0, normal), constant);
+}
+
+const slabFloor: Slab = {
+    low: clipPlane(1, CLIP_OPEN),
+    high: clipPlane(-1, CLIP_OPEN),
+    faded: true,
+    material: null,
+    points: null,
+};
+const slabKept: Slab = {
+    low: clipPlane(1, CLIP_OPEN),
+    high: clipPlane(-1, CLIP_OPEN),
+    faded: false,
+    material: null,
+    points: null,
+};
+const slabCeiling: Slab = {
+    low: clipPlane(1, CLIP_OPEN),
+    high: clipPlane(-1, CLIP_OPEN),
+    faded: true,
+    material: null,
+    points: null,
+};
+const slabs = [slabFloor, slabKept, slabCeiling];
+const zRange = ref<ZClip | null>(null);
 
 let resizeObserver: ResizeObserver | null = null;
 let frustumSize = 2;
@@ -100,6 +136,14 @@ const pointOpacity = ref(
         DEFAULT_POINT_OPACITY,
         POINT_OPACITY_MIN,
         POINT_OPACITY_MAX,
+    ),
+);
+const fadeOpacity = ref(
+    readStoredValue(
+        `plan-fade-opacity:${props.reconstructionId}`,
+        DEFAULT_FADE_OPACITY,
+        FADE_OPACITY_MIN,
+        FADE_OPACITY_MAX,
     ),
 );
 const scaleBarWidthPx = ref(0);
@@ -166,8 +210,9 @@ function applyZoom(): void {
 
 // Slider value is the size in px at the fit zoom; points scale with zoom like the plan.
 function applyPointSize(): void {
-    if (!material || !renderer) return;
-    material.size = pointSize.value * renderer.getPixelRatio() * (view.zoom / fitZoom);
+    if (!renderer) return;
+    const size = pointSize.value * renderer.getPixelRatio() * (view.zoom / fitZoom);
+    for (const slab of slabs) if (slab.material) slab.material.size = size;
 }
 
 function setZoom(zoom: number): void {
@@ -292,26 +337,38 @@ function onContextMenu(event: MouseEvent): void {
     event.preventDefault();
 }
 
+function slabOpacity(slab: Slab): number {
+    return pointOpacity.value * (slab.faded ? fadeOpacity.value : 1);
+}
+
+function applyOpacity(): void {
+    for (const slab of slabs) {
+        if (slab.material) slab.material.opacity = slabOpacity(slab);
+    }
+}
+
 function rebuildPoints(): void {
     if (!scene || !renderer) return;
     geometry?.dispose();
     geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(props.buffer), 3));
-    if (points) {
-        points.geometry = geometry;
-        return;
+    const reuse = slabKept.points !== null;
+    for (const slab of slabs) {
+        if (slab.points) slab.points.geometry = geometry;
+        else {
+            slab.material = new THREE.PointsMaterial({
+                color: 0x000000,
+                sizeAttenuation: false,
+                transparent: true,
+                depthWrite: false,
+                opacity: slabOpacity(slab),
+                clippingPlanes: [slab.low, slab.high],
+            });
+            slab.points = new THREE.Points(geometry, slab.material);
+            group.add(slab.points);
+        }
     }
-    material = new THREE.PointsMaterial({
-        color: 0x000000,
-        sizeAttenuation: false,
-        transparent: true,
-        depthWrite: false,
-        opacity: pointOpacity.value,
-        clippingPlanes: clipPlanes,
-    });
-    applyPointSize();
-    points = new THREE.Points(geometry, material);
-    group.add(points);
+    if (!reuse) applyPointSize();
 }
 
 const collection = useAsyncResultCollection();
@@ -326,10 +383,12 @@ onBeforeUnmount(() => {
         renderer = null;
     }
     geometry?.dispose();
-    material?.dispose();
+    for (const slab of slabs) {
+        slab.material?.dispose();
+        slab.material = null;
+        slab.points = null;
+    }
     geometry = null;
-    material = null;
-    points = null;
     scene = null;
     camera = null;
 });
@@ -409,14 +468,22 @@ watch(pointSize, (value) => {
 
 watch(pointOpacity, (value) => {
     window.localStorage.setItem(`plan-point-opacity:${props.reconstructionId}`, String(value));
-    if (material) {
-        material.opacity = value;
-    }
+    applyOpacity();
+});
+
+watch(fadeOpacity, (value) => {
+    window.localStorage.setItem(`plan-fade-opacity:${props.reconstructionId}`, String(value));
+    applyOpacity();
 });
 
 watch(zRange, (value) => {
-    minPlane.constant = value === null ? CLIP_OPEN : -value.min;
-    maxPlane.constant = value === null ? CLIP_OPEN : value.max;
+    // A keeps `z >= min`, D keeps `z <= max`, and B / C split the two faded slabs.
+    slabFloor.low.constant = value === null ? CLIP_OPEN : -value.clip.min;
+    slabFloor.high.constant = value === null ? CLIP_OPEN : value.opaque.min;
+    slabKept.low.constant = value === null ? CLIP_OPEN : -value.opaque.min;
+    slabKept.high.constant = value === null ? CLIP_OPEN : value.opaque.max;
+    slabCeiling.low.constant = value === null ? CLIP_OPEN : -value.opaque.max;
+    slabCeiling.high.constant = value === null ? CLIP_OPEN : value.clip.max;
 });
 </script>
 
@@ -440,6 +507,16 @@ watch(zRange, (value) => {
                 :max="POINT_OPACITY_MAX"
                 :step="POINT_OPACITY_STEP"
                 :label-value="formatValue(pointOpacity, POINT_OPACITY_STEP)"
+                label
+                dense
+            />
+            <span class="text-caption text-grey-7">{{ t('plans.points.fadeOpacity') }}</span>
+            <q-slider
+                v-model="fadeOpacity"
+                :min="FADE_OPACITY_MIN"
+                :max="FADE_OPACITY_MAX"
+                :step="FADE_OPACITY_STEP"
+                :label-value="formatValue(fadeOpacity, FADE_OPACITY_STEP)"
                 label
                 dense
             />

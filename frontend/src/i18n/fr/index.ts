@@ -439,6 +439,13 @@ export default {
             pointOpacity: 'Opacité des points',
             preparing: 'Préparation du nuage de points…',
             density: 'Densité des points par hauteur',
+            clipFloor: 'Hauteur de coupe basse',
+            clipCeiling: 'Hauteur de coupe haute',
+            opaqueBottom: 'Bas de la bande visible',
+            opaqueTop: 'Haut de la bande visible',
+            fadeOpacity: 'Opacité sol/plafond',
+            floorBand: 'SOL',
+            ceilingBand: 'PLAFOND',
         },
     },
     settings: {

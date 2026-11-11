@@ -416,6 +416,13 @@ export default {
             pointOpacity: 'Point opacity',
             preparing: 'Preparing point cloud…',
             density: 'Point density by height',
+            clipFloor: 'Floor clipping height',
+            clipCeiling: 'Ceiling clipping height',
+            opaqueBottom: 'Kept band bottom',
+            opaqueTop: 'Kept band top',
+            fadeOpacity: 'Floor/ceiling opacity',
+            floorBand: 'FLOOR',
+            ceilingBand: 'CEILING',
         },
     },
     settings: {

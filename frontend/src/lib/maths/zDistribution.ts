@@ -3,6 +3,19 @@ export interface ZAxisRange {
     max: number;
 }
 
+/**
+ * Grabbed part of the bar, bottom first: the A and D handles resize the floor and
+ * ceiling bands, the B and C handles translate them together with the band body.
+ */
+export type ZClipTarget = 'a' | 'ab' | 'cd' | 'd' | 'bc';
+
+export interface ZClip {
+    /** Clip limits: no point below `clip.min` or above `clip.max` is drawn. */
+    clip: ZAxisRange;
+    /** Opacity limits: only the points inside `opaque` keep the full opacity. */
+    opaque: ZAxisRange;
+}
+
 export interface ZDistribution {
     /** Trimmed Z axis drawn by the bar, bottom first. */
     axis: ZAxisRange;
@@ -160,26 +173,117 @@ export function barRatio(count: number, maxCount: number, useSquareRoot: boolean
     return useSquareRoot ? Math.sqrt(ratio) : ratio;
 }
 
+/** Smallest distance kept between two heights: one bar bin. */
+export function zBinHeight(axis: ZAxisRange): number {
+    return Math.max(axis.max - axis.min, 0) / Z_BIN_COUNT;
+}
+
+/**
+ * Smallest distance between the neighbours A-B, B-C, C-D. The clip bands may collapse
+ * onto their opacity limit, so only the kept band keeps a bin.
+ */
+function pairGaps(axis: ZAxisRange): [number, number, number] {
+    return [0, zBinHeight(axis), 0];
+}
+
+/** Metres in world units, or null when the cloud has no scale. */
+function worldFromMetres(metres: number, cmPerUnit: number | null): number | null {
+    return cmPerUnit != null && cmPerUnit > 0 ? (metres * 100) / cmPerUnit : null;
+}
+
+/** Default gap between the detected floor and the bottom of the kept band. */
+export function floorClearance(axis: ZAxisRange, cmPerUnit: number | null): number {
+    return (
+        worldFromMetres(DEFAULT_FLOOR_CLEARANCE_METERS, cmPerUnit) ??
+        Math.max(axis.max - axis.min, 0) * DEFAULT_FLOOR_CLEARANCE_FRACTION
+    );
+}
+
+function clampInto(value: number, low: number, high: number): number {
+    return Math.min(Math.max(value, low), Math.max(low, high));
+}
+
 /** Keeps `range` inside `axis` and at least one bin tall. */
 export function clampZRange(range: ZAxisRange, axis: ZAxisRange): ZAxisRange {
-    const span = Math.max(axis.max - axis.min, 0);
-    const minSpan = span / Z_BIN_COUNT;
-    const min = Math.min(Math.max(range.min, axis.min), axis.max - minSpan);
-    const max = Math.min(Math.max(range.max, min + minSpan), axis.max);
+    const minSpan = zBinHeight(axis);
+    const min = clampInto(range.min, axis.min, axis.max - minSpan);
+    const max = clampInto(range.max, min + minSpan, axis.max);
     return { min, max };
 }
 
+/** Orders the four heights and keeps them inside `axis`. */
+export function clampZClip(value: ZClip, axis: ZAxisRange): ZClip {
+    const gaps = pairGaps(axis);
+    // The kept band must keep its bin, so A and B stop one bin below the top.
+    const a = clampInto(value.clip.min, axis.min, axis.max - gaps[1]);
+    const b = clampInto(value.opaque.min, a + gaps[0], axis.max - gaps[1]);
+    const c = clampInto(value.opaque.max, b + gaps[1], axis.max);
+    const d = clampInto(value.clip.max, c + gaps[2], axis.max);
+    return { clip: { min: a, max: d }, opaque: { min: b, max: c } };
+}
+
+/**
+ * Moves the grabbed handle (or band) by `delta` from `value`. Heights resolve from the
+ * end the drag pushes towards, so a height blocked by the axis or by its neighbour
+ * stops while the others keep moving: the bands compress instead of freezing.
+ */
+export function dragZClip(
+    value: ZClip,
+    target: ZClipTarget,
+    delta: number,
+    axis: ZAxisRange,
+): ZClip {
+    const gaps = pairGaps(axis);
+    const before: Heights = [value.clip.min, value.opaque.min, value.opaque.max, value.clip.max];
+    const after: Heights = [...before];
+    const moves = MOVES[target];
+    const upwards = delta >= 0;
+    for (const index of upwards ? UPWARDS : DOWNWARDS) {
+        if (!moves[index]) continue;
+        // The neighbour the drag pushes into is already resolved, the other is not.
+        const below =
+            index === 0 ? axis.min : (upwards ? before : after)[index - 1]! + gaps[index - 1]!;
+        const above = index === 3 ? axis.max : (upwards ? after : before)[index + 1]! - gaps[index];
+        after[index] = clampInto(before[index] + delta, below, above);
+    }
+    return { clip: { min: after[0], max: after[3] }, opaque: { min: after[1], max: after[2] } };
+}
+
+type HeightIndex = 0 | 1 | 2 | 3;
+type Heights = [number, number, number, number];
+
+const UPWARDS: HeightIndex[] = [3, 2, 1, 0];
+const DOWNWARDS: HeightIndex[] = [0, 1, 2, 3];
+
+const MOVES: Record<ZClipTarget, [boolean, boolean, boolean, boolean]> = {
+    a: [true, false, false, false],
+    ab: [true, true, false, false],
+    cd: [false, false, true, true],
+    d: [false, false, false, true],
+    bc: [true, true, true, true],
+};
+
 export function defaultZRange(distribution: ZDistribution, cmPerUnit: number | null): ZAxisRange {
     const { axis, floorZ } = distribution;
-    const span = axis.max - axis.min;
-    const scaled = cmPerUnit != null && cmPerUnit > 0;
-    const toWorld = (metres: number) => (metres * 100) / cmPerUnit!;
-    const clearance = scaled
-        ? toWorld(DEFAULT_FLOOR_CLEARANCE_METERS)
-        : span * DEFAULT_FLOOR_CLEARANCE_FRACTION;
-    const slab = scaled ? toWorld(DEFAULT_SLAB_METERS) : span * DEFAULT_SLAB_FRACTION;
+    const clearance = floorClearance(axis, cmPerUnit);
+    const slab =
+        worldFromMetres(DEFAULT_SLAB_METERS, cmPerUnit) ??
+        Math.max(axis.max - axis.min, 0) * DEFAULT_SLAB_FRACTION;
     const bottom = (floorZ ?? axis.min) + clearance;
     return clampZRange({ min: bottom, max: bottom + slab }, axis);
+}
+
+/** The kept band, framed by a floor and a ceiling band twice the floor clearance thick. */
+export function defaultZClip(distribution: ZDistribution, cmPerUnit: number | null): ZClip {
+    const opaque = defaultZRange(distribution, cmPerUnit);
+    const band = 2 * floorClearance(distribution.axis, cmPerUnit);
+    return {
+        clip: {
+            min: Math.max(opaque.min - band, distribution.axis.min),
+            max: Math.min(opaque.max + band, distribution.axis.max),
+        },
+        opaque,
+    };
 }
 
 /** 0 at the bottom of the axis, 1 at the top. */
@@ -187,6 +291,21 @@ export function heightFraction(z: number, axis: ZAxisRange): number {
     const span = axis.max - axis.min;
     if (!(span > 0)) return 0;
     return Math.min(Math.max((z - axis.min) / span, 0), 1);
+}
+
+/** Height above the detected floor, labelled like the axis ticks. */
+export function formatHeight(
+    z: number,
+    distribution: ZDistribution,
+    cmPerUnit: number | null,
+): string {
+    const foot = distribution.floorZ ?? distribution.axis.min;
+    const metresPerUnit = cmPerUnit != null && cmPerUnit > 0 ? cmPerUnit / 100 : null;
+    if (metresPerUnit === null) {
+        const span = distribution.axis.max - distribution.axis.min;
+        return `${Math.round(((z - foot) / span) * 100)} %`;
+    }
+    return `${((z - foot) * metresPerUnit).toFixed(2)} m`;
 }
 
 /**

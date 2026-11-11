@@ -159,3 +159,81 @@ test('labels heights above the floor, or in percent without a scale', async (t) 
         ['-2 m', '-1 m', '0 m', '1 m'],
     );
 });
+
+test('frames the kept band with bands twice the floor clearance thick', async (t) => {
+    const z = await load(t);
+    const distribution = {
+        axis: { min: 0, max: 10 },
+        counts: new Uint32Array(Z_BIN_COUNT),
+        maxCount: 1,
+        floorZ: 0,
+    };
+
+    // 100 cm per unit: the clearance is 0.1 m, so each band is 0.2 m thick.
+    const scaled = z.defaultZClip(distribution, 100);
+    assert.ok(Math.abs(scaled.opaque.min - 0.1) < 1e-9);
+    assert.equal(scaled.clip.min, 0);
+    assert.ok(Math.abs(scaled.clip.max - (scaled.opaque.max + 0.2)) < 1e-9);
+
+    // No scale: 5 % clearance, 10 % bands.
+    const plain = z.defaultZClip(distribution, null);
+    assert.ok(Math.abs(plain.opaque.min - 0.5) < 1e-9);
+    assert.ok(Math.abs(plain.clip.max - (plain.opaque.max + 1)) < 1e-9);
+});
+
+test('orders the four heights and keeps them one bin apart', async (t) => {
+    const z = await load(t);
+    const gap = 10 / Z_BIN_COUNT;
+    const clamped = z.clampZClip(
+        { clip: { min: -5, max: 50 }, opaque: { min: 4, max: 2 } },
+        { min: 0, max: 10 },
+    );
+    assert.equal(clamped.clip.min, 0);
+    assert.equal(clamped.opaque.min, 4);
+    assert.ok(Math.abs(clamped.opaque.max - (4 + gap)) < 1e-12);
+    assert.equal(clamped.clip.max, 10);
+});
+
+test('moves the grabbed handle or band and compresses at the axis ends', async (t) => {
+    const z = await load(t);
+    const axis = { min: 0, max: 10 };
+    const gap = 10 / Z_BIN_COUNT;
+    const start = { clip: { min: 2, max: 6 }, opaque: { min: 3, max: 5 } };
+    const move = (target, delta) => z.dragZClip(start, target, delta, axis);
+
+    // A and D resize the floor and ceiling bands only.
+    assert.deepEqual(move('a', -0.5), { clip: { min: 1.5, max: 6 }, opaque: { min: 3, max: 5 } });
+    assert.deepEqual(move('d', 0.5), { clip: { min: 2, max: 6.5 }, opaque: { min: 3, max: 5 } });
+    // A may sit exactly on B: the clip band collapses onto the opacity limit.
+    assert.equal(move('a', 5).clip.min, 3);
+    assert.equal(move('d', -5).clip.max, 5);
+
+    // The B and C band bodies translate their band.
+    assert.deepEqual(move('ab', 0.5), { clip: { min: 2.5, max: 6 }, opaque: { min: 3.5, max: 5 } });
+    assert.deepEqual(move('cd', 0.5), { clip: { min: 2, max: 6.5 }, opaque: { min: 3, max: 5.5 } });
+
+    // The kept band moves everything, then the bands pile up one bin apart at the end.
+    const up = move('bc', 20);
+    assert.equal(up.clip.max, 10);
+    assert.equal(up.opaque.max, 10);
+    assert.ok(Math.abs(up.opaque.min - (10 - gap)) < 1e-9);
+    assert.ok(Math.abs(up.clip.min - (10 - gap)) < 1e-9);
+
+    const down = move('bc', -20);
+    assert.equal(down.clip.min, 0);
+    assert.equal(down.opaque.min, 0);
+    assert.ok(Math.abs(down.opaque.max - gap) < 1e-9);
+    assert.ok(Math.abs(down.clip.max - gap) < 1e-9);
+});
+
+test('labels a handle height above the floor', async (t) => {
+    const z = await load(t);
+    const distribution = {
+        axis: { min: 0, max: 3 },
+        counts: new Uint32Array(Z_BIN_COUNT),
+        maxCount: 1,
+        floorZ: 1,
+    };
+    assert.equal(z.formatHeight(2.5, distribution, 100), '1.50 m');
+    assert.equal(z.formatHeight(2.5, distribution, null), '50 %');
+});

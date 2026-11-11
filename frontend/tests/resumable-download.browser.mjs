@@ -156,9 +156,9 @@ try {
         await first.evaluate(async () => {
             const root = await navigator.storage.getDirectory();
             const directory = await root.getDirectoryHandle('resumable-downloads');
-            let count = 0;
-            for await (const _entry of directory.values()) count++;
-            return count;
+            const entries = [];
+            for await (const entry of directory.values()) entries.push(entry);
+            return entries.length;
         }),
         1,
     ); // Only the other URL remains.
