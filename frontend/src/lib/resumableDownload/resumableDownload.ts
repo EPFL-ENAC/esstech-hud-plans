@@ -67,13 +67,15 @@ export class ResumableDownload {
                 };
                 reportProgress();
 
-                if (!this.metadataValue?.complete) {
+                if (!this.metadataValue?.complete || this.file.size === 0) {
                     await this.transfer(controller, reportProgress);
                     await this.finish(controller.signal);
                 }
                 controller.signal.throwIfAborted();
                 reportProgress();
-                return this.file.toBlob();
+                const blob = await this.file.toBlob();
+                if (blob.size === 0) throw new Error(`Empty download: ${this.url}`);
+                return blob;
             }),
         );
     }

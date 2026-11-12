@@ -51,18 +51,27 @@ for (const persistent of [false, true]) {
         assert.equal(f.requests.length, 2);
     });
 
-    for (const size of [0, 3]) {
-        test(`unknown length completes and reopens: size=${size}, persistent=${persistent}`, async (t) => {
-            const f = await downloadFixture(t, { persistent });
-            f.setFetch(() => response(new Uint8Array(size).fill(7)));
-            let download = await f.open();
-            assert.equal((await download.download()).size, size);
-            assert.equal(download.metadata.totalBytes, size);
-            if (persistent) download = await f.open();
-            assert.equal((await download.download()).size, size);
-            assert.equal(f.requests.length, 1);
-        });
-    }
+    test(`unknown length completes and reopens: persistent=${persistent}`, async (t) => {
+        const f = await downloadFixture(t, { persistent });
+        f.setFetch(() => response(new Uint8Array(3).fill(7)));
+        let download = await f.open();
+        assert.equal((await download.download()).size, 3);
+        assert.equal(download.metadata.totalBytes, 3);
+        if (persistent) download = await f.open();
+        assert.equal((await download.download()).size, 3);
+        assert.equal(f.requests.length, 1);
+    });
+
+    test(`empty downloads reject and refetch on the next open: persistent=${persistent}`, async (t) => {
+        const f = await downloadFixture(t, { persistent });
+        f.setFetch(() => response(new Uint8Array(0)));
+        let download = await f.open();
+        await assert.rejects(download.download(), /Empty download/);
+        assert.equal(download.metadata.totalBytes, 0);
+        download = await f.open();
+        await assert.rejects(download.download(), /Empty download/);
+        assert.equal(f.requests.length, 2);
+    });
 
     test(`cancellation flushes a small tail before retry: persistent=${persistent}`, async (t) => {
         const f = await downloadFixture(t, { persistent });
