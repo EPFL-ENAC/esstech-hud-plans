@@ -51,11 +51,26 @@ RUN apt-get update && \
 
 COPY --from=builder /spirula-studio/build/spirula /usr/local/bin/spirula
 
-# Download the default depth/normals model
+# Download the depth/normals/segmentation models
 ENV XDG_CACHE_HOME=/opt/spirula-cache
+ARG SAM3_REVISION=a3892b63b918e872671322e116982a8910f0ffb7
 RUN mkdir -p "$XDG_CACHE_HOME/spirula-studio/models" && \
     curl -fsSL --retry 3 -o \
         "$XDG_CACHE_HOME/spirula-studio/models/moge2-vitb-normal.onnx" \
         "https://huggingface.co/Ruicheng/moge-2-vitb-normal-onnx/resolve/main/model.onnx" && \
     sha256sum "$XDG_CACHE_HOME/spirula-studio/models/moge2-vitb-normal.onnx" | \
-        grep -q "^bbf14e07a30f11e69d36ab861590123f5598ababcbc8946a063eb4a966f35a21"
+        grep -q "^bbf14e07a30f11e69d36ab861590123f5598ababcbc8946a063eb4a966f35a21" && \
+    curl -fsSL --retry 3 -o \
+        "$XDG_CACHE_HOME/spirula-studio/models/sam3-q4_0.ggml" \
+        "https://huggingface.co/PABannier/sam3.cpp/resolve/${SAM3_REVISION}/sam3-q4_0.ggml" && \
+    sha256sum "$XDG_CACHE_HOME/spirula-studio/models/sam3-q4_0.ggml" | \
+        grep -q "^5dafc790c8493319f542f575e718084f4e0a452fd7e483c64853d33ffe3f1889"
+
+# The SAM 3 checkpoint is under the Meta SAM License, not GPLv3, so the terms
+# ship beside it. Consent is recorded where the GUI records it, which is what
+# keeps `spirula sam` from prompting for a terminal in a container.
+ENV XDG_CONFIG_HOME=/opt/spirula-config
+COPY --from=builder /spirula-studio/LICENSES/SAM3-License.txt \
+    /usr/share/licenses/spirula-studio/SAM3-License.txt
+RUN mkdir -p "$XDG_CONFIG_HOME/spirula-studio" && \
+    printf 'accepted_license=sam3\n' > "$XDG_CONFIG_HOME/spirula-studio/gui.conf"
