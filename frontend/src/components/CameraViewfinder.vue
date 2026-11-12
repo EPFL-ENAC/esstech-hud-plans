@@ -109,6 +109,13 @@ const { t } = useI18n();
 
 const CAPTURE_FPS = 4;
 const CAPTURE_MAX_SIDE = 1280;
+const CAPTURE_VIDEO_BITS_PER_SECOND = 1_000_000;
+const CAPTURE_MIME_TYPES = [
+    'video/mp4;codecs=avc1.42E01E',
+    'video/mp4;codecs=avc1',
+    'video/webm;codecs=vp9',
+    'video/webm;codecs=vp8',
+];
 const CANVAS_CAPTURE_SUPPORTED =
     typeof HTMLCanvasElement !== 'undefined' &&
     typeof HTMLCanvasElement.prototype.captureStream === 'function';
@@ -252,6 +259,19 @@ function releaseCanvasSource(source: CanvasSource | null): void {
     for (const track of source.stream.getTracks()) track.stop();
 }
 
+function createRecorder(stream: MediaStream): MediaRecorder {
+    const bitrate = { videoBitsPerSecond: CAPTURE_VIDEO_BITS_PER_SECOND };
+    for (const mimeType of CAPTURE_MIME_TYPES) {
+        if (!MediaRecorder.isTypeSupported(mimeType)) continue;
+        try {
+            return new MediaRecorder(stream, { ...bitrate, mimeType });
+        } catch {
+            continue;
+        }
+    }
+    return new MediaRecorder(stream, bitrate);
+}
+
 function startRecording(): void {
     if (
         !canStartRecording.value ||
@@ -268,7 +288,7 @@ function startRecording(): void {
     try {
         canvasSource = createCanvasSource();
         if (!canvasSource) limitedCapture.value = true;
-        const recorder = new MediaRecorder(canvasSource?.stream ?? stream);
+        const recorder = createRecorder(canvasSource?.stream ?? stream);
         const session: RecordingSession = {
             recorder,
             chunks: [],
