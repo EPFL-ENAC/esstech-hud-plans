@@ -151,6 +151,8 @@ export default {
             refresh: 'Refresh cameras',
             recordingUnsupported:
                 'Video recording is not supported by this browser. Try another browser.',
+            captureLimited:
+                'This browser cannot limit the recording. The file may be larger than usual.',
             livePreview: 'Live camera preview',
             waitingForAccess: 'Waiting for camera access…',
             tapToStart: 'Tap to start the camera preview.',

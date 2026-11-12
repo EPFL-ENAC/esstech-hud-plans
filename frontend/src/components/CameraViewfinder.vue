@@ -107,6 +107,12 @@ import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
 
+const CAPTURE_FPS = 4;
+const CAPTURE_MAX_SIDE = 1280;
+const CANVAS_CAPTURE_SUPPORTED =
+    typeof HTMLCanvasElement !== 'undefined' &&
+    typeof HTMLCanvasElement.prototype.captureStream === 'function';
+
 withDefaults(defineProps<{ fullscreen?: boolean }>(), { fullscreen: false });
 
 type CameraState = 'requesting' | 'live' | 'paused' | 'error';
@@ -115,6 +121,8 @@ interface RecordingSession {
     recorder: MediaRecorder;
     chunks: Blob[];
     startedAt: number;
+    drawTimer: number | null;
+    canvasStream: MediaStream | null;
     stop: {
         promise: Promise<RecordedVideo>;
         resolve: (video: RecordedVideo) => void;
@@ -141,6 +149,7 @@ const needsPlaybackGesture = ref(false);
 const startingPreview = ref(false);
 const recordingSupported = typeof MediaRecorder !== 'undefined';
 const recordingError = ref('');
+const limitedCapture = ref(!CANVAS_CAPTURE_SUPPORTED);
 const isRecording = ref(false);
 const isStopping = ref(false);
 const pendingRequest = ref(false);
@@ -191,6 +200,10 @@ function clearRecording(): void {
             // Cleanup must still release the camera if the recorder has failed.
         }
     }
+    if (session.drawTimer !== null) window.clearInterval(session.drawTimer);
+    if (session.canvasStream) {
+        for (const track of session.canvasStream.getTracks()) track.stop();
+    }
 }
 
 function failRecording(message: string): Error {
@@ -199,6 +212,44 @@ function failRecording(message: string): Error {
     recording?.stop?.reject(error);
     clearRecording();
     return error;
+}
+
+interface CanvasSource {
+    stream: MediaStream;
+    drawTimer: number;
+}
+
+function createCanvasSource(): CanvasSource | null {
+    const video = videoElement.value;
+    const sourceWidth = video?.videoWidth ?? 0;
+    const sourceHeight = video?.videoHeight ?? 0;
+    if (!CANVAS_CAPTURE_SUPPORTED || !video || !sourceWidth || !sourceHeight) return null;
+
+    const scale = Math.min(1, CAPTURE_MAX_SIDE / Math.max(sourceWidth, sourceHeight));
+    const canvas = document.createElement('canvas');
+    // Even dimensions keep every encoder happy.
+    canvas.width = Math.max(2, Math.round((sourceWidth * scale) / 2) * 2);
+    canvas.height = Math.max(2, Math.round((sourceHeight * scale) / 2) * 2);
+    const context = canvas.getContext('2d');
+    if (!context) return null;
+    const canvasStream = canvas.captureStream(CAPTURE_FPS);
+    if (canvasStream.getVideoTracks().length === 0) {
+        for (const track of canvasStream.getTracks()) track.stop();
+        return null;
+    }
+    const draw = (): void => {
+        if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    };
+    draw();
+    const drawTimer = window.setInterval(draw, 1000 / CAPTURE_FPS);
+    return { stream: canvasStream, drawTimer };
+}
+
+function releaseCanvasSource(source: CanvasSource | null): void {
+    if (!source) return;
+    window.clearInterval(source.drawTimer);
+    for (const track of source.stream.getTracks()) track.stop();
 }
 
 function startRecording(): void {
@@ -213,12 +264,17 @@ function startRecording(): void {
     }
 
     recordingError.value = '';
+    let canvasSource: CanvasSource | null = null;
     try {
-        const recorder = new MediaRecorder(stream);
+        canvasSource = createCanvasSource();
+        if (!canvasSource) limitedCapture.value = true;
+        const recorder = new MediaRecorder(canvasSource?.stream ?? stream);
         const session: RecordingSession = {
             recorder,
             chunks: [],
             startedAt: performance.now(),
+            drawTimer: canvasSource?.drawTimer ?? null,
+            canvasStream: canvasSource?.stream ?? null,
             stop: null,
         };
         recording = session;
@@ -253,6 +309,7 @@ function startRecording(): void {
         session.startedAt = performance.now();
         isRecording.value = true;
     } catch {
+        releaseCanvasSource(canvasSource);
         throw failRecording(t('capture.camera.startRecordingFailed'));
     }
 }
@@ -414,9 +471,14 @@ async function startCamera(): Promise<void> {
     try {
         const constraints: MediaStreamConstraints = {
             audio: false,
-            video: selectedCameraId.value
-                ? { deviceId: { exact: selectedCameraId.value } }
-                : { facingMode: { ideal: 'environment' } },
+            video: {
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+                ...(!CANVAS_CAPTURE_SUPPORTED ? { frameRate: { ideal: CAPTURE_FPS } } : {}),
+                ...(selectedCameraId.value
+                    ? { deviceId: { exact: selectedCameraId.value } }
+                    : { facingMode: { ideal: 'environment' } }),
+            },
         };
         const acquiredStream = await navigator.mediaDevices.getUserMedia(constraints);
         // Permission requests cannot be cancelled. Never retain a late grant.
@@ -511,6 +573,7 @@ defineExpose({
     startRecording,
     stopRecording,
     canStartRecording,
+    limitedCapture: readonly(limitedCapture),
     isRecording: readonly(isRecording),
     isStopping: readonly(isStopping),
 });

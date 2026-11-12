@@ -156,6 +156,8 @@ export default {
             refresh: 'Actualizar las cámaras',
             recordingUnsupported:
                 'Este navegador no permite grabar vídeo. Prueba con otro navegador.',
+            captureLimited:
+                'Este navegador no puede limitar la grabación. El archivo puede ser más grande de lo habitual.',
             livePreview: 'Vista previa de la cámara en directo',
             waitingForAccess: 'Esperando el acceso a la cámara…',
             tapToStart: 'Toca para iniciar la vista previa de la cámara.',

@@ -158,6 +158,8 @@ export default {
             refresh: 'Actualiser les caméras',
             recordingUnsupported:
                 'L’enregistrement vidéo n’est pas pris en charge par ce navigateur. Essayez un autre navigateur.',
+            captureLimited:
+                'Ce navigateur ne peut pas limiter l’enregistrement. Le fichier peut être plus volumineux que d’habitude.',
             livePreview: 'Aperçu de la caméra en direct',
             waitingForAccess: 'En attente de l’accès à la caméra…',
             tapToStart: 'Appuyez pour démarrer l’aperçu de la caméra.',

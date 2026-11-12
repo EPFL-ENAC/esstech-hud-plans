@@ -5,14 +5,18 @@
                 <camera-viewfinder ref="viewfinder" fullscreen />
                 <video-tips-modal v-model="showTips" />
 
-                <div
-                    v-if="isRecording"
-                    class="record-timer"
-                    role="timer"
-                    :aria-label="t('capture.record.elapsed', { time: formattedElapsed })"
-                >
-                    <span class="record-timer-dot" aria-hidden="true" />
-                    <span>{{ formattedElapsed }}</span>
+                <div v-if="isRecording" class="record-status-stack">
+                    <q-banner v-if="limitedCapture" class="record-capture-notice" role="alert">
+                        {{ t('capture.camera.captureLimited') }}
+                    </q-banner>
+                    <div
+                        class="record-timer"
+                        role="timer"
+                        :aria-label="t('capture.record.elapsed', { time: formattedElapsed })"
+                    >
+                        <span class="record-timer-dot" aria-hidden="true" />
+                        <span>{{ formattedElapsed }}</span>
+                    </div>
                 </div>
 
                 <div class="record-controls">
@@ -124,6 +128,7 @@ let recordingStartedAt = 0;
 let timerId: number | null = null;
 
 const isRecording = computed(() => viewfinder.value?.isRecording ?? false);
+const limitedCapture = computed(() => viewfinder.value?.limitedCapture ?? false);
 
 const formattedElapsed = computed(() => {
     const total = Math.floor(elapsedSeconds.value);
@@ -214,14 +219,31 @@ onBeforeUnmount(() => {
     background-color: #000000;
 }
 
+/* Timer and optional banner */
+.record-status-stack {
+    position: absolute;
+    top: calc(16px + env(safe-area-inset-top));
+    left: 0;
+    right: 0;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 0 16px;
+    pointer-events: none;
+}
+
+.record-capture-notice {
+    width: 100%;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.75);
+    color: #ffffff;
+}
+
 /* Translucent pill with a pulsing dot so the user sees the recording is
    running and how long it has been running. */
 .record-timer {
-    position: absolute;
-    top: calc(16px + env(safe-area-inset-top));
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 10;
     display: flex;
     align-items: center;
     gap: 8px;
