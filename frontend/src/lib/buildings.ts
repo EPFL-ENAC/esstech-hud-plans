@@ -123,12 +123,18 @@ export interface FramePickerWorkflowSettings {
     outlier_sharpness_ratio: number;
 }
 
+export interface SpirulaObjectPromptsSettings {
+    enabled: boolean;
+    prompts: string[];
+}
+
 export interface SpirulaSfmWorkflowSettings {
     data_type: SpirulaSfmDataType;
     pairs: SpirulaSfmPairs;
     quality: SpirulaSfmQuality;
     camera_model: SpirulaSfmCameraModel;
     single_camera: boolean;
+    remove_objects: SpirulaObjectPromptsSettings;
 }
 
 export interface SpirulaGeometryWorkflowSettings {
@@ -144,6 +150,7 @@ export interface SpirulaTrainWorkflowSettings {
     primitive: SpirulaTrainPrimitive;
     sh_degree: number;
     cap_max: number;
+    keep_objects: SpirulaObjectPromptsSettings;
 }
 
 export interface SplatGenerationSettings {

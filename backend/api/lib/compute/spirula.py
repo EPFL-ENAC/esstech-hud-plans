@@ -8,6 +8,7 @@ from api.lib.utils.commands import (
     workspace_relative_path,
 )
 from api.models.workflows import (
+    ObjectMaskSettings,
     SpirulaGeometrySettings,
     SpirulaSfmSettings,
     SpirulaTrainSettings,
@@ -18,6 +19,15 @@ from api.models.workflows import (
 # the final checkpoint as splat.ply. The run directory name is fixed so the
 # runner can move the splat up to the artifact path the workflow expects.
 TRAIN_RUN_DIRECTORY_NAME = "train"
+
+SAM_MODEL_PATH = "/opt/spirula-cache/spirula-studio/models/sam3-q4_0.ggml"
+MASKABLE_FRAME_SUFFIXES = frozenset(
+    {".png", ".jpg", ".jpeg", ".bmp", ".exr", ".tif", ".tiff"}
+)
+SFM_MASKS_DIRECTORY = Path("sfm-masks")
+TRAIN_MASKS_DIRECTORY = Path("train-masks")
+SFM_RAW_MASKS_DIRECTORY = Path("sfm-masks-raw")
+TRAIN_RAW_MASKS_DIRECTORY = Path("train-masks-raw")
 
 # spirula sfm auto exits 3 for a partial reconstruction (<50% images
 # registered). COLMAP tolerated partial models, so the model check below
@@ -38,25 +48,36 @@ def build_spirula_sfm_command(
     relative_colmap_directory = workspace_relative_path(
         colmap_directory, workspace_directory
     )
+    arguments = [
+        "sfm",
+        "auto",
+        relative_frames_directory.as_posix(),
+        "--output",
+        relative_colmap_directory.as_posix(),
+        "--data-type",
+        settings.data_type,
+        "--pairs",
+        settings.pairs,
+        "--quality",
+        settings.quality,
+        "--camera-model",
+        settings.camera_model,
+        "--camera-mode",
+        "single" if settings.single_camera else "folder",
+    ]
+    if settings.remove_objects.enabled:
+        arguments.extend(
+            [
+                "--feature-masks",
+                workspace_relative_path(
+                    workspace_directory / SFM_MASKS_DIRECTORY,
+                    workspace_directory,
+                ).as_posix(),
+            ]
+        )
     return Command(
         tool="spirula",
-        arguments=(
-            "sfm",
-            "auto",
-            relative_frames_directory.as_posix(),
-            "--output",
-            relative_colmap_directory.as_posix(),
-            "--data-type",
-            settings.data_type,
-            "--pairs",
-            settings.pairs,
-            "--quality",
-            settings.quality,
-            "--camera-model",
-            settings.camera_model,
-            "--camera-mode",
-            "single" if settings.single_camera else "folder",
-        ),
+        arguments=tuple(arguments),
         capture="combined",
         acceptable_return_codes=(SFM_PARTIAL_RETURN_CODE,),
     )
@@ -127,9 +148,53 @@ def build_spirula_train_command(
         )
     if settings.floater_suppression:
         arguments.extend(["--floater-suppression", "mild"])
+    if settings.keep_objects.enabled:
+        arguments.extend(
+            [
+                "--mask-dir",
+                TRAIN_MASKS_DIRECTORY.as_posix(),
+                "--load-masks",
+                "1",
+                "--flip-mask",
+                "1",
+                "--apply-loss-for-mask",
+                "1",
+            ]
+        )
     arguments.extend(["--cap-max", str(settings.cap_max)])
 
     return Command(tool="spirula", arguments=tuple(arguments), capture="combined")
+
+
+def build_spirula_sam_track_command(
+    frames_directory: Path,
+    output_directory: Path,
+    prompts: list[str],
+    *,
+    workspace_directory: Path,
+) -> Command:
+    relative_frames_directory = workspace_relative_path(
+        frames_directory, workspace_directory
+    )
+    relative_output_directory = workspace_relative_path(
+        output_directory, workspace_directory
+    )
+    return Command(
+        tool="spirula",
+        arguments=(
+            "sam",
+            "track",
+            "--model",
+            SAM_MODEL_PATH,
+            "--frames",
+            relative_frames_directory.as_posix(),
+            "--text",
+            "; ".join(prompts),
+            "--out",
+            relative_output_directory.as_posix(),
+        ),
+        capture="combined",
+    )
 
 
 def looks_like_colmap_model(directory: Path) -> bool:
@@ -140,6 +205,82 @@ def looks_like_colmap_model(directory: Path) -> bool:
     binary_model = {"cameras.bin", "images.bin", "points3D.bin"}
     text_model = {"cameras.txt", "images.txt", "points3D.txt"}
     return binary_model.issubset(filenames) or text_model.issubset(filenames)
+
+
+def maskable_frames(frames_directory: Path) -> list[Path]:
+    return sorted(
+        (
+            path
+            for path in frames_directory.iterdir()
+            if path.is_file() and path.suffix.lower() in MASKABLE_FRAME_SUFFIXES
+        ),
+        key=lambda path: path.as_posix(),
+    )
+
+
+def _rename_sam_masks(
+    raw_directory: Path,
+    masks_directory: Path,
+    frames: list[Path],
+) -> None:
+    generated_masks = [
+        raw_directory / f"frame_{index:05d}.png" for index in range(len(frames))
+    ]
+    missing_masks = [path for path in generated_masks if not path.is_file()]
+    if missing_masks:
+        raise RuntimeError(
+            "spirula sam track did not produce a mask for every frame: "
+            + ", ".join(path.name for path in missing_masks)
+        )
+    for generated_mask, frame in zip(generated_masks, frames, strict=True):
+        generated_mask.replace(masks_directory / f"{frame.stem}.png")
+
+
+def run_spirula_masks(
+    frames_directory: Path,
+    workspace_directory: Path,
+    remove_objects: ObjectMaskSettings,
+    keep_objects: ObjectMaskSettings,
+    *,
+    execution_environment: CommandExecutionEnvironment,
+    on_log: LogCallback | None = None,
+) -> None:
+    """Generate SAM masks for the enabled SfM and training steps."""
+
+    workspace_directory = workspace_directory.resolve()
+    frames_directory = frames_directory.resolve()
+    frames = maskable_frames(frames_directory)
+    if not frames:
+        raise RuntimeError(
+            f"Frames directory contains no maskable images: {frames_directory}"
+        )
+
+    # SAM numbers masks from 0 while frames are numbered from 1, so its raw output
+    # goes to its own tree: cluster scratch mirrors keep files they already have,
+    # and a raw name that is also a final name would be left pointing at the
+    # previous frame.
+    for settings, relative_raw_directory, relative_masks_directory in (
+        (remove_objects, SFM_RAW_MASKS_DIRECTORY, SFM_MASKS_DIRECTORY),
+        (keep_objects, TRAIN_RAW_MASKS_DIRECTORY, TRAIN_MASKS_DIRECTORY),
+    ):
+        if not settings.enabled:
+            continue
+        raw_directory = workspace_directory / relative_raw_directory
+        masks_directory = workspace_directory / relative_masks_directory
+        command = build_spirula_sam_track_command(
+            frames_directory,
+            raw_directory,
+            settings.prompts,
+            workspace_directory=workspace_directory,
+        )
+        raw_directory.mkdir(parents=True, exist_ok=True)
+        masks_directory.mkdir(parents=True, exist_ok=True)
+        execution_environment.execute(
+            command,
+            workspace=workspace_directory,
+            on_log=on_log,
+        )
+        _rename_sam_masks(raw_directory, masks_directory, frames)
 
 
 def _validate_frames_directory(frames_directory: Path) -> None:

@@ -1,7 +1,7 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 WorkflowStatus = Literal[
     "scheduled",
@@ -29,6 +29,22 @@ class FramePickerSettings(BaseModel):
     outlier_sharpness_ratio: float = Field(default=0.1, ge=0, le=1)
 
 
+class ObjectMaskSettings(BaseModel):
+    enabled: bool = False
+    prompts: list[str] = Field(default_factory=list)
+
+    @field_validator("prompts")
+    @classmethod
+    def _strip_prompts(cls, prompts: list[str]) -> list[str]:
+        return [stripped for prompt in prompts if (stripped := prompt.strip())]
+
+    @model_validator(mode="after")
+    def _require_prompt_when_enabled(self) -> "ObjectMaskSettings":
+        if self.enabled and not self.prompts:
+            raise ValueError("at least one object prompt is required when enabled")
+        return self
+
+
 class SpirulaSfmSettings(BaseModel):
     data_type: Literal["individual", "video", "internet"] = "video"
     pairs: Literal["auto", "exhaustive", "sequential", "prefilter"] = "exhaustive"
@@ -37,6 +53,9 @@ class SpirulaSfmSettings(BaseModel):
         "simple-pinhole", "pinhole", "radial", "opencv", "opencv-fisheye"
     ] = "opencv"
     single_camera: bool = True
+    remove_objects: ObjectMaskSettings = Field(
+        default_factory=lambda: ObjectMaskSettings(prompts=["person"]),
+    )
 
 
 class SpirulaGeometrySettings(BaseModel):
@@ -52,6 +71,11 @@ class SpirulaTrainSettings(BaseModel):
     cap_max: int = Field(default=1_000_000, gt=0)
     floater_suppression: bool = True
     meshing_preset: bool = True
+    keep_objects: ObjectMaskSettings = Field(
+        default_factory=lambda: ObjectMaskSettings(
+            prompts=["walls", "doors", "windows", "floor", "ceiling"]
+        ),
+    )
 
 
 class SplatGenerationWorkflowSettings(BaseModel):

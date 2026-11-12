@@ -22,6 +22,7 @@ from api.lib.workflows import splat_generation as splat_workflow
 from api.models.user import User
 from api.models.workflows import (
     FramePickerSettings,
+    ObjectMaskSettings,
     SpirulaGeometrySettings,
     SpirulaSfmSettings,
     SpirulaTrainSettings,
@@ -360,6 +361,78 @@ def test_pick_frames_task_rejects_empty_selection(
         )
 
 
+def test_generate_masks_task_sends_output_and_progress_to_prefect_run_logger(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    environment = splat_workflow.LocalCommandExecutionEnvironment()
+    run = AsyncMock(wraps=environment.run)
+    monkeypatch.setattr(environment, "run", run)
+    frames_directory = tmp_path / "frames"
+    frames_directory.mkdir()
+    (frames_directory / "frame_00001.jpg").touch()
+    (frames_directory / "frame_00002.jpg").touch()
+    records: list[tuple[str, str]] = []
+    progress: list[float] = []
+    remove_objects = ObjectMaskSettings(enabled=True, prompts=["person"])
+    keep_objects = ObjectMaskSettings(prompts=["walls"])
+
+    class FakeRunLogger:
+        def info(self, message: str, record: str) -> None:
+            records.append((message, record))
+
+    def fake_run_spirula_masks(*args, on_log, **kwargs):
+        assert args == (
+            frames_directory,
+            tmp_path,
+            remove_objects,
+            keep_objects,
+        )
+        assert kwargs["execution_environment"] is environment
+        on_log("frame 0: frame_00001.jpg -- kept 95.0%")
+        on_log("frame 1: frame_00002.jpg -- kept 90.0%")
+        on_log("frames: 2 in 1.0 s")
+
+    monkeypatch.setattr(splat_workflow, "get_run_logger", lambda: FakeRunLogger())
+    monkeypatch.setattr(
+        splat_workflow,
+        "run_spirula_masks",
+        fake_run_spirula_masks,
+    )
+
+    asyncio.run(
+        splat_workflow.generate_masks_task.fn(
+            str(tmp_path),
+            str(frames_directory),
+            remove_objects,
+            keep_objects,
+            execution_environment=environment,
+            report_progress=progress.append,
+        )
+    )
+
+    run.assert_awaited_once()
+    assert records == [
+        ("spirula-masks: %s", "frame 0: frame_00001.jpg -- kept 95.0%"),
+        ("spirula-masks: %s", "frame 1: frame_00002.jpg -- kept 90.0%"),
+        ("spirula-masks: %s", "frames: 2 in 1.0 s"),
+    ]
+    assert progress == [0.5, 1.0, 1.0]
+
+
+def test_generate_masks_task_skips_when_both_passes_are_disabled(
+    tmp_path: Path,
+) -> None:
+    asyncio.run(
+        splat_workflow.generate_masks_task.fn(
+            str(tmp_path),
+            str(tmp_path / "frames"),
+            ObjectMaskSettings(prompts=["person"]),
+            ObjectMaskSettings(prompts=["walls"]),
+            execution_environment=splat_workflow.LocalCommandExecutionEnvironment(),
+        )
+    )
+
+
 def test_reconstruct_with_spirula_task_sends_output_to_prefect_run_logger(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -454,12 +527,14 @@ def test_train_with_spirula_task_sends_output_to_prefect_run_logger(
 @pytest.mark.parametrize("use_geometry", [False, True])
 @pytest.mark.parametrize("use_frame_picker", [False, True])
 @pytest.mark.parametrize("use_scitas", [False, True])
+@pytest.mark.parametrize("use_masks", [False, True])
 def test_splat_generation_flow_selects_gpu_environment(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     use_scitas: bool,
     use_frame_picker: bool,
     use_geometry: bool,
+    use_masks: bool,
 ) -> None:
     calls: list[tuple] = []
     video_path = tmp_path / "uploads" / "source video.mov"
@@ -471,6 +546,18 @@ def test_splat_generation_flow_selects_gpu_environment(
     settings = SplatGenerationWorkflowSettings(
         frame_picker=picker_settings,
         spirula_geometry=SpirulaGeometrySettings(compute_depth=use_geometry),
+        spirula_sfm=SpirulaSfmSettings(
+            remove_objects=ObjectMaskSettings(
+                enabled=use_masks,
+                prompts=["person", "chair"],
+            )
+        ),
+        spirula_train=SpirulaTrainSettings(
+            keep_objects=ObjectMaskSettings(
+                enabled=use_masks,
+                prompts=["walls", "ceiling"],
+            )
+        ),
     )
 
     class FakeRunLogger:
@@ -488,6 +575,9 @@ def test_splat_generation_flow_selects_gpu_environment(
         calls.append(("frame-picker", kwargs))
         return str(workspace / "frames")
 
+    async def fake_masks_task(**kwargs):
+        calls.append(("generate-masks", kwargs))
+
     async def fake_sfm_task(**kwargs):
         calls.append(("spirula-sfm", kwargs))
         return str(workspace / "colmap")
@@ -503,10 +593,19 @@ def test_splat_generation_flow_selects_gpu_environment(
     async def fake_point_cloud_task(**kwargs):
         calls.append(("point-cloud", kwargs))
 
+    progress_ranges: list[tuple[float, float]] = []
+    progress_callback = splat_workflow._progress_callback
+
+    def record_progress_range(reconstruction_id, start, end):
+        progress_ranges.append((start, end))
+        return progress_callback(reconstruction_id, start, end)
+
+    monkeypatch.setattr(splat_workflow, "_progress_callback", record_progress_range)
     monkeypatch.setattr(splat_workflow, "get_run_logger", lambda: FakeRunLogger())
     monkeypatch.setattr(splat_workflow.config, "USE_SCITAS", use_scitas)
     monkeypatch.setattr(splat_workflow, "extract_frames_task", fake_extract_frames_task)
     monkeypatch.setattr(splat_workflow, "pick_frames_task", fake_picker_task)
+    monkeypatch.setattr(splat_workflow, "generate_masks_task", fake_masks_task)
     monkeypatch.setattr(
         splat_workflow,
         "reconstruct_with_spirula_task",
@@ -537,6 +636,14 @@ def test_splat_generation_flow_selects_gpu_environment(
     )
 
     assert result == str(workspace / "splat.ply")
+    assert all(end >= start for start, end in progress_ranges)
+    if use_masks:
+        assert (0.40, 0.50) in progress_ranges
+        assert any(
+            start == 0.50 and end in (0.65, 0.70) for start, end in progress_ranges
+        )
+    else:
+        assert all(start != 0.50 for start, end in progress_ranges)
     local_environment = calls[0][1]["execution_environment"]
     assert isinstance(
         local_environment, splat_workflow.LocalCommandExecutionEnvironment
@@ -570,6 +677,19 @@ def test_splat_generation_flow_selects_gpu_environment(
                     "input_frames_directory": str(workspace / "frames_raw"),
                     "frames_directory": str(workspace / "frames"),
                     "settings": picker_settings,
+                },
+            )
+        )
+    if use_masks:
+        expected_calls.append(
+            (
+                "generate-masks",
+                {
+                    "workspace_directory": str(workspace),
+                    "frames_directory": str(workspace / "frames"),
+                    "remove_objects": settings.spirula_sfm.remove_objects,
+                    "keep_objects": settings.spirula_train.keep_objects,
+                    "execution_environment": gpu_environment,
                 },
             )
         )

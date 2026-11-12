@@ -65,6 +65,33 @@ class SpirulaSfmProgressEstimator:
         return None
 
 
+class SpirulaMaskProgressEstimator:
+    _FRAME = re.compile(r"^\s*frame (\d+):")
+    _SUMMARY = re.compile(r"^\s*frames: \d+ in ")
+
+    def __init__(self, total_frames: int, pass_count: int) -> None:
+        self.total_frames = total_frames
+        self.pass_count = pass_count
+        self.pass_index = 0
+        self.progress = 0.0
+
+    def _monotonic(self, progress: float) -> float:
+        self.progress = max(self.progress, progress)
+        return self.progress
+
+    def feed(self, record: str) -> float | None:
+        record = _ANSI_ESCAPE.sub("", record)
+        if match := self._FRAME.match(record):
+            frame_progress = _fraction(int(match.group(1)) + 1, self.total_frames)
+            if frame_progress is None:
+                return None
+            return self._monotonic((self.pass_index + frame_progress) / self.pass_count)
+        if self._SUMMARY.match(record):
+            self.pass_index = min(self.pass_index + 1, self.pass_count)
+            return self._monotonic(self.pass_index / self.pass_count)
+        return None
+
+
 class SpirulaTrainProgressEstimator:
     _STEPS = re.compile(r"step\s+\d+/(\d+)\s+\(\s*(\d+)%\)")
 

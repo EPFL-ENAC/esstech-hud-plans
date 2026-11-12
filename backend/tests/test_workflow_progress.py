@@ -234,6 +234,7 @@ def test_progress_callback_survives_thread_bridge_failure(
     [
         workflow.extract_frames_task,
         workflow.pick_frames_task,
+        workflow.generate_masks_task,
         workflow.reconstruct_with_spirula_task,
         workflow.predict_geometry_maps_task,
         workflow.train_with_spirula_task,
@@ -258,6 +259,7 @@ def test_task_cache_key_excludes_unserializable_progress_callback(task) -> None:
     "task",
     [
         workflow.extract_frames_task,
+        workflow.generate_masks_task,
         workflow.reconstruct_with_spirula_task,
         workflow.train_with_spirula_task,
     ],

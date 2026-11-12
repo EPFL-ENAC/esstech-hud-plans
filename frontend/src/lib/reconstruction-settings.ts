@@ -2,11 +2,13 @@ import type {
     FfmpegSettings,
     SplatGenerationSettings,
     SpirulaGeometryWorkflowSettings,
+    SpirulaObjectPromptsSettings,
     SpirulaSfmWorkflowSettings,
     SpirulaTrainWorkflowSettings,
 } from './buildings';
 import {
     type SpirulaGeometryConfig,
+    type SpirulaObjectPromptsConfig,
     type SpirulaSfmConfig,
     type SpirulaTrainConfig,
     makeDefaultSpirulaSfmConfig,
@@ -38,9 +40,11 @@ export function makeDefaultReconstructionSettings(
 }
 
 export function isValidReconstructionSettings(settings: ReconstructionSettingsConfig): boolean {
-    const { ffmpeg, framePicker, spirulaTrain } = settings;
+    const { ffmpeg, framePicker, spirulaSfm, spirulaTrain } = settings;
     const positiveInteger = (value: number) => Number.isInteger(value) && value > 0;
     const positiveNumber = (value: number) => Number.isFinite(value) && value > 0;
+    const hasObjectPrompt = (config: SpirulaObjectPromptsConfig) =>
+        !config.enabled || config.prompts.some((prompt) => prompt.trim() !== '');
     return (
         positiveNumber(ffmpeg.fps) &&
         positiveInteger(ffmpeg.fit_in_width) &&
@@ -52,12 +56,21 @@ export function isValidReconstructionSettings(settings: ReconstructionSettingsCo
                 Number.isFinite(framePicker.outlier_sharpness_ratio) &&
                 framePicker.outlier_sharpness_ratio >= 0 &&
                 framePicker.outlier_sharpness_ratio <= 1)) &&
+        hasObjectPrompt(spirulaSfm.removeObjects) &&
+        hasObjectPrompt(spirulaTrain.keepObjects) &&
         positiveInteger(spirulaTrain.numIterations) &&
         Number.isInteger(spirulaTrain.shDegree) &&
         spirulaTrain.shDegree >= 0 &&
         spirulaTrain.shDegree <= 3 &&
         positiveInteger(spirulaTrain.capMax)
     );
+}
+
+function toObjectPromptsSettings(config: SpirulaObjectPromptsConfig): SpirulaObjectPromptsSettings {
+    return {
+        enabled: config.enabled,
+        prompts: config.prompts.map((prompt) => prompt.trim()).filter((prompt) => prompt !== ''),
+    };
 }
 
 export function toSplatGenerationSettings(
@@ -71,6 +84,7 @@ export function toSplatGenerationSettings(
         quality: spirulaSfm.quality,
         camera_model: spirulaSfm.cameraModel,
         single_camera: spirulaSfm.singleCamera,
+        remove_objects: toObjectPromptsSettings(spirulaSfm.removeObjects),
     };
     const geometry: SpirulaGeometryWorkflowSettings = {
         compute_depth: spirulaGeometry.computeDepth,
@@ -84,6 +98,7 @@ export function toSplatGenerationSettings(
         primitive: spirulaTrain.primitive,
         sh_degree: spirulaTrain.shDegree,
         cap_max: spirulaTrain.capMax,
+        keep_objects: toObjectPromptsSettings(spirulaTrain.keepObjects),
     };
 
     return {

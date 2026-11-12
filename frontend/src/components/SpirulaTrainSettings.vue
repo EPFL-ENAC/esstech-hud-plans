@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { type SpirulaTrainConfig, makeDefaultSpirulaTrainConfig } from '../lib/splats/spirula';
+import {
+    type SpirulaTrainConfig,
+    DEFAULT_KEEP_OBJECT_PROMPTS,
+    makeDefaultSpirulaTrainConfig,
+} from '../lib/splats/spirula';
+import ObjectPromptsSettings from './ObjectPromptsSettings.vue';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
@@ -124,6 +129,14 @@ const resetDefaults = () => {
                     />
                 </div>
             </div>
+
+            <object-prompts-settings
+                v-model="config.keepObjects"
+                :label="t('settings.spirula.train.keepObjects')"
+                :select-label="t('settings.spirula.train.keepObjectsPrompts')"
+                :hint="t('settings.spirula.train.keepObjectsHint')"
+                :default-prompts="DEFAULT_KEEP_OBJECT_PROMPTS"
+            />
         </q-card-section>
 
         <q-separator />

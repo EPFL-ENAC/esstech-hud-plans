@@ -79,6 +79,13 @@
                 :label="t('settings.spirula.sfm.sharedIntrinsics')"
             />
         </div>
+        <object-prompts-settings
+            v-model="settings.spirulaSfm.removeObjects"
+            :label="t('settings.spirula.sfm.removeObjects')"
+            :select-label="t('settings.spirula.sfm.removeObjectsPrompts')"
+            :hint="t('settings.spirula.sfm.removeObjectsHint')"
+            :default-prompts="DEFAULT_REMOVE_OBJECT_PROMPTS"
+        />
 
         <q-separator />
         <div class="text-subtitle1 text-weight-bold">
@@ -105,7 +112,9 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import SpirulaTrainSettings from 'src/components/SpirulaTrainSettings.vue';
+import ObjectPromptsSettings from 'src/components/ObjectPromptsSettings.vue';
 import FramePickerSettings from 'src/components/FramePickerSettings.vue';
+import { DEFAULT_REMOVE_OBJECT_PROMPTS } from 'src/lib/splats/spirula';
 import type { ReconstructionSettingsConfig } from 'src/lib/reconstruction-settings';
 import { useI18n } from 'vue-i18n';
 

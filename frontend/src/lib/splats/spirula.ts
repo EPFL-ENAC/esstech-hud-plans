@@ -8,12 +8,18 @@ export type SpirulaSfmCameraModel =
     | 'opencv'
     | 'opencv-fisheye';
 
+export interface SpirulaObjectPromptsConfig {
+    enabled: boolean;
+    prompts: string[];
+}
+
 export interface SpirulaSfmConfig {
     dataType: SpirulaSfmDataType;
     pairs: SpirulaSfmPairs;
     quality: SpirulaSfmQuality;
     cameraModel: SpirulaSfmCameraModel;
     singleCamera: boolean;
+    removeObjects: SpirulaObjectPromptsConfig;
 }
 
 export interface SpirulaGeometryConfig {
@@ -32,7 +38,11 @@ export interface SpirulaTrainConfig {
     primitive: SpirulaTrainPrimitive;
     shDegree: number;
     capMax: number;
+    keepObjects: SpirulaObjectPromptsConfig;
 }
+
+export const DEFAULT_REMOVE_OBJECT_PROMPTS = ['person'];
+export const DEFAULT_KEEP_OBJECT_PROMPTS = ['walls', 'doors', 'windows', 'floor', 'ceiling'];
 
 export function makeDefaultSpirulaSfmConfig(
     preset: 'indoors' | 'outdoors' | 'advanced',
@@ -43,6 +53,7 @@ export function makeDefaultSpirulaSfmConfig(
         quality: preset === 'outdoors' ? 'medium' : 'high',
         cameraModel: 'opencv',
         singleCamera: true,
+        removeObjects: { enabled: false, prompts: [...DEFAULT_REMOVE_OBJECT_PROMPTS] },
     };
 }
 
@@ -62,5 +73,6 @@ export function makeDefaultSpirulaTrainConfig(): SpirulaTrainConfig {
         primitive: '3dgs',
         shDegree: 3,
         capMax: 1_000_000,
+        keepObjects: { enabled: false, prompts: [...DEFAULT_KEEP_OBJECT_PROMPTS] },
     };
 }

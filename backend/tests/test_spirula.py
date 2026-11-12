@@ -10,9 +10,11 @@ from api.lib.utils.commands import (
     LogCallback,
 )
 from api.models.workflows import (
+    ObjectMaskSettings,
     SpirulaGeometrySettings,
     SpirulaSfmSettings,
     SpirulaTrainSettings,
+    SplatGenerationWorkflowSettings,
 )
 
 
@@ -85,6 +87,34 @@ def test_build_sfm_command_uses_workspace_relative_paths_and_settings(
         capture="combined",
         acceptable_return_codes=(3,),
     )
+
+
+@pytest.mark.parametrize(
+    ("remove_objects", "mask_arguments"),
+    [
+        (ObjectMaskSettings(prompts=["person"]), ()),
+        (
+            ObjectMaskSettings(enabled=True, prompts=["person", "chair"]),
+            ("--feature-masks", "sfm-masks"),
+        ),
+    ],
+)
+def test_build_sfm_command_gates_feature_masks_on_remove_objects(
+    tmp_path: Path,
+    remove_objects: ObjectMaskSettings,
+    mask_arguments: tuple[str, ...],
+) -> None:
+    command = spirula.build_spirula_sfm_command(
+        tmp_path / "frames",
+        tmp_path / "colmap",
+        SpirulaSfmSettings(remove_objects=remove_objects),
+        workspace_directory=tmp_path,
+    )
+
+    if mask_arguments:
+        assert command.arguments[-len(mask_arguments) :] == mask_arguments
+    else:
+        assert "--feature-masks" not in command.arguments
 
 
 @pytest.mark.parametrize(
@@ -194,6 +224,73 @@ def test_build_train_command_uses_workspace_relative_paths_and_settings(
 
 
 @pytest.mark.parametrize(
+    ("keep_objects", "mask_arguments"),
+    [
+        (ObjectMaskSettings(prompts=["walls"]), ()),
+        (
+            ObjectMaskSettings(enabled=True, prompts=["walls", "ceiling"]),
+            (
+                "--mask-dir",
+                "train-masks",
+                "--load-masks",
+                "1",
+                "--flip-mask",
+                "1",
+                "--apply-loss-for-mask",
+                "1",
+            ),
+        ),
+    ],
+)
+def test_build_train_command_gates_masks_on_keep_objects(
+    tmp_path: Path,
+    keep_objects: ObjectMaskSettings,
+    mask_arguments: tuple[str, ...],
+) -> None:
+    command = spirula.build_spirula_train_command(
+        tmp_path,
+        tmp_path / "splat.ply",
+        SpirulaTrainSettings(keep_objects=keep_objects),
+        workspace_directory=tmp_path,
+    )
+
+    if mask_arguments:
+        start = command.arguments.index("--mask-dir")
+        assert command.arguments[start : start + len(mask_arguments)] == mask_arguments
+    else:
+        assert "--mask-dir" not in command.arguments
+
+
+def test_object_mask_defaults() -> None:
+    assert SpirulaSfmSettings().remove_objects == ObjectMaskSettings(
+        enabled=False,
+        prompts=["person"],
+    )
+    assert SpirulaTrainSettings().keep_objects == ObjectMaskSettings(
+        enabled=False,
+        prompts=["walls", "doors", "windows", "floor", "ceiling"],
+    )
+
+
+def test_stored_settings_without_object_masks_still_validate() -> None:
+    settings = SplatGenerationWorkflowSettings.model_validate(
+        {
+            "spirula_sfm": {"quality": "high"},
+            "spirula_train": {"quality": "high"},
+        }
+    )
+
+    assert settings.spirula_sfm.remove_objects == ObjectMaskSettings(
+        enabled=False,
+        prompts=["person"],
+    )
+    assert settings.spirula_train.keep_objects == ObjectMaskSettings(
+        enabled=False,
+        prompts=["walls", "doors", "windows", "floor", "ceiling"],
+    )
+
+
+@pytest.mark.parametrize(
     "build",
     [
         lambda tmp_path: spirula.build_spirula_sfm_command(
@@ -238,6 +335,142 @@ def test_looks_like_colmap_model_accepts_binary_and_text_models(
     for filename in ("cameras.txt", "images.txt", "points3D.txt"):
         (text_directory / filename).touch()
     assert spirula.looks_like_colmap_model(text_directory)
+
+
+def test_run_masks_renames_sam_output_to_sorted_frame_stems(
+    tmp_path: Path,
+) -> None:
+    source_directory = tmp_path / "frames_raw"
+    source_directory.mkdir()
+    source_frame = source_directory / "frame_00003.jpg"
+    source_frame.touch()
+    frames_directory = tmp_path / "frames"
+    frames_directory.mkdir()
+    (frames_directory / "frame_00003.jpg").symlink_to(source_frame)
+    (frames_directory / "frame_00007.jpg").touch()
+    commands: list[Command] = []
+
+    class FakeEnvironment(CommandExecutionEnvironment):
+        def execute(
+            self,
+            command: Command,
+            *,
+            workspace: Path,
+            on_log: LogCallback | None = None,
+        ) -> CommandResult:
+            commands.append(command)
+            output_directory = (
+                workspace / command.arguments[command.arguments.index("--out") + 1]
+            )
+            output_directory.mkdir(parents=True, exist_ok=True)
+            (output_directory / "frame_00000.png").write_text("frame_00003")
+            (output_directory / "frame_00001.png").write_text("frame_00007")
+            return CommandResult(return_code=0)
+
+    spirula.run_spirula_masks(
+        frames_directory,
+        tmp_path,
+        ObjectMaskSettings(enabled=True, prompts=["person", "chair"]),
+        ObjectMaskSettings(
+            enabled=True,
+            prompts=["walls", "doors", "windows", "floor", "ceiling"],
+        ),
+        execution_environment=FakeEnvironment(),
+    )
+
+    for masks_directory in (tmp_path / "sfm-masks", tmp_path / "train-masks"):
+        assert {path.name: path.read_text() for path in masks_directory.iterdir()} == {
+            "frame_00003.png": "frame_00003",
+            "frame_00007.png": "frame_00007",
+        }
+    assert commands[0] == Command(
+        tool="spirula",
+        arguments=(
+            "sam",
+            "track",
+            "--model",
+            spirula.SAM_MODEL_PATH,
+            "--frames",
+            "frames",
+            "--text",
+            "person; chair",
+            "--out",
+            "sfm-masks-raw",
+        ),
+        capture="combined",
+    )
+    assert commands[1].arguments[-4:] == (
+        "--text",
+        "walls; doors; windows; floor; ceiling",
+        "--out",
+        "train-masks-raw",
+    )
+
+
+def test_run_masks_requires_a_mask_for_every_frame(tmp_path: Path) -> None:
+    frames_directory = tmp_path / "frames"
+    _create_frames(frames_directory)
+
+    with pytest.raises(RuntimeError, match="did not produce a mask for every frame"):
+        spirula.run_spirula_masks(
+            frames_directory,
+            tmp_path,
+            ObjectMaskSettings(enabled=True, prompts=["person"]),
+            ObjectMaskSettings(prompts=["walls"]),
+            execution_environment=_NoOpEnvironment(),
+        )
+
+
+def test_rename_sam_masks_maps_zero_based_masks_to_one_based_frames(
+    tmp_path: Path,
+) -> None:
+    frames = [tmp_path / f"frame_{index:05d}.jpg" for index in range(1, 5)]
+    raw_directory = tmp_path / "raw"
+    masks_directory = tmp_path / "masks"
+    masks_directory.mkdir()
+    for frame in frames:
+        frame.touch()
+    raw_directory.mkdir()
+    for index in range(len(frames)):
+        (raw_directory / f"frame_{index:05d}.png").write_text(str(index))
+
+    spirula._rename_sam_masks(raw_directory, masks_directory, frames)
+
+    assert {path.name: path.read_text() for path in masks_directory.iterdir()} == {
+        f"{frame.stem}.png": str(index) for index, frame in enumerate(frames)
+    }
+
+
+def test_run_masks_reports_the_frames_that_have_no_mask(tmp_path: Path) -> None:
+    frames_directory = tmp_path / "frames"
+    frames_directory.mkdir()
+    for index in range(1, 4):
+        (frames_directory / f"frame_{index:05d}.jpg").touch()
+
+    class PairedEnvironment(CommandExecutionEnvironment):
+        def execute(
+            self,
+            command: Command,
+            *,
+            workspace: Path,
+            on_log: LogCallback | None = None,
+        ) -> CommandResult:
+            output_directory = (
+                workspace / command.arguments[command.arguments.index("--out") + 1]
+            )
+            output_directory.mkdir(parents=True, exist_ok=True)
+            (output_directory / "frame_00000.png").touch()
+            (output_directory / "frame_00001.png").touch()
+            return CommandResult(return_code=0)
+
+    with pytest.raises(RuntimeError, match="frame_00002.png"):
+        spirula.run_spirula_masks(
+            frames_directory,
+            tmp_path,
+            ObjectMaskSettings(enabled=True, prompts=["person"]),
+            ObjectMaskSettings(prompts=["walls"]),
+            execution_environment=PairedEnvironment(),
+        )
 
 
 def test_run_sfm_forwards_logs_and_returns_workspace(tmp_path: Path) -> None:

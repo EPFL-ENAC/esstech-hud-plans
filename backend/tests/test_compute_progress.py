@@ -2,6 +2,7 @@ import pytest
 
 from api.lib.compute.progress import (
     FfmpegProgressEstimator,
+    SpirulaMaskProgressEstimator,
     SpirulaSfmProgressEstimator,
     SpirulaTrainProgressEstimator,
 )
@@ -45,6 +46,30 @@ def test_sfm_handles_missing_counts() -> None:
     assert estimator.feed("images in the model: 5") == 0.50
     assert estimator.feed("0/0 pairs matched") is None
     assert estimator.feed("0/0   frame_00000.jpg   Features: 0") is None
+
+
+def test_mask_progress_covers_each_pass_without_regressing() -> None:
+    estimator = SpirulaMaskProgressEstimator(total_frames=4, pass_count=2)
+
+    assert estimator.feed("Loading model...") is None
+    assert estimator.feed("frame 0: frame_00001.jpg -- kept 95.0%") == pytest.approx(
+        0.125
+    )
+    assert estimator.feed(
+        "\x1b[2Kframe 3: frame_00004.jpg -- kept 90.0%"
+    ) == pytest.approx(0.5)
+    assert estimator.feed(
+        "frames: 4 in 2.0 s -- 500 ms per frame (decode 10, model 480, write 10)"
+    ) == pytest.approx(0.5)
+    assert estimator.feed("frame 0: frame_00001.jpg -- kept 95.0%") == pytest.approx(
+        0.625
+    )
+    assert estimator.feed("frame 3: frame_00004.jpg -- kept 90.0%") == pytest.approx(
+        1.0
+    )
+    assert estimator.feed(
+        "frames: 4 in 1.0 s -- 250 ms per frame (decode 10, model 230, write 10)"
+    ) == pytest.approx(1.0)
 
 
 @pytest.mark.parametrize(

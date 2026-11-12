@@ -28,11 +28,14 @@ from api.lib.compute.point_cloud import generate_plan_point_cloud
 from api.lib.compute.progress import (
     FfmpegProgressEstimator,
     ReportProgress,
+    SpirulaMaskProgressEstimator,
     SpirulaSfmProgressEstimator,
     SpirulaTrainProgressEstimator,
 )
 from api.lib.compute.spirula import (
+    maskable_frames,
     run_spirula_geometry,
+    run_spirula_masks,
     run_spirula_sfm,
     run_spirula_train,
 )
@@ -45,6 +48,7 @@ from api.lib.workflows import common as workflow_common
 from api.models.reconstruction import Reconstruction, ReconstructionArtifactUpdate
 from api.models.workflows import (
     FramePickerSettings,
+    ObjectMaskSettings,
     SpirulaGeometrySettings,
     SpirulaSfmSettings,
     SpirulaTrainSettings,
@@ -445,6 +449,52 @@ async def pick_frames_task(
 
 
 @task(
+    name="generate-masks",
+    cache_policy=DEFAULT - "report_progress" - "execution_environment",
+)
+async def generate_masks_task(
+    workspace_directory: str,
+    frames_directory: str,
+    remove_objects: ObjectMaskSettings,
+    keep_objects: ObjectMaskSettings,
+    execution_environment: CommandExecutionEnvironment,
+    report_progress: ReportProgress | None = None,
+) -> None:
+    pass_count = int(remove_objects.enabled) + int(keep_objects.enabled)
+    if pass_count == 0:
+        return
+
+    run_logger = get_run_logger()
+    frames = maskable_frames(Path(frames_directory))
+    if not frames:
+        raise RuntimeError(
+            f"Frames directory contains no maskable images: {frames_directory}"
+        )
+    estimator = SpirulaMaskProgressEstimator(
+        total_frames=len(frames),
+        pass_count=pass_count,
+    )
+
+    def log_spirula_masks(record: str) -> None:
+        run_logger.info("spirula-masks: %s", record)
+        progress = estimator.feed(record)
+        if progress is not None and report_progress is not None:
+            report_progress(progress)
+
+    await execution_environment.run(
+        partial(
+            run_spirula_masks,
+            Path(frames_directory),
+            Path(workspace_directory),
+            remove_objects,
+            keep_objects,
+            execution_environment=execution_environment,
+            on_log=log_spirula_masks,
+        ),
+    )
+
+
+@task(
     name="reconstruct-with-spirula-sfm",
     cache_policy=DEFAULT - "report_progress" - "execution_environment",
 )
@@ -632,6 +682,22 @@ async def splat_generation_flow(
     predicts_geometry_maps = (
         geometry_settings.compute_depth or geometry_settings.compute_normals
     )
+    sfm_progress_start = 0.40
+    masks_enabled = (
+        settings.spirula_sfm.remove_objects.enabled
+        or settings.spirula_train.keep_objects.enabled
+    )
+    if masks_enabled:
+        await generate_masks_task(
+            workspace_directory=workspace_directory,
+            frames_directory=selected_frames_directory,
+            remove_objects=settings.spirula_sfm.remove_objects,
+            keep_objects=settings.spirula_train.keep_objects,
+            execution_environment=gpu_execution_environment,
+            report_progress=_progress_callback(reconstruction_id, 0.40, 0.50),
+        )
+        sfm_progress_start = 0.50
+        await _record_reconstruction_progress(reconstruction_id, progress=0.50)
     sfm_progress_end = 0.65 if predicts_geometry_maps else 0.70
     reconstructed_colmap_directory = await reconstruct_with_spirula_task(
         workspace_directory=workspace_directory,
@@ -639,7 +705,9 @@ async def splat_generation_flow(
         colmap_directory=colmap_directory,
         settings=settings.spirula_sfm,
         execution_environment=gpu_execution_environment,
-        report_progress=_progress_callback(reconstruction_id, 0.40, sfm_progress_end),
+        report_progress=_progress_callback(
+            reconstruction_id, sfm_progress_start, sfm_progress_end
+        ),
     )
     if predicts_geometry_maps:
         await _record_reconstruction_progress(reconstruction_id, progress=0.65)
