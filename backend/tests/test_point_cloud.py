@@ -40,7 +40,7 @@ def _make_splat_arrays() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return means, scales, opacities
 
 
-def test_compute_plan_point_cloud_filters_by_decoded_density() -> None:
+def test_compute_plan_point_cloud_keeps_the_densest_fraction() -> None:
     means, scales, opacities = _make_splat_arrays()
 
     positions = compute_plan_point_cloud(
@@ -48,13 +48,45 @@ def test_compute_plan_point_cloud_filters_by_decoded_density() -> None:
         scales,
         opacities,
         matrix=np.eye(4),
-        radius=2.0,
-        threshold=1.0,
+        keep_fraction=0.5,
     )
 
-    # radius**3 = 8: densities are ~20.1, ~1.0, ~48.1, ~0.12
+    # densities are ~20.1, ~1.0, ~48.1, ~0.12: the two densest are kept
     np.testing.assert_allclose(positions, [[1.0, 2.0, 2.0], [-4.0, 0.5, 2.0]])
     assert positions.dtype == np.float32
+
+
+def test_compute_plan_point_cloud_rounds_the_kept_count_up() -> None:
+    means = np.zeros((10, 3))
+    scales = np.zeros((10, 3))
+    # Descending density: splat 0 is the densest, splat 9 the faintest.
+    opacities = np.linspace(10.0, -10.0, 10)
+
+    positions = compute_plan_point_cloud(
+        means,
+        scales,
+        opacities,
+        matrix=np.eye(4),
+        keep_fraction=0.9,
+    )
+
+    assert len(positions) == 9
+
+
+def test_compute_plan_point_cloud_ranks_nan_density_last() -> None:
+    means = np.zeros((3, 3))
+    scales = np.zeros((3, 3))
+    opacities = np.array([np.nan, 20.0, 20.0])
+
+    positions = compute_plan_point_cloud(
+        means,
+        scales,
+        opacities,
+        matrix=np.eye(4),
+        keep_fraction=0.5,
+    )
+
+    assert len(positions) == 2
 
 
 def test_compute_plan_point_cloud_applies_the_plan_matrix() -> None:
@@ -69,8 +101,7 @@ def test_compute_plan_point_cloud_applies_the_plan_matrix() -> None:
         scales,
         opacities,
         matrix=matrix,
-        radius=1.0,
-        threshold=0.0,
+        keep_fraction=1.0,
     )
 
     # Every baked position must lie where the viewers put that same splat.
@@ -109,8 +140,7 @@ def test_compute_plan_point_cloud_drops_non_finite_positions() -> None:
         scales,
         opacities,
         matrix=np.eye(4),
-        radius=1.0,
-        threshold=0.0,
+        keep_fraction=1.0,
     )
 
     np.testing.assert_allclose(positions, [[1.0, 2.0, 2.0], [-4.0, 0.5, 2.0]])
@@ -172,7 +202,7 @@ def test_generate_plan_point_cloud_writes_artifacts_next_to_splat(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(config, "PLAN_DENSITY_THRESHOLD", 1.0)
+    monkeypatch.setattr(config, "PLAN_POINT_KEEP_FRACTION", 0.5)
     monkeypatch.setattr(
         "api.lib.compute.colmap_geometric_data.colmap_compute_geometric_data",
         lambda sparse_dir: _fake_geometric_data(),
@@ -208,7 +238,7 @@ def _setup_generation(
     monkeypatch: pytest.MonkeyPatch,
     name: str = "splat.ply",
 ) -> tuple[Path, Path]:
-    monkeypatch.setattr(config, "PLAN_DENSITY_THRESHOLD", 1.0)
+    monkeypatch.setattr(config, "PLAN_POINT_KEEP_FRACTION", 0.5)
     monkeypatch.setattr(
         "api.lib.compute.colmap_geometric_data.colmap_compute_geometric_data",
         lambda sparse_dir: _fake_geometric_data(),

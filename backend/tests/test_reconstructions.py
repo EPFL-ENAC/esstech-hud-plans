@@ -1670,7 +1670,7 @@ def test_missing_point_cloud_artifacts_are_generated_on_request(
         client,
         building_id,
     )
-    monkeypatch.setattr(config, "PLAN_DENSITY_THRESHOLD", 1.0)
+    monkeypatch.setattr(config, "PLAN_POINT_KEEP_FRACTION", 0.5)
     _fake_point_cloud_colmap(monkeypatch)
     _create_sparse_model(splat_path)
     if foreign_stored_path:
@@ -1784,7 +1784,6 @@ def test_point_cloud_artifacts_are_generated_once_across_requests(
         client,
         building_id,
     )
-    monkeypatch.setattr(config, "PLAN_DENSITY_THRESHOLD", 1.0)
     _fake_point_cloud_colmap(monkeypatch)
     _create_sparse_model(splat_path)
     calls: list[Path] = []
@@ -1834,7 +1833,6 @@ def test_concurrent_point_cloud_requests_generate_once(
         client,
         building_id,
     )
-    monkeypatch.setattr(config, "PLAN_DENSITY_THRESHOLD", 1.0)
     _fake_point_cloud_colmap(monkeypatch)
     _create_sparse_model(splat_path)
     started = threading.Event()

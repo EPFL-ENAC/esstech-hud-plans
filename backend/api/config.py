@@ -47,8 +47,8 @@ class Config(BaseSettings):
     def PREFECT_API_URL(self) -> str:
         return f"http://{self.PREFECT_HOST}:{self.PREFECT_PORT}/api"
 
-    # Density cutoff for the plan point cloud conversion, scaled by scene radius cubed
-    PLAN_DENSITY_THRESHOLD: float = 1e7
+    # Fraction of the densest splats kept in the plan point cloud conversion
+    PLAN_POINT_KEEP_FRACTION: float = 0.9
 
     USE_SCITAS: bool = False
     SCITAS_MOUNT_EXPORT_PATH: str = "/mnt/scitas"

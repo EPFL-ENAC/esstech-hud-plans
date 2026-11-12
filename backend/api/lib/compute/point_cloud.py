@@ -35,18 +35,17 @@ def compute_plan_point_cloud(
     scales: np.ndarray,
     opacities: np.ndarray,
     matrix: np.ndarray,
-    radius: float,
-    threshold: float,
+    keep_fraction: float,
 ) -> np.ndarray:
-    """Filter splats by decoded density and bake positions into the plan frame.
+    """Keep the densest splats and bake positions into the plan frame.
 
     The 3DGS PLY stores opacity as a logit and scales as log-scales; the
     frontend filter sees Spark-decoded values (sigmoid/exp), so decode the
-    same way and keep splats with density >= threshold * radius**3. The plan
-    frame comes from ``plan_matrix``: the same matrix the viewers apply, so
-    the point cloud and the splat cannot disagree. Trained splats can hold
-    non-finite positions, and a degenerate reconstruction makes the whole
-    frame non-finite, so drop them.
+    same way and rank the splats by density. The plan frame comes from
+    ``plan_matrix``: the same matrix the viewers apply, so the point cloud and
+    the splat cannot disagree. Trained splats can hold non-finite positions,
+    and a degenerate reconstruction makes the whole frame non-finite, so drop
+    them.
     """
     means = np.asarray(means, dtype=np.float64)
     scales = np.asarray(scales, dtype=np.float64)
@@ -56,7 +55,11 @@ def compute_plan_point_cloud(
         decoded_opacities = 1.0 / (1.0 + np.exp(-opacities))
     decoded_scales = np.exp(scales)
     densities = decoded_opacities / np.prod(decoded_scales, axis=-1)
-    keep = densities >= threshold * radius**3
+
+    # argsort ranks NaN last, so a broken splat never takes a kept slot.
+    keep_count = int(np.ceil(len(densities) * np.clip(keep_fraction, 0.0, 1.0)))
+    keep = np.zeros(len(densities), dtype=bool)
+    keep[np.argsort(-densities, kind="stable")[:keep_count]] = True
 
     plan_positions = transform_points(means[keep], matrix)
     plan_positions = plan_positions[np.isfinite(plan_positions).all(axis=1)]
@@ -137,8 +140,7 @@ def generate_plan_point_cloud(splat_path: Path, colmap_directory: Path) -> None:
         scales,
         opacities,
         geometric_data.matrix,
-        geometric_data.radius,
-        config.PLAN_DENSITY_THRESHOLD,
+        config.PLAN_POINT_KEEP_FRACTION,
     )
     # The camera poses put the scene level but leave the heading open; the point
     # layout decides it, so both viewers get walls aligned with the plan axes.
@@ -150,9 +152,9 @@ def generate_plan_point_cloud(splat_path: Path, colmap_directory: Path) -> None:
     if positions.shape[0] == 0:
         logger.warning(
             "Plan point cloud for %s is empty: every splat was filtered out "
-            "(threshold=%g, %d splats considered)",
+            "(keep fraction=%g, %d splats considered)",
             splat_path,
-            config.PLAN_DENSITY_THRESHOLD * geometric_data.radius**3,
+            config.PLAN_POINT_KEEP_FRACTION,
             len(means),
         )
     meta = {
