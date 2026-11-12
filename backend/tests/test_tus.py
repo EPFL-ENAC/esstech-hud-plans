@@ -319,6 +319,7 @@ def test_hook_rejects_non_dict_payload(tus_hook_api: TestClient) -> None:
 def tus_api(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    sqlite_idempotency_lock: None,
 ) -> Iterator[tuple[TestClient, UUID, Path]]:
     engine = create_async_engine(
         "sqlite+aiosqlite://",
@@ -432,6 +433,7 @@ def test_from_upload_reconstruction_submission_uses_permanent_source(
 
     response = client.post(
         f"/buildings/{building_id}/reconstructions/from-upload",
+        headers={"Idempotency-Key": str(uuid4())},
         json={"upload_id": upload_id, "settings": {}},
     )
 
@@ -472,6 +474,7 @@ def test_from_upload_reconstruction_submission_passes_upload_parameters(
 
     response = client.post(
         f"/buildings/{building_id}/reconstructions/from-upload",
+        headers={"Idempotency-Key": str(uuid4())},
         json={"upload_id": upload_id, "settings": {"ffmpeg": {"fps": 4}}},
     )
 
@@ -512,10 +515,14 @@ def test_permanent_upload_can_be_submitted_twice(
 
     asyncio.run(complete())
     url = f"/buildings/{building_id}/reconstructions/from-upload"
-    first = client.post(url, json={"upload_id": upload_id})
+    first = client.post(
+        url, headers={"Idempotency-Key": str(uuid4())}, json={"upload_id": upload_id}
+    )
     assert first.status_code == 202
     assert not (tus_dir / upload_id).exists()
-    second = client.post(url, json={"upload_id": upload_id})
+    second = client.post(
+        url, headers={"Idempotency-Key": str(uuid4())}, json={"upload_id": upload_id}
+    )
     assert second.status_code == 202
     assert first.json()["id"] != second.json()["id"]
     assert upload_file_path(UUID(upload_id), "scan.mp4").read_bytes() == b"video bytes"
@@ -548,7 +555,9 @@ def test_reconstruction_rejects_unavailable_upload_before_creating_records(
         if new_building
         else f"/buildings/{building_id}/reconstructions/from-upload"
     )
-    response = client.post(url, json={"upload_id": upload_id})
+    response = client.post(
+        url, headers={"Idempotency-Key": str(uuid4())}, json={"upload_id": upload_id}
+    )
     expected = {
         "unknown": 404,
         "unowned": 404,
@@ -569,6 +578,7 @@ def test_reconstruction_rejects_invalid_upload_id(
     client, building_id, _ = tus_api
     response = client.post(
         f"/buildings/{building_id}/reconstructions/from-upload",
+        headers={"Idempotency-Key": str(uuid4())},
         json={"upload_id": upload_id},
     )
     assert response.status_code == 422
@@ -584,6 +594,7 @@ def test_from_upload_building_from_reconstruction_creates_linked_records(
 
     response = client.post(
         "/buildings/from-reconstruction/from-upload",
+        headers={"Idempotency-Key": str(uuid4())},
         json={
             "upload_id": upload_id,
             "building": {"name": "New hall"},
@@ -609,6 +620,7 @@ def test_from_upload_submission_waits_for_incomplete_upload(
 
     response = client.post(
         f"/buildings/{building_id}/reconstructions/from-upload",
+        headers={"Idempotency-Key": str(uuid4())},
         json={"upload_id": upload_id, "settings": {}},
     )
 
@@ -638,6 +650,7 @@ def test_from_upload_submission_maps_scheduling_failure_to_503(
 
     response = client.post(
         f"/buildings/{building_id}/reconstructions/from-upload",
+        headers={"Idempotency-Key": str(uuid4())},
         json={"upload_id": upload_id, "settings": {}},
     )
 

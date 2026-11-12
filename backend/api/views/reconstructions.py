@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, Query, status
+from fastapi import Depends, Header, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.routing import APIRouter
 from sqlalchemy.exc import SQLAlchemyError
@@ -33,6 +33,7 @@ from api.models.reconstruction import (
     ReconstructionRead,
     ReconstructionStatus,
 )
+from api.services.idempotency import IdempotencyInProgressError, IdempotencyService
 from api.services.reconstructions import (
     ReconstructionConflictError,
     ReconstructionCreationError,
@@ -45,6 +46,7 @@ from api.utils.responses import file_storage_errors, inline_file_response
 from api.views.buildings import get_current_building
 from api.views.reconstruction_submission import (
     UploadReconstructionSubmission,
+    get_idempotency_service,
     get_reconstruction_service,
 )
 
@@ -224,24 +226,45 @@ def get_reconstruction_point_cloud(
     "/from-upload",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=ReconstructionRead,
+    responses={
+        204: {"description": "This operation was already accepted."},
+        409: {
+            "description": "The operation is being accepted or the upload has failed."
+        },
+    },
 )
 async def create_reconstruction_from_upload(
     payload: UploadReconstructionSubmission,
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1)],
     building: Annotated[Building, Depends(get_current_building)],
+    idempotency: Annotated[IdempotencyService, Depends(get_idempotency_service)],
     reconstructions: Annotated[
         ReconstructionService,
         Depends(get_reconstruction_service),
     ],
-) -> Reconstruction:
+) -> Reconstruction | Response:
     """Create a reconstruction from a pending or completed user upload."""
 
     try:
-        return await reconstructions.create_from_upload(
-            user_id=building.user_id,
-            building_id=building.id,
-            upload_id=payload.upload_id,
-            settings=payload.settings,
-        )
+        async with idempotency.operation(
+            owner_id=building.user_id,
+            idempotency_key=idempotency_key,
+        ) as should_run:
+            if not should_run:
+                return Response(status_code=status.HTTP_204_NO_CONTENT)
+            reconstruction = await reconstructions.add_from_upload(
+                user_id=building.user_id,
+                building_id=building.id,
+                upload_id=payload.upload_id,
+                settings=payload.settings,
+            )
+        return await reconstructions.schedule_if_ready(reconstruction.id)
+    except IdempotencyInProgressError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "idempotency_in_progress"},
+            headers={"Retry-After": "1"},
+        ) from exc
     except ReconstructionInputNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
     except ReconstructionConflictError as exc:

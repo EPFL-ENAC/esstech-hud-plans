@@ -150,9 +150,21 @@ class BuildingService:
         user_id: UUID,
         payload: BuildingCreate,
     ) -> Building:
+        building = await self.add(user_id=user_id, payload=payload)
+        await self._commit_and_refresh(building)
+        return building
+
+    async def add(
+        self,
+        *,
+        user_id: UUID,
+        payload: BuildingCreate,
+    ) -> Building:
+        """Add a building to the caller's transaction without committing."""
+
         building = Building(user_id=user_id, **payload.model_dump())
         self._session.add(building)
-        await self._commit_and_refresh(building)
+        await self._session.flush()
         return building
 
     async def update(

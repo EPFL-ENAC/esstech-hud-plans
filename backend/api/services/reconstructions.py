@@ -104,7 +104,7 @@ class ReconstructionService:
         )
         return Page(items=list(result.all()), total=total)
 
-    async def create_from_upload(
+    async def add_from_upload(
         self,
         *,
         user_id: UUID,
@@ -112,46 +112,39 @@ class ReconstructionService:
         upload_id: UUID,
         settings: SplatGenerationWorkflowSettings,
     ) -> Reconstruction:
-        """Persist a reconstruction, then schedule it if its upload is ready."""
+        """Add a waiting reconstruction to the caller's transaction."""
 
-        try:
-            building = await self._session.scalar(
-                select(Building)
-                .where(Building.id == building_id, Building.user_id == user_id)
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
-            if building is None:
-                raise ReconstructionInputNotFoundError("Building not found")
+        building = await self._session.scalar(
+            select(Building)
+            .where(Building.id == building_id, Building.user_id == user_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if building is None:
+            raise ReconstructionInputNotFoundError("Building not found")
 
-            upload = await self._session.scalar(
-                select(UserUploads)
-                .where(UserUploads.id == upload_id, UserUploads.user_id == user_id)
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
-            if upload is None:
-                raise ReconstructionInputNotFoundError("Upload not found")
-            if upload.status not in {UploadStatus.PENDING, UploadStatus.UPLOADED}:
-                raise ReconstructionConflictError("Upload has failed")
-            if upload.status == UploadStatus.UPLOADED:
-                validate_completed_file(Path(upload.file_path), upload.size_bytes)
+        upload = await self._session.scalar(
+            select(UserUploads)
+            .where(UserUploads.id == upload_id, UserUploads.user_id == user_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if upload is None:
+            raise ReconstructionInputNotFoundError("Upload not found")
+        if upload.status not in {UploadStatus.PENDING, UploadStatus.UPLOADED}:
+            raise ReconstructionConflictError("Upload has failed")
+        if upload.status == UploadStatus.UPLOADED:
+            validate_completed_file(Path(upload.file_path), upload.size_bytes)
 
-            reconstruction = Reconstruction(
-                building_id=building.id,
-                upload_id=upload.id,
-                status=ReconstructionStatus.WAITING_FOR_UPLOAD,  # _schedule_if_ready will update this if the upload is already complete
-                settings=settings.model_dump(mode="json"),
-            )
-            self._session.add(reconstruction)
-            await self._session.commit()
-        except BaseException:
-            await self._session.rollback()
-            raise
-
-        # Publish the waiting row before rereading readiness. If completion's
-        # scan missed this row, this read will observe the completed upload.
-        return await self._schedule_if_ready(reconstruction.id)
+        reconstruction = Reconstruction(
+            building_id=building.id,
+            upload_id=upload.id,
+            status=ReconstructionStatus.WAITING_FOR_UPLOAD,
+            settings=settings.model_dump(mode="json"),
+        )
+        self._session.add(reconstruction)
+        await self._session.flush()
+        return reconstruction
 
     async def schedule_waiting_for_upload(self, upload_id: UUID) -> None:
         """Dispatch waiting rows independently after upload persistence succeeds."""
@@ -166,7 +159,7 @@ class ReconstructionService:
         )
         for reconstruction_id in result.all():
             try:
-                await self._schedule_if_ready(reconstruction_id)
+                await self.schedule_if_ready(reconstruction_id)
             except ReconstructionNotFoundError:
                 # A waiting row may have been deleted after the scan.
                 continue
@@ -179,10 +172,16 @@ class ReconstructionService:
                     upload_id,
                 )
 
-    async def _schedule_if_ready(
+    async def schedule_if_ready(
         self,
         reconstruction_id: UUID,
     ) -> Reconstruction:
+        """Schedule a committed waiting row, rereading upload readiness.
+
+        Publishing the row before this read ensures that either upload
+        completion's scan finds it, or this read observes the completed upload.
+        """
+
         scheduling_error: Exception | None = None
         try:
             reconstruction = await self._get_for_update(reconstruction_id)

@@ -116,6 +116,18 @@ generated artifacts: extracted frames (including raw frames when selection is
 enabled), sparse COLMAP reconstructions, and `splat.ply` files. The source video
 is never copied into the reconstruction directory or staged to SCITAS scratch.
 
+Both submission endpoints require a nonempty `Idempotency-Key` header. Reuse the
+same key when retrying one user action; keys are scoped to the authenticated user
+across both endpoints. A new key follows the usual submission flow. A concurrent
+attempt still being accepted returns `409` with
+`{"detail":{"code":"idempotency_in_progress"}}` and `Retry-After: 1`. Once the
+reconstruction is committed, a replay returns an empty `204`, without returning
+the original resources or scheduling another reconstruction. Acceptance includes
+waiting for an upload; it does not wait for reconstruction completion. A scheduling
+failure still returns `503` with retained IDs to the original caller, and a replay
+then returns `204`. Failed acceptance rolls back its resources and allows retrying
+the same key. Frontend key handling and automatic retries are separate work.
+
 Deleting a reconstruction removes its generated artifacts and preserves the
 source video. Deleting an upload removes its metadata while retaining the
 permanent file, so existing reconstructions can still read and serve their source.
