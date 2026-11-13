@@ -20,6 +20,11 @@ from api.models.workflows import (
 # runner can move the splat up to the artifact path the workflow expects.
 TRAIN_RUN_DIRECTORY_NAME = "train"
 
+# Measured on the meeting room: 0.05 instead of the spirula default 0.01 thins
+# the plan wall lines by 36 percent together with medium-quality SfM, against
+# 19 percent for the SfM change alone. See PERF.md.
+NORMAL_SUPERVISION_WEIGHT = "0.05"
+
 SAM_MODEL_PATH = "/opt/spirula-cache/spirula-studio/models/sam3-q4_0.ggml"
 MASKABLE_FRAME_SUFFIXES = frozenset(
     {".png", ".jpg", ".jpeg", ".bmp", ".exr", ".tif", ".tiff"}
@@ -148,6 +153,7 @@ def build_spirula_train_command(
         )
     if settings.floater_suppression:
         arguments.extend(["--floater-suppression", "mild"])
+    arguments.extend(["--normal-supervision-weight", NORMAL_SUPERVISION_WEIGHT])
     if settings.keep_objects.enabled:
         arguments.extend(
             [

@@ -29,7 +29,7 @@ def test_splat_generation_workflow_settings_defaults_are_grouped_by_tool() -> No
     )
     assert settings.spirula_geometry == SpirulaGeometrySettings(
         compute_depth=False,
-        compute_normals=False,
+        compute_normals=True,
     )
     assert settings.spirula_train == SpirulaTrainSettings(
         num_iterations=30_000,

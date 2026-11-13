@@ -434,7 +434,9 @@ def test_flow_combines_intermediate_updates_with_validated_milestones(
             splat_path=str(tmp_path / "splat.ply"),
             settings=SplatGenerationWorkflowSettings(
                 frame_picker=FramePickerSettings() if use_frame_picker else None,
-                spirula_geometry=SpirulaGeometrySettings(compute_depth=use_geometry),
+                spirula_geometry=SpirulaGeometrySettings(
+                    compute_depth=use_geometry, compute_normals=use_geometry
+                ),
             ),
             owner_id=uuid4(),
             reconstruction_id=uuid4(),

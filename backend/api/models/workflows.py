@@ -60,7 +60,7 @@ class SpirulaSfmSettings(BaseModel):
 
 class SpirulaGeometrySettings(BaseModel):
     compute_depth: bool = False
-    compute_normals: bool = False
+    compute_normals: bool = True
 
 
 class SpirulaTrainSettings(BaseModel):

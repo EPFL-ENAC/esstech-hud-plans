@@ -159,15 +159,41 @@ def test_build_geometry_command_uses_workspace_relative_paths_and_flags(
 @pytest.mark.parametrize(
     ("meshing_preset", "floater_suppression", "head_arguments", "tail_arguments"),
     [
-        (True, True, ("meshing",), ("--floater-suppression", "mild")),
-        (True, False, ("meshing",), ()),
+        (
+            True,
+            True,
+            ("meshing",),
+            ("--floater-suppression", "mild", "--normal-supervision-weight", "0.05"),
+        ),
+        (True, False, ("meshing",), ("--normal-supervision-weight", "0.05")),
         (
             False,
             True,
             (),
-            ("--primitive", "mip", "--sh-degree", "2", "--floater-suppression", "mild"),
+            (
+                "--primitive",
+                "mip",
+                "--sh-degree",
+                "2",
+                "--floater-suppression",
+                "mild",
+                "--normal-supervision-weight",
+                "0.05",
+            ),
         ),
-        (False, False, (), ("--primitive", "mip", "--sh-degree", "2")),
+        (
+            False,
+            False,
+            (),
+            (
+                "--primitive",
+                "mip",
+                "--sh-degree",
+                "2",
+                "--normal-supervision-weight",
+                "0.05",
+            ),
+        ),
     ],
 )
 def test_build_train_command_uses_workspace_relative_paths_and_settings(

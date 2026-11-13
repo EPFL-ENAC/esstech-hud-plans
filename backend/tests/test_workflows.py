@@ -545,7 +545,9 @@ def test_splat_generation_flow_selects_gpu_environment(
     picker_settings = FramePickerSettings() if use_frame_picker else None
     settings = SplatGenerationWorkflowSettings(
         frame_picker=picker_settings,
-        spirula_geometry=SpirulaGeometrySettings(compute_depth=use_geometry),
+        spirula_geometry=SpirulaGeometrySettings(
+            compute_depth=use_geometry, compute_normals=use_geometry
+        ),
         spirula_sfm=SpirulaSfmSettings(
             remove_objects=ObjectMaskSettings(
                 enabled=use_masks,

@@ -60,7 +60,7 @@ export function makeDefaultSpirulaSfmConfig(
 export function makeDefaultSpirulaGeometryConfig(): SpirulaGeometryConfig {
     return {
         computeDepth: false,
-        computeNormals: false,
+        computeNormals: true,
     };
 }
 
