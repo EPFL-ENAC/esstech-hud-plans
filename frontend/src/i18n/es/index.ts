@@ -1,6 +1,35 @@
 import type enUS from '../en-US';
 
 export default {
+    tasks: {
+        title: 'Tareas pendientes',
+        empty: 'No hay tareas pendientes.',
+        memoryOnly:
+            'Mantén esta aplicación abierta. Cerrarla o recargarla descartará las tareas pendientes.',
+        offline: 'Sin conexión. Las tareas continuarán cuando vuelvas a conectarte.',
+        authenticationRequired: 'Inicia sesión para continuar las tareas pendientes.',
+        waitingHelp:
+            'Las tareas interrumpidas se reintentan al recuperar la conexión. También puedes reintentarlas manualmente.',
+        cancelHint:
+            'Cancelar detiene el trabajo local. No puede deshacer trabajo ya aceptado por el servidor.',
+        attempts: 'Intentos: {count}',
+        retryLabel: 'Reintentar {label}',
+        cancelLabel: 'Cancelar {label}',
+        progress: 'Progreso de {label}',
+        progressValue: '{completed} / {total}',
+        unknownError: 'No se pudo completar la tarea.',
+        status: {
+            queued: 'En cola',
+            running: 'En curso',
+            pausing: 'Pausando',
+            waiting: 'Esperando conexión',
+            blocked: 'Requiere atención',
+            failed: 'Error',
+            cancelling: 'Cancelando',
+            cancelled: 'Cancelada',
+            completed: 'Completada',
+        },
+    },
     pwa: {
         install: 'Instalar HUD Plans',
         installIos:

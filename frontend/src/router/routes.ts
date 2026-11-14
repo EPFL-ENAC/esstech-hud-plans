@@ -50,6 +50,15 @@ const routes: RouteRecordRaw[] = [
                 component: () => import('pages/ReconstructionFromUploadPage.vue'),
             },
             {
+                path: 'more/tasks',
+                name: 'network-dependent-tasks',
+                meta: { drawer: true },
+                components: {
+                    default: () => import('components/BackgroundPage.vue'),
+                    detail: () => import('pages/NetworkDependentTasksPage.vue'),
+                },
+            },
+            {
                 path: 'more/settings',
                 name: 'settings',
                 meta: { drawer: true },

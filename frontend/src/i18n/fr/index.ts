@@ -1,6 +1,35 @@
 import type enUS from '../en-US';
 
 export default {
+    tasks: {
+        title: 'Tâches en attente',
+        empty: 'Aucune tâche en attente.',
+        memoryOnly:
+            'Gardez cette application ouverte. La fermer ou la recharger supprimera les tâches en attente.',
+        offline: 'Vous êtes hors ligne. Les tâches reprendront à la reconnexion.',
+        authenticationRequired: 'Connectez-vous pour poursuivre les tâches en attente.',
+        waitingHelp:
+            'Les tâches interrompues reprendront à la reconnexion. Vous pouvez aussi réessayer manuellement.',
+        cancelHint:
+            'L’annulation arrête le travail local. Elle ne peut pas annuler un travail déjà accepté par le serveur.',
+        attempts: 'Tentatives : {count}',
+        retryLabel: 'Réessayer : {label}',
+        cancelLabel: 'Annuler : {label}',
+        progress: 'Progression : {label}',
+        progressValue: '{completed} / {total}',
+        unknownError: 'La tâche n’a pas pu être terminée.',
+        status: {
+            queued: 'En file d’attente',
+            running: 'En cours',
+            pausing: 'Mise en pause',
+            waiting: 'En attente de connexion',
+            blocked: 'Intervention requise',
+            failed: 'Échec',
+            cancelling: 'Annulation en cours',
+            cancelled: 'Annulée',
+            completed: 'Terminée',
+        },
+    },
     pwa: {
         install: 'Installer HUD Plans',
         installIos:
