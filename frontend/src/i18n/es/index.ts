@@ -357,6 +357,7 @@ export default {
         new: 'Nueva reconstrucción',
         named: 'Reconstrucción {id}',
         submitted: 'Reconstrucción enviada.',
+        queued: 'Reconstrucción en cola. Se enviará cuando haya conexión disponible.',
         refreshFailed: 'No se pudieron actualizar las reconstrucciones.',
         loadFailed: 'No se pudieron cargar las reconstrucciones.',
         loading: 'Cargando las reconstrucciones',

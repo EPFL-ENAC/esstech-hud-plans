@@ -1,17 +1,19 @@
 import { useMutation, useQueryCache } from '@pinia/colada';
 import { computed } from 'vue';
+import { i18n } from 'src/i18n/instance';
+import { ApiError } from 'src/lib/api';
 import { getAuthSubject } from 'src/lib/auth';
 import type { Page } from 'src/lib/pagination';
 import {
-    type BuildingSelection,
+    ReconstructionSubmissionTask,
+    type ReconstructionSubmission,
+    type ReconstructionSubmissionResult,
+} from 'src/lib/reconstructionSubmissionTask';
+import { useNetworkDependentTasks, type TaskSubmission } from 'src/stores/networkDependentTasks';
+import {
     type Reconstruction,
-    type SplatGenerationSettings,
-    createBuildingFromReconstructionUpload,
-    createReconstructionFromUpload,
     cancelReconstruction,
     isReconstructionProcessing,
-    getFailedBuildingId,
-    getFailedReconstructionId,
     getReconstructionSubmissionErrorMessage,
 } from 'src/lib/buildings';
 
@@ -87,68 +89,67 @@ export function useCancelReconstructionMutation() {
     });
 }
 
-export type SubmitReconstructionVariables = BuildingSelection & {
-    uploadId: string;
-    settings: SplatGenerationSettings;
-};
+export type SubmitReconstructionVariables = ReconstructionSubmission;
 
-function retainedBuildingId(
-    error: unknown,
-    variables: SubmitReconstructionVariables | undefined,
-): string | null {
-    return (
-        getFailedBuildingId(error) ??
-        (getFailedReconstructionId(error) ? (variables?.buildingId ?? null) : null)
-    );
+function invalidateSubmissionQueries(
+    queryCache: ReturnType<typeof useQueryCache>,
+    ownerId: string,
+    buildingId: string | null,
+): void {
+    void Promise.all([
+        queryCache.invalidateQueries({ key: ['buildings', ownerId, 'picker'] }),
+        queryCache.invalidateQueries({ key: ['buildings', ownerId, 'list'] }),
+        queryCache.invalidateQueries({ key: ['buildings', ownerId, 'locations'] }),
+        ...(buildingId === null
+            ? []
+            : [
+                  queryCache.invalidateQueries({
+                      key: ['buildings', ownerId, 'detail', buildingId],
+                      exact: true,
+                  }),
+                  queryCache.invalidateQueries({
+                      key: ['buildings', ownerId, 'detail', buildingId, 'reconstructions', 'list'],
+                  }),
+              ]),
+    ]).catch((error: unknown) => console.warn('Could not refresh building data', error));
 }
 
 export function useSubmitReconstructionMutation() {
+    const queue = useNetworkDependentTasks();
     const queryCache = useQueryCache();
     const subject = getAuthSubject();
-    const mutation = useMutation<Reconstruction, SubmitReconstructionVariables, unknown>({
-        mutation: async (variables) => {
-            if (variables.buildingId === null) {
-                const result = await createBuildingFromReconstructionUpload(
-                    variables.building,
-                    variables.uploadId,
-                    variables.settings,
-                );
-                return result.reconstruction;
+    const mutation = useMutation<
+        TaskSubmission<ReconstructionSubmissionResult>,
+        SubmitReconstructionVariables,
+        unknown
+    >({
+        mutation: (submission) => {
+            if (subject === null || getAuthSubject() !== subject) {
+                throw new ApiError('Submission account has changed', 401, null);
             }
-            return createReconstructionFromUpload(
-                variables.buildingId,
-                variables.uploadId,
-                variables.settings,
+            return queue.submit(
+                new ReconstructionSubmissionTask({
+                    ownerId: subject,
+                    label: i18n.global.t('capture.submittingReconstruction'),
+                    submission,
+                    onCompleted: ({ buildingId }) => {
+                        invalidateSubmissionQueries(queryCache, subject, buildingId);
+                    },
+                }),
             );
-        },
-        onSettled(data, error, variables) {
-            const buildingId = data?.building_id ?? retainedBuildingId(error, variables);
-            if (buildingId === null) return;
-
-            // Mark cached data stale immediately, but don't let background refresh
-            // failures change the outcome of a submission that already finished.
-            void Promise.all([
-                queryCache.invalidateQueries({ key: ['buildings', subject, 'picker'] }),
-                queryCache.invalidateQueries({ key: ['buildings', subject, 'list'] }),
-                queryCache.invalidateQueries({ key: ['buildings', subject, 'locations'] }),
-                queryCache.invalidateQueries({
-                    key: ['buildings', subject, 'detail', buildingId],
-                    exact: true,
-                }),
-                queryCache.invalidateQueries({
-                    key: ['buildings', subject, 'detail', buildingId, 'reconstructions', 'list'],
-                }),
-            ]).catch((error: unknown) => console.warn('Could not refresh building data', error));
         },
     });
 
-    const destinationBuildingId = computed(
-        () =>
-            mutation.data.value?.building_id ??
-            retainedBuildingId(mutation.error.value, mutation.variables.value),
-    );
+    const destinationBuildingId = computed(() => {
+        const outcome = mutation.data.value;
+        if (!outcome) return null;
+        return outcome.status === 'completed'
+            ? outcome.result.buildingId
+            : (mutation.variables.value?.buildingId ?? null);
+    });
     const errorMessage = computed(() =>
-        mutation.error.value === null
+        mutation.error.value === null ||
+        (mutation.error.value instanceof DOMException && mutation.error.value.name === 'AbortError')
             ? ''
             : getReconstructionSubmissionErrorMessage(mutation.error.value),
     );

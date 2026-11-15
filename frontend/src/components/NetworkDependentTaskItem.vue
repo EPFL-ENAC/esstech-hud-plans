@@ -70,7 +70,7 @@ import type { NetworkDependentTask } from 'src/lib/networkDependentTasks';
 
 const props = withDefaults(
     defineProps<{
-        task: NetworkDependentTask;
+        task: NetworkDependentTask<unknown>;
         retryDisabled?: boolean;
     }>(),
     { retryDisabled: false },

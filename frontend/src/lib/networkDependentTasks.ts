@@ -27,12 +27,14 @@ export interface TaskState {
 export type FailureAction = 'retry' | 'blocked' | 'failed';
 export type InterruptionReason = 'pause' | 'cancel';
 
-export interface TaskOptions {
+export interface TaskOptions<TResult = void> {
     ownerId: string;
     label: string;
+    /** Runs once after success without delaying task completion. */
+    onCompleted?(this: void, result: TResult): void | Promise<void>;
 }
 
-export abstract class NetworkDependentTask {
+export abstract class NetworkDependentTask<TResult = void> {
     readonly id = crypto.randomUUID();
     readonly createdAt = Date.now();
     readonly ownerId: string;
@@ -49,20 +51,23 @@ export abstract class NetworkDependentTask {
     readonly state = readonly(this.mutableState);
 
     private controller: AbortController | null = null;
-    private activeAttempt: Promise<void> | null = null;
+    private activeAttempt: Promise<TResult | undefined> | null = null;
+    private attemptFailure: unknown = null;
     private interruption: Promise<void> | null = null;
     private interruptionReason: InterruptionReason | null = null;
+    private readonly onCompleted: TaskOptions<TResult>['onCompleted'];
 
-    constructor({ ownerId, label }: TaskOptions) {
+    constructor({ ownerId, label, onCompleted }: TaskOptions<TResult>) {
         this.ownerId = ownerId;
         this.label = label;
+        this.onCompleted = onCompleted;
     }
 
     /** Run one attempt; concurrent calls share this task's active attempt. */
-    retryOrResume(): Promise<void> {
+    retryOrResume(): Promise<TResult | undefined> {
         if (this.activeAttempt) return this.activeAttempt;
         if (this.interruption || this.mutableState.status !== 'queued') {
-            return Promise.resolve();
+            return Promise.resolve(undefined);
         }
 
         const controller = new AbortController();
@@ -70,6 +75,7 @@ export abstract class NetworkDependentTask {
         this.mutableState.status = 'running';
         this.mutableState.attempts += 1;
         this.mutableState.error = null;
+        this.attemptFailure = null;
 
         const attempt = Promise.resolve()
             .then(() => {
@@ -77,13 +83,16 @@ export abstract class NetworkDependentTask {
                 return this.resume(controller.signal);
             })
             .then(
-                () => {
+                (result) => {
                     if (!controller.signal.aborted) {
                         this.mutableState.status = 'completed';
+                        void this.invokeCompletionHook(result);
+                        return result;
                     }
                 },
-                (error: unknown) => {
+                (error: unknown): undefined => {
                     if (!controller.signal.aborted) this.recordFailure(error);
+                    return undefined;
                 },
             )
             .finally(() => {
@@ -95,6 +104,10 @@ export abstract class NetworkDependentTask {
         return attempt;
     }
 
+    get failure(): unknown {
+        return this.attemptFailure;
+    }
+
     requestRetry(): void {
         if (
             this.interruption ||
@@ -104,6 +117,7 @@ export abstract class NetworkDependentTask {
         }
 
         this.mutableState.error = null;
+        this.attemptFailure = null;
         this.mutableState.status = 'queued';
     }
 
@@ -127,7 +141,7 @@ export abstract class NetworkDependentTask {
      * be idempotent or reconcile the previous attempt before submitting again.
      * Subclasses update progress/message; the base class manages lifecycle.
      */
-    protected abstract resume(signal: AbortSignal): Promise<void>;
+    protected abstract resume(signal: AbortSignal): Promise<TResult>;
 
     /** Override for transports needing explicit, repeatable pause/cancel calls. */
     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Subclasses inspect the reason.
@@ -141,6 +155,14 @@ export abstract class NetworkDependentTask {
         return 'failed';
     }
 
+    private async invokeCompletionHook(result: TResult): Promise<void> {
+        try {
+            await this.onCompleted?.(result);
+        } catch (error) {
+            console.warn('Task completion callback failed', error);
+        }
+    }
+
     private recordFailure(error: unknown): void {
         let action: FailureAction = 'failed';
         try {
@@ -149,6 +171,7 @@ export abstract class NetworkDependentTask {
             console.warn('Could not classify task failure', classificationError);
         }
 
+        this.attemptFailure = error;
         this.mutableState.error = error instanceof Error ? error.message || null : null;
         this.mutableState.status = action === 'retry' ? 'waiting' : action;
     }

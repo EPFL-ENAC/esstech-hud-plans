@@ -126,7 +126,11 @@ the original resources or scheduling another reconstruction. Acceptance includes
 waiting for an upload; it does not wait for reconstruction completion. A scheduling
 failure still returns `503` with retained IDs to the original caller, and a replay
 then returns `204`. Failed acceptance rolls back its resources and allows retrying
-the same key. Frontend key handling and automatic retries are separate work.
+the same key. The frontend uses its task ID as the key. Submission returns either
+the immediate result or queued success when offline or after a retryable failure.
+Queued work stays in memory and retries on reconnect or manually from Pending
+tasks; closing or reloading the app discards it. Retained-ID scheduling failures
+complete submission with a warning.
 
 Deleting a reconstruction removes its generated artifacts and preserves the
 source video. Deleting an upload removes its metadata while retaining the

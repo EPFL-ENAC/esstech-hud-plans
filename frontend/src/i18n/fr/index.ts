@@ -365,6 +365,7 @@ export default {
         new: 'Nouvelle reconstruction',
         named: 'Reconstruction {id}',
         submitted: 'Reconstruction envoyée.',
+        queued: 'Reconstruction en attente. Elle sera envoyée dès que la connexion sera disponible.',
         refreshFailed: 'Impossible d’actualiser les reconstructions.',
         loadFailed: 'Impossible de charger les reconstructions.',
         loading: 'Chargement des reconstructions',

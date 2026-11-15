@@ -353,30 +353,6 @@ export function getReconstructionViewParams(
     );
 }
 
-export function createReconstructionFromUpload(
-    buildingId: string,
-    uploadId: string,
-    settings: SplatGenerationSettings,
-): Promise<Reconstruction> {
-    return requestJson(`/buildings/${encodeURIComponent(buildingId)}/reconstructions/from-upload`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ upload_id: uploadId, settings }),
-    });
-}
-
-export function createBuildingFromReconstructionUpload(
-    building: BuildingCreate,
-    uploadId: string,
-    settings: SplatGenerationSettings,
-): Promise<BuildingFromReconstruction> {
-    return requestJson('/buildings/from-reconstruction/from-upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ upload_id: uploadId, building, settings }),
-    });
-}
-
 export function getFailedBuildingId(error: unknown): string | null {
     if (!(error instanceof ApiError) || !isRecord(error.body)) return null;
     const detail = error.body.detail;

@@ -4,6 +4,13 @@ import { createPinia, disposePinia, setActivePinia } from 'pinia';
 import { effectScope, isProxy, isReadonly, watchEffect } from 'vue';
 import { deferred, importTypeScript } from './helpers/typescript.mjs';
 
+function enqueue(queue, task) {
+    const submission = queue.submit(task);
+    // Legacy lifecycle tests intentionally leave the caller before settlement.
+    void submission.catch(() => undefined);
+    return submission;
+}
+
 async function flush() {
     await new Promise((resolve) => setImmediate(resolve));
 }
@@ -83,8 +90,9 @@ async function setup(t, { online = true } = {}) {
             ownerId = 'owner',
             operation = () => Promise.resolve(),
             action = 'failed',
+            onCompleted,
         } = {}) {
-            super({ ownerId, label: 'Test task' });
+            super({ ownerId, label: 'Test task', onCompleted });
             this.operation = operation;
             this.action = action;
             this.calls = 0;
@@ -96,7 +104,7 @@ async function setup(t, { online = true } = {}) {
         async resume(signal) {
             this.calls += 1;
             this.signal = signal;
-            await this.operation(signal, this);
+            return await this.operation(signal, this);
         }
 
         failureAction() {
@@ -159,12 +167,229 @@ test('connectivity callbacks fire only on transitions and stop with their scope'
     assert.deepEqual(calls, ['offline', 'online']);
 });
 
+test('online submission waits for its attempt and returns its typed result', async (t) => {
+    const { queue, TestTask } = await setup(t);
+    const work = deferred();
+    const task = new TestTask({ operation: () => work.promise });
+    const submission = queue.submit(task);
+    let settled = false;
+    void submission.then(() => {
+        settled = true;
+    });
+    await flush();
+    assert.equal(settled, false);
+    const result = { id: 'accepted' };
+    work.resolve(result);
+    assert.deepEqual(await submission, { status: 'completed', taskId: task.id, result });
+    assert.equal(queue.get(task.id), undefined);
+});
+
+test('void and null are valid completed results', async (t) => {
+    const { queue, TestTask } = await setup(t);
+    for (const result of [undefined, null]) {
+        const task = new TestTask({ operation: async () => result });
+        assert.deepEqual(await queue.submit(task), {
+            status: 'completed',
+            taskId: task.id,
+            result,
+        });
+    }
+});
+
+test('completion callbacks run once with the result after concurrent callers and retries', async (t) => {
+    const { queue, TestTask } = await setup(t);
+    const calls = [];
+    const work = deferred();
+    const task = new TestTask({
+        operation: () => work.promise,
+        onCompleted(result) {
+            assert.equal(task.state.status, 'completed');
+            calls.push(result);
+        },
+    });
+    const submission = queue.submit(task);
+    await flush();
+    const attempt = task.retryOrResume();
+    assert.equal(calls.length, 0);
+    const result = { id: 'accepted' };
+    work.resolve(result);
+    await submission;
+    await attempt;
+    task.requestRetry();
+    await task.retryOrResume();
+    assert.deepEqual(calls, [result]);
+});
+
+test('completion callbacks wait for a successful background retry', async (t) => {
+    const { queue, TestTask, connect } = await setup(t, { online: false });
+    const calls = [];
+    const task = new TestTask({
+        action: 'retry',
+        operation: async (_signal, current) => {
+            if (current.calls === 1) throw new TypeError('Connection lost');
+            return 'accepted';
+        },
+        onCompleted: (result) => {
+            calls.push(result);
+        },
+    });
+    await queue.submit(task);
+    assert.deepEqual(calls, []);
+    connect(true);
+    await flush();
+    assert.equal(task.state.status, 'waiting');
+    assert.deepEqual(calls, []);
+    queue.retry(task.id);
+    await flush();
+    assert.deepEqual(calls, ['accepted']);
+});
+
+test('pause and cancellation suppress completion callbacks for late results', async (t) => {
+    const { queue, TestTask } = await setup(t);
+    for (const reason of ['pause', 'cancel']) {
+        const work = deferred();
+        const calls = [];
+        const task = new TestTask({
+            operation: () => work.promise,
+            onCompleted: (result) => {
+                calls.push(result);
+            },
+        });
+        const submission = queue.submit(task);
+        const settled =
+            reason === 'cancel' ? assert.rejects(submission, { name: 'AbortError' }) : submission;
+        await flush();
+        const interrupted = task[reason]();
+        work.resolve('late');
+        await interrupted;
+        await settled;
+        assert.deepEqual(calls, []);
+        await queue.cancel(task.id);
+    }
+});
+
+test('completion callback failures cannot change success or delay submission', async (t) => {
+    const { queue, TestTask } = await setup(t);
+    const warning = t.mock.method(console, 'warn', () => {});
+    const pending = deferred();
+    const failure = new Error('Refresh failed');
+    for (const onCompleted of [
+        () => {
+            throw failure;
+        },
+        () => pending.promise,
+    ]) {
+        const task = new TestTask({ operation: async () => 'accepted', onCompleted });
+        assert.equal((await queue.submit(task)).result, 'accepted');
+        assert.equal(task.state.status, 'completed');
+        assert.equal(task.failure, null);
+    }
+    pending.reject(failure);
+    await flush();
+    assert.equal(warning.mock.callCount(), 2);
+});
+
+test('offline submission resolves immediately and later completion cannot resettle it', async (t) => {
+    const { queue, TestTask, connect } = await setup(t, { online: false });
+    const task = new TestTask({ operation: async () => 'accepted later' });
+    const submission = queue.submit(task);
+    const outcome = await submission;
+    assert.deepEqual(outcome, { status: 'queued', taskId: task.id });
+    assert.equal(task.calls, 0);
+    connect(true);
+    await flush();
+    assert.equal(task.state.status, 'completed');
+    assert.equal(await submission, outcome);
+});
+
+test('retryable initial failure hands off the task and preserves the failure object', async (t) => {
+    const { queue, TestTask } = await setup(t);
+    const failure = new TypeError('Network failed');
+    const task = new TestTask({
+        action: 'retry',
+        operation: async () => {
+            throw failure;
+        },
+    });
+    assert.deepEqual(await queue.submit(task), { status: 'queued', taskId: task.id });
+    assert.equal(task.failure, failure);
+    assert.equal(queue.get(task.id), task);
+});
+
+test('initial permanent and authentication failures reject and remove the task', async (t) => {
+    const { queue, TestTask } = await setup(t);
+    for (const action of ['failed', 'blocked']) {
+        const failure = new Error('Needs attention');
+        const task = new TestTask({
+            action,
+            operation: async () => {
+                throw failure;
+            },
+        });
+        await assert.rejects(queue.submit(task), (error) => error === failure);
+        assert.equal(task.failure, failure);
+        assert.equal(queue.get(task.id), undefined);
+    }
+});
+
+test('cancelling or switching account during submission rejects with AbortError', async (t) => {
+    const { queue, TestTask, setAuth } = await setup(t);
+    for (const changeAccount of [false, true]) {
+        const task = new TestTask({ operation: untilAborted });
+        const rejected = assert.rejects(queue.submit(task), { name: 'AbortError' });
+        await flush();
+        if (changeAccount) setAuth('other', true);
+        else await queue.cancel(task.id);
+        await rejected;
+        assert.equal(queue.get(task.id), undefined);
+    }
+});
+
+test('reconnect and manual retry wait for the initial interrupted outcome', async (t) => {
+    const { queue, TestTask, connect } = await setup(t);
+    const cleanup = deferred();
+    const task = new TestTask({
+        operation: async (signal, current) => {
+            if (current.calls === 1) await untilAborted(signal);
+            return 'accepted later';
+        },
+    });
+    task.cleanup = () => cleanup.promise;
+    const submission = queue.submit(task);
+    await flush();
+    connect(false);
+    connect(true);
+    queue.retry(task.id);
+    await flush();
+    assert.equal(task.calls, 1);
+    cleanup.resolve();
+    assert.deepEqual(await submission, { status: 'queued', taskId: task.id });
+    await flush();
+    assert.equal(task.calls, 2);
+    assert.equal(task.state.status, 'completed');
+});
+
+test('a manual retry cannot overwrite an initial permanent failure', async (t) => {
+    const { queue, TestTask } = await setup(t);
+    const work = deferred();
+    const failure = new Error('Rejected');
+    const task = new TestTask({ operation: () => work.promise });
+    const rejected = assert.rejects(queue.submit(task), (error) => error === failure);
+    await flush();
+    queue.retry(task.id);
+    work.reject(failure);
+    await rejected;
+    await flush();
+    assert.equal(task.calls, 1);
+    assert.equal(queue.get(task.id), undefined);
+});
+
 test('offline submissions start concurrently on reconnect', async (t) => {
     const { queue, TestTask, connect } = await setup(t, { online: false });
     const first = new TestTask({ operation: untilAborted });
     const second = new TestTask({ operation: untilAborted });
-    queue.submit(first);
-    queue.submit(second);
+    enqueue(queue, first);
+    enqueue(queue, second);
     await flush();
     assert.equal(first.calls, 0);
     assert.equal(second.calls, 0);
@@ -190,7 +415,7 @@ test('raw task instances expose reactive readonly UI state', async (t) => {
             .join('|');
     });
     t.after(stop);
-    queue.submit(task);
+    enqueue(queue, task);
     await flush();
     assert.equal(queue.get(task.id), task);
     assert.equal(isProxy(task), false);
@@ -214,12 +439,12 @@ test('transient failures wait for reconnect or manual retry without blocking oth
             if (current.calls < 3) throw new Error('Connection interrupted');
         },
     });
-    queue.submit(task);
+    enqueue(queue, task);
     await flush();
     assert.equal(task.state.status, 'waiting');
 
     const other = new TestTask();
-    queue.submit(other);
+    enqueue(queue, other);
     browserWindow.dispatchEvent(new Event('online'));
     browserWindow.dispatchEvent(new Event('focus'));
     await flush();
@@ -247,7 +472,9 @@ test('blocked and permanently failed tasks require manual retry', async (t) => {
                 throw new Error('Needs attention');
             },
         });
-        queue.submit(task);
+        connect(false);
+        await enqueue(queue, task);
+        connect(true);
         await flush();
         connect(false);
         connect(true);
@@ -264,11 +491,11 @@ test('blocked and permanently failed tasks require manual retry', async (t) => {
 test('submission validates identity, account, and lifecycle', async (t) => {
     const { queue, TestTask } = await setup(t);
     const task = new TestTask();
-    queue.submit(task);
-    assert.throws(() => queue.submit(task), /already enqueued/);
-    assert.throws(() => queue.submit(new TestTask({ ownerId: 'other' })), /another account/);
+    enqueue(queue, task);
+    assert.throws(() => enqueue(queue, task), /already enqueued/);
+    assert.throws(() => enqueue(queue, new TestTask({ ownerId: 'other' })), /another account/);
     await flush();
-    assert.throws(() => queue.submit(task), /Only queued tasks/);
+    assert.throws(() => enqueue(queue, task), /Only queued tasks/);
     queue.retry('missing');
     await queue.cancel('missing');
 });
@@ -277,11 +504,11 @@ test('cancellation waits for late work without blocking other tasks or accepting
     const { queue, TestTask } = await setup(t);
     const work = deferred();
     const first = new TestTask({ operation: () => work.promise });
-    queue.submit(first);
+    enqueue(queue, first);
     await flush();
     const cancellation = queue.cancel(first.id);
     const second = new TestTask({ operation: untilAborted });
-    queue.submit(second);
+    enqueue(queue, second);
     await flush();
     assert.equal(first.signal.aborted, true);
     assert.equal(first.state.status, 'cancelling');
@@ -305,7 +532,7 @@ test('reconnect waits for pause cleanup and creates a fresh signal', async (t) =
         },
     });
     task.cleanup = (reason) => (reason === 'pause' ? cleanup.promise : Promise.resolve());
-    queue.submit(task);
+    enqueue(queue, task);
     await flush();
     connect(false);
     await flush();
@@ -328,7 +555,7 @@ test('cancellation supersedes pause, even during reconnect', async (t) => {
     const cleanup = deferred();
     const task = new TestTask({ operation: untilAborted });
     task.cleanup = (reason) => (reason === 'pause' ? cleanup.promise : Promise.resolve());
-    queue.submit(task);
+    enqueue(queue, task);
     await flush();
     connect(false);
     await flush();
@@ -346,7 +573,7 @@ test('cancellation supersedes pause, even during reconnect', async (t) => {
 test('repeated calls share an attempt and cannot revive a cancelled task', async (t) => {
     const { queue, TestTask, browserWindow } = await setup(t);
     const task = new TestTask({ operation: untilAborted });
-    queue.submit(task);
+    enqueue(queue, task);
     queue.retry(task.id);
     queue.retry(task.id);
     browserWindow.dispatchEvent(new Event('focus'));
@@ -368,14 +595,14 @@ test('repeated calls share an attempt and cannot revive a cancelled task', async
 test('account changes synchronously hide and cancel previous tasks', async (t) => {
     const { queue, TestTask, setAuth } = await setup(t);
     const task = new TestTask({ operation: untilAborted });
-    queue.submit(task);
+    enqueue(queue, task);
     await flush();
     setAuth('other', true);
     assert.equal(queue.pendingCount, 0);
     assert.equal(task.signal.aborted, true);
-    assert.throws(() => queue.submit(new TestTask()), /another account/);
+    assert.throws(() => enqueue(queue, new TestTask()), /another account/);
     const next = new TestTask({ ownerId: 'other' });
-    queue.submit(next);
+    enqueue(queue, next);
     await flush();
     assert.equal(task.state.status, 'cancelled');
     assert.equal(next.state.status, 'completed');
@@ -388,14 +615,14 @@ test('focus detects expired auth and renewed auth resumes queued work', async (t
             if (current.calls === 1) await untilAborted(signal);
         },
     });
-    queue.submit(task);
+    enqueue(queue, task);
     await flush();
     setAuth('owner', false, false);
     browserWindow.dispatchEvent(new Event('focus'));
     await flush();
     assert.equal(queue.authenticationRequired, true);
     assert.equal(task.state.status, 'queued');
-    assert.throws(() => queue.submit(new TestTask()), /Sign in/);
+    assert.throws(() => enqueue(queue, new TestTask()), /Sign in/);
     setAuth('owner', true);
     await flush();
     assert.equal(task.calls, 2);
@@ -405,10 +632,10 @@ test('focus detects expired auth and renewed auth resumes queued work', async (t
 test('disposal cancels tasks, removes listeners, and prevents pending execution', async (t) => {
     const { queue, TestTask, connect, authListeners } = await setup(t);
     const task = new TestTask({ operation: untilAborted });
-    queue.submit(task);
+    enqueue(queue, task);
     await flush();
     const pending = new TestTask();
-    queue.submit(pending);
+    enqueue(queue, pending);
     queue.$dispose();
     assert.equal(authListeners.size, 0);
     assert.equal(queue.pendingCount, 0);
@@ -430,7 +657,7 @@ test('interruption hook errors do not reject cancellation or revive the task', a
     };
     const warnings = [];
     t.mock.method(console, 'warn', (...args) => warnings.push(args));
-    queue.submit(task);
+    enqueue(queue, task);
     await flush();
     await queue.cancel(task.id);
     assert.equal(task.state.status, 'cancelled');

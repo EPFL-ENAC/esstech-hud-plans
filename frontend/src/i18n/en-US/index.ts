@@ -342,6 +342,7 @@ export default {
         new: 'New reconstruction',
         named: 'Reconstruction {id}',
         submitted: 'Reconstruction submitted.',
+        queued: 'Reconstruction queued. It will be submitted when the connection is available.',
         refreshFailed: 'Could not refresh reconstructions.',
         loadFailed: 'Could not load reconstructions.',
         loading: 'Loading reconstructions',

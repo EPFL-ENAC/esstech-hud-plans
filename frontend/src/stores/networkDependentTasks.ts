@@ -4,9 +4,15 @@ import { useAuthentication } from 'src/composables/useAuthentication';
 import { useOnlineConnection } from 'src/composables/useOnlineConnection';
 import type { NetworkDependentTask } from 'src/lib/networkDependentTasks';
 
+export type TaskSubmission<TResult> =
+    | { status: 'completed'; taskId: string; result: TResult }
+    | { status: 'queued'; taskId: string };
+
 export const useNetworkDependentTasks = defineStore('networkDependentTasks', () => {
-    const entries = shallowReactive(new Map<string, NetworkDependentTask>());
-    const tasks = computed<readonly NetworkDependentTask[]>(() => [...entries.values()]);
+    const entries = shallowReactive(new Map<string, NetworkDependentTask<unknown>>());
+    const tasks = computed<readonly NetworkDependentTask<unknown>[]>(() => [...entries.values()]);
+    // Reconnect/manual retries wait until submit has captured the initial outcome.
+    const submissions = new Map<string, Promise<unknown>>();
     const pendingCount = computed(() => entries.size);
     const auth = useAuthentication({
         onChange(current, previous) {
@@ -28,20 +34,62 @@ export const useNetworkDependentTasks = defineStore('networkDependentTasks', () 
         },
     });
 
-    async function execute(task: NetworkDependentTask): Promise<void> {
+    async function runAttempt<TResult>(
+        task: NetworkDependentTask<TResult>,
+    ): Promise<TResult | undefined> {
         await task.waitUntilIdle();
         if (!auth.refreshAuthentication() || !isOnline.value || entries.get(task.id) !== task) {
             return;
         }
 
-        await task.retryOrResume();
+        const result = await task.retryOrResume();
         await task.waitUntilIdle();
         if (task.state.status === 'completed' && entries.get(task.id) === task) {
             entries.delete(task.id);
         }
+        return result;
     }
 
-    function submit(task: NetworkDependentTask): string {
+    async function execute(
+        task: NetworkDependentTask<unknown>,
+        retry: 'none' | 'waiting' | 'all' = 'none',
+    ): Promise<void> {
+        // A rejected initial attempt is removed by submit; do not replay it.
+        await submissions.get(task.id)?.catch(() => undefined);
+        await task.waitUntilIdle();
+        if (entries.get(task.id) !== task) return;
+        if (retry === 'all' || (retry === 'waiting' && task.state.status === 'waiting')) {
+            task.requestRetry();
+        }
+        await runAttempt(task);
+    }
+
+    async function submitNow<TResult>(
+        task: NetworkDependentTask<TResult>,
+    ): Promise<TaskSubmission<TResult>> {
+        const result = await runAttempt(task);
+        if (
+            auth.ownerId.value !== task.ownerId ||
+            task.state.status === 'cancelled' ||
+            task.state.status === 'cancelling' ||
+            (task.state.status !== 'completed' && entries.get(task.id) !== task)
+        ) {
+            throw new DOMException('Task submission was cancelled', 'AbortError');
+        }
+        if (task.state.status === 'completed') {
+            // The completed lifecycle state guarantees a result, including void.
+            return { status: 'completed', taskId: task.id, result: result as TResult };
+        }
+        if (task.state.status === 'blocked' || task.state.status === 'failed') {
+            entries.delete(task.id);
+            throw task.failure;
+        }
+        return { status: 'queued', taskId: task.id };
+    }
+
+    function submit<TResult>(
+        task: NetworkDependentTask<TResult>,
+    ): Promise<TaskSubmission<TResult>> {
         if (!auth.refreshAuthentication()) throw new Error('Sign in before submitting tasks');
         if (task.ownerId !== auth.ownerId.value) throw new Error('Task belongs to another account');
         if (entries.has(task.id)) throw new Error('Task is already enqueued');
@@ -50,11 +98,14 @@ export const useNetworkDependentTasks = defineStore('networkDependentTasks', () 
         }
 
         entries.set(task.id, markRaw(task));
-        void execute(task);
-        return task.id;
+        if (!isOnline.value) return Promise.resolve({ status: 'queued', taskId: task.id });
+
+        const submission = submitNow(task).finally(() => submissions.delete(task.id));
+        submissions.set(task.id, submission);
+        return submission;
     }
 
-    function get(id: string): NetworkDependentTask | undefined {
+    function get(id: string): NetworkDependentTask<unknown> | undefined {
         return entries.get(id);
     }
 
@@ -62,8 +113,7 @@ export const useNetworkDependentTasks = defineStore('networkDependentTasks', () 
         if (!auth.refreshAuthentication() || !isOnline.value) return;
         const task = entries.get(id);
         if (!task) return;
-        task.requestRetry();
-        void execute(task);
+        void execute(task, 'all');
     }
 
     async function cancel(id: string): Promise<void> {
@@ -92,9 +142,12 @@ export const useNetworkDependentTasks = defineStore('networkDependentTasks', () 
     function resumeTasks(retryWaiting = false): void {
         if (!auth.refreshAuthentication() || !isOnline.value) return;
         for (const task of entries.values()) {
-            if (retryWaiting && task.state.status === 'waiting') task.requestRetry();
-            if (task.state.status === 'queued' || task.state.status === 'pausing') {
-                void execute(task);
+            if (
+                task.state.status === 'queued' ||
+                task.state.status === 'pausing' ||
+                (retryWaiting && task.state.status === 'waiting')
+            ) {
+                void execute(task, retryWaiting ? 'waiting' : 'none');
             }
         }
     }

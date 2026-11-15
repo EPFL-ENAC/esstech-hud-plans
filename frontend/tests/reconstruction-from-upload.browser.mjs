@@ -135,7 +135,9 @@ try {
                         assert.ok(path.endsWith('/from-upload'));
                         const upload = rows.find((row) => row.id === body.upload_id);
                         assert.ok(upload && upload.status !== 'failed');
-                        submissions.push({ path, body });
+                        const key = request.headers()['idempotency-key'];
+                        assert.ok(key, 'Submissions must carry their frontend task ID');
+                        submissions.push({ path, body, key });
                         destination = building(
                             body.building ? 'created' : 'existing',
                             body.building?.name,
@@ -443,7 +445,13 @@ try {
                 await goto('/reconstructions/from-upload');
                 await items.first().waitFor();
                 listMode = 'error';
+                const refreshFailure = page.waitForResponse(
+                    (response) =>
+                        new URL(response.url()).pathname.endsWith('/uploads') &&
+                        response.status() === 503,
+                );
                 await page.getByRole('button', { name: text.uploads.refresh, exact: true }).click();
+                await refreshFailure;
                 await page.getByText(text.uploads.refreshFailed, { exact: true }).waitFor();
                 assert.equal(await items.count(), 20);
                 listMode = 'empty';
@@ -511,6 +519,71 @@ try {
                     const beforeDisposal = details.length;
                     await page.clock.fastForward(10_000);
                     assert.equal(details.length, beforeDisposal);
+                }
+                // Queued submissions finish the form, remain locked if navigation
+                // fails, and complete later without taking over navigation.
+                for (const buildingId of ['existing', null]) {
+                    await goto(
+                        `/reconstructions/from-upload/${rows[1].id}${
+                            buildingId === null ? '' : '?buildingId=existing'
+                        }`,
+                    );
+                    await ready();
+                    await page.evaluate(async () => {
+                        const app = document.querySelector('#q-app').__vue_app__;
+                        const { useNetworkDependentTasks } =
+                            await import('/src/stores/networkDependentTasks.ts');
+                        window.formTaskQueue = app.runWithContext(useNetworkDependentTasks);
+                        const router = app.config.globalProperties.$router;
+                        window.queuedNavigation = null;
+                        window.removeQueuedGuard = router.beforeEach((to) => {
+                            if (to.path === '/library' || to.path.startsWith('/building/')) {
+                                window.queuedNavigation = to.path;
+                                return false;
+                            }
+                        });
+                    });
+                    await context.setOffline(true);
+                    await page.waitForFunction(() => !window.formTaskQueue.isOnline);
+                    const beforeQueued = submissions.length;
+                    await start().click();
+                    await page.getByText(text.reconstructions.queued, { exact: true }).waitFor();
+                    const target = buildingId === null ? '/library' : '/building/existing';
+                    await page.waitForFunction(
+                        (target) => window.queuedNavigation === target,
+                        target,
+                    );
+                    assert.equal(await start().isDisabled(), true);
+                    await start().locator('.q-spinner').waitFor({ state: 'detached' });
+                    assert.equal(submissions.length, beforeQueued);
+                    const taskId = await page.evaluate(() => window.formTaskQueue.tasks[0].id);
+                    await page.evaluate(async (target) => {
+                        window.removeQueuedGuard();
+                        await document
+                            .querySelector('#q-app')
+                            .__vue_app__.config.globalProperties.$router.push(target);
+                    }, target);
+                    await page.waitForURL(`**/#${target}`);
+                    await page.evaluate(() => {
+                        const $q =
+                            document.querySelector('#q-app').__vue_app__.config.globalProperties.$q;
+                        const notify = $q.notify;
+                        window.backgroundNotifications = [];
+                        window.restoreNotifications = () => {
+                            $q.notify = notify;
+                        };
+                        $q.notify = (...args) => {
+                            window.backgroundNotifications.push(args);
+                            return notify(...args);
+                        };
+                    });
+                    await context.setOffline(false);
+                    await page.waitForFunction(() => window.formTaskQueue.pendingCount === 0);
+                    assert.equal(submissions.length, beforeQueued + 1);
+                    assert.equal(submissions.at(-1).key, taskId);
+                    assert.equal(new URL(page.url()).hash, `#${target}`);
+                    assert.deepEqual(await page.evaluate(() => window.backgroundNotifications), []);
+                    await page.evaluate(() => window.restoreNotifications());
                 }
                 assert.deepEqual(errors, []);
                 console.log(
