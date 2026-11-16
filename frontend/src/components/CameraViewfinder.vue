@@ -108,8 +108,8 @@ import { useI18n } from 'vue-i18n';
 const { t } = useI18n();
 
 const CAPTURE_FPS = 4;
-const CAPTURE_MAX_SIDE = 1280;
-const CAPTURE_VIDEO_BITS_PER_SECOND = 1_000_000;
+const CAPTURE_MAX_SIDE = 1920;
+const CAPTURE_VIDEO_BITS_PER_SECOND = 8_000_000;
 const CAPTURE_MIME_TYPES = [
     'video/mp4;codecs=avc1.42E01E',
     'video/mp4;codecs=avc1',
@@ -492,8 +492,8 @@ async function startCamera(): Promise<void> {
         const constraints: MediaStreamConstraints = {
             audio: false,
             video: {
-                width: { ideal: 1280 },
-                height: { ideal: 720 },
+                width: { ideal: 1920 },
+                height: { ideal: 1080 },
                 ...(!CANVAS_CAPTURE_SUPPORTED ? { frameRate: { ideal: CAPTURE_FPS } } : {}),
                 ...(selectedCameraId.value
                     ? { deviceId: { exact: selectedCameraId.value } }
