@@ -1,4 +1,4 @@
-import { reactive, readonly } from 'vue';
+import { reactive, readonly, shallowRef } from 'vue';
 
 export type TaskStatus =
     | 'queued'
@@ -28,15 +28,47 @@ export type FailureAction = 'retry' | 'blocked' | 'failed';
 export type InterruptionReason = 'pause' | 'cancel';
 
 export interface TaskOptions<TResult = void> {
+    id?: string;
+    createdAt?: number;
     ownerId: string;
     label: string;
     /** Runs once after success without delaying task completion. */
     onCompleted?(this: void, result: TResult): void | Promise<void>;
 }
 
+export interface TaskSnapshot<TData = unknown> {
+    type: string;
+    id: string;
+    createdAt: number;
+    ownerId: string;
+    label: string;
+    state: TaskState;
+    data: TData;
+}
+
+export interface SerializedTask<TData = unknown> {
+    snapshot: TaskSnapshot<TData>;
+    files?: Record<string, File>;
+}
+
+export interface TaskFiles {
+    get(name: string): Promise<File>;
+}
+
+export class TaskPersistenceError extends Error {
+    constructor(cause: unknown) {
+        super('Could not save pending tasks on this device.', { cause });
+    }
+}
+
+export interface TaskPersistence {
+    save(snapshot: TaskSnapshot): Promise<void>;
+    delete(): Promise<void>;
+}
+
 export abstract class NetworkDependentTask<TResult = void> {
-    readonly id = crypto.randomUUID();
-    readonly createdAt = Date.now();
+    readonly id: string;
+    readonly createdAt: number;
     readonly ownerId: string;
     readonly label: string;
 
@@ -56,17 +88,146 @@ export abstract class NetworkDependentTask<TResult = void> {
     private interruption: Promise<void> | null = null;
     private interruptionReason: InterruptionReason | null = null;
     private readonly onCompleted: TaskOptions<TResult>['onCompleted'];
+    private persistence: TaskPersistence | null = null;
+    private readonly persistenceFailure = shallowRef<TaskPersistenceError | null>(null);
+    private pendingSave: Promise<void> = Promise.resolve();
+    private progressTimer: ReturnType<typeof setTimeout> | null = null;
+    private suspended = false;
 
-    constructor({ ownerId, label, onCompleted }: TaskOptions<TResult>) {
+    constructor({ id, createdAt, ownerId, label, onCompleted }: TaskOptions<TResult>) {
+        this.id = id ?? crypto.randomUUID();
+        this.createdAt = createdAt ?? Date.now();
         this.ownerId = ownerId;
         this.label = label;
         this.onCompleted = onCompleted;
     }
 
+    abstract serialize(): SerializedTask;
+
+    bindPersistence(persistence: TaskPersistence): void {
+        this.persistence = persistence;
+    }
+
+    get storageFailure(): TaskPersistenceError | null {
+        return this.persistenceFailure.value;
+    }
+
+    /** Allow a retained, suspended instance to rejoin its owner's queue. */
+    activate(): void {
+        this.suspended = false;
+    }
+
+    protected checkpoint(): Promise<void> {
+        this.stopProgressCheckpoint();
+        const snapshot = this.serialize().snapshot;
+        const saving = (this.persistence?.save(snapshot) ?? Promise.resolve()).then(
+            () => {
+                this.persistenceFailure.value = null;
+            },
+            (error: unknown) => {
+                throw this.recordPersistenceFailure(error);
+            },
+        );
+        this.pendingSave = saving;
+        return saving;
+    }
+
+    protected setProgress(progress: TaskProgress): void {
+        if (
+            this.suspended ||
+            ['completed', 'cancelled', 'cancelling', 'pausing'].includes(this.mutableState.status)
+        )
+            return;
+        this.mutableState.progress = progress;
+        if (!this.persistence || this.storageFailure || this.progressTimer !== null) return;
+        this.progressTimer = setTimeout(() => {
+            this.progressTimer = null;
+            void this.checkpoint().catch(() => undefined);
+        }, 1000);
+    }
+
+    private stopProgressCheckpoint(): void {
+        if (this.progressTimer !== null) clearTimeout(this.progressTimer);
+        this.progressTimer = null;
+    }
+
+    private recordPersistenceFailure(error: unknown): TaskPersistenceError {
+        const failure =
+            error instanceof TaskPersistenceError ? error : new TaskPersistenceError(error);
+        this.persistenceFailure.value = failure;
+        this.stopProgressCheckpoint();
+        if (!['completed', 'cancelled', 'cancelling'].includes(this.mutableState.status)) {
+            this.attemptFailure = failure;
+            this.mutableState.error = failure.message;
+            this.mutableState.status = 'blocked';
+            this.controller?.abort();
+        }
+        return failure;
+    }
+
+    private async persistTerminalState(): Promise<void> {
+        await this.checkpoint();
+        try {
+            await this.persistence?.delete();
+        } catch (error) {
+            throw this.recordPersistenceFailure(error);
+        }
+    }
+
+    /** Retry storage cleanup without repeating accepted or cancelled work. */
+    async retryPersistence(): Promise<void> {
+        try {
+            if (this.mutableState.status === 'cancelling') {
+                await this.cancel();
+            } else if (['completed', 'cancelled'].includes(this.mutableState.status)) {
+                await this.persistTerminalState();
+            } else {
+                await this.checkpoint();
+            }
+        } catch {
+            // The storage error remains visible and can be retried.
+        }
+    }
+
+    /** Stop local execution while keeping its durable checkpoint. */
+    async suspend(): Promise<void> {
+        this.suspended = true;
+        this.stopProgressCheckpoint();
+        if (['running', 'pausing'].includes(this.mutableState.status)) await this.pause();
+        await this.waitUntilIdle();
+        if (['completed', 'cancelled'].includes(this.mutableState.status)) return;
+        await this.checkpoint();
+    }
+
+    dispose(): Promise<void> {
+        return this.suspend();
+    }
+
+    protected serializeBase(): Omit<TaskSnapshot, 'type' | 'data'> {
+        return {
+            id: this.id,
+            createdAt: this.createdAt,
+            ownerId: this.ownerId,
+            label: this.label,
+            state: {
+                ...this.mutableState,
+                progress: this.mutableState.progress ? { ...this.mutableState.progress } : null,
+            },
+        };
+    }
+
+    protected restoreState(state: TaskState): void {
+        Object.assign(this.mutableState, {
+            ...state,
+            status: ['running', 'pausing'].includes(state.status) ? 'queued' : state.status,
+            progress: state.progress ? { ...state.progress } : null,
+        });
+    }
+
     /** Run one attempt; concurrent calls share this task's active attempt. */
     retryOrResume(): Promise<TResult | undefined> {
         if (this.activeAttempt) return this.activeAttempt;
-        if (this.interruption || this.mutableState.status !== 'queued') {
+        if (this.suspended || this.interruption || this.mutableState.status !== 'queued') {
             return Promise.resolve(undefined);
         }
 
@@ -78,20 +239,32 @@ export abstract class NetworkDependentTask<TResult = void> {
         this.attemptFailure = null;
 
         const attempt = Promise.resolve()
-            .then(() => {
+            .then(async () => {
+                controller.signal.throwIfAborted();
+                await this.checkpoint();
                 controller.signal.throwIfAborted();
                 return this.resume(controller.signal);
             })
             .then(
-                (result) => {
-                    if (!controller.signal.aborted) {
-                        this.mutableState.status = 'completed';
-                        void this.invokeCompletionHook(result);
-                        return result;
+                async (result) => {
+                    if (controller.signal.aborted) return undefined;
+                    this.mutableState.status = 'completed';
+                    try {
+                        await this.persistTerminalState();
+                    } catch {
+                        // Backend acceptance remains successful even if cleanup fails.
                     }
+                    void this.invokeCompletionHook(result);
+                    return result;
                 },
-                (error: unknown): undefined => {
-                    if (!controller.signal.aborted) this.recordFailure(error);
+                async (error: unknown): Promise<undefined> => {
+                    if (controller.signal.aborted) return undefined;
+                    this.recordFailure(error);
+                    try {
+                        await this.checkpoint();
+                    } catch {
+                        // checkpoint() records and exposes storage failures itself.
+                    }
                     return undefined;
                 },
             )
@@ -133,6 +306,7 @@ export abstract class NetworkDependentTask<TResult = void> {
     async waitUntilIdle(): Promise<void> {
         await this.activeAttempt;
         await this.interruption;
+        await this.pendingSave.catch(() => undefined);
     }
 
     /**
@@ -166,7 +340,7 @@ export abstract class NetworkDependentTask<TResult = void> {
     private recordFailure(error: unknown): void {
         let action: FailureAction = 'failed';
         try {
-            action = this.failureAction(error);
+            action = error instanceof TaskPersistenceError ? 'blocked' : this.failureAction(error);
         } catch (classificationError) {
             console.warn('Could not classify task failure', classificationError);
         }
@@ -185,14 +359,19 @@ export abstract class NetworkDependentTask<TResult = void> {
             if (reason === 'cancel') {
                 this.interruptionReason = 'cancel';
                 this.mutableState.status = 'cancelling';
+                void this.checkpoint().catch(() => undefined);
             }
             return this.interruption;
         }
 
         this.interruptionReason = reason;
         this.mutableState.status = reason === 'cancel' ? 'cancelling' : 'pausing';
+        this.stopProgressCheckpoint();
         const attempt = this.activeAttempt;
         this.controller?.abort();
+        // Queue the interruption marker before waiting for transport cleanup.
+        const marker = this.checkpoint();
+        void marker.catch(() => undefined);
 
         const interruption = Promise.resolve()
             .then(async () => {
@@ -201,10 +380,23 @@ export abstract class NetworkDependentTask<TResult = void> {
                 if (reason === 'pause' && this.interruptionReason === 'cancel') {
                     await this.invokeInterruptionHook('cancel');
                 }
+                await marker;
+                await this.pendingSave;
+                if (this.interruptionReason === 'cancel') {
+                    this.mutableState.status = 'cancelled';
+                    await this.persistTerminalState();
+                } else {
+                    this.mutableState.status = 'queued';
+                    await this.checkpoint();
+                }
+            })
+            .catch((error: unknown) => {
+                this.recordPersistenceFailure(error);
+                if (this.interruptionReason === 'cancel') {
+                    this.mutableState.status = 'cancelling';
+                }
             })
             .finally(() => {
-                this.mutableState.status =
-                    this.interruptionReason === 'cancel' ? 'cancelled' : 'queued';
                 this.interruptionReason = null;
                 this.interruption = null;
             });

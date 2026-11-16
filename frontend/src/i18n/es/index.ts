@@ -4,8 +4,9 @@ export default {
     tasks: {
         title: 'Tareas pendientes',
         empty: 'No hay tareas pendientes.',
-        memoryOnly:
-            'Mantén esta aplicación abierta. Cerrarla o recargarla descartará las tareas pendientes.',
+        persisted:
+            'Las tareas pendientes se guardan en este dispositivo y se reanudan al volver a abrir la aplicación.',
+        restoring: 'Restaurando tareas pendientes…',
         offline: 'Sin conexión. Las tareas continuarán cuando vuelvas a conectarte.',
         authenticationRequired: 'Inicia sesión para continuar las tareas pendientes.',
         waitingHelp:

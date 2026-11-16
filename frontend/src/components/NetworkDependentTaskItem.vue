@@ -85,7 +85,11 @@ const { t } = useI18n();
 const status = computed(() => props.task.state.status);
 const progress = computed(() => props.task.state.progress);
 const canRetry = computed(
-    () => status.value === 'waiting' || status.value === 'blocked' || status.value === 'failed',
+    () =>
+        Boolean(props.task.storageFailure) ||
+        status.value === 'waiting' ||
+        status.value === 'blocked' ||
+        status.value === 'failed',
 );
 const canCancel = computed(() => status.value !== 'completed' && status.value !== 'cancelled');
 const interrupting = computed(() => status.value === 'pausing' || status.value === 'cancelling');

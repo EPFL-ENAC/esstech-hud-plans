@@ -17,13 +17,21 @@ export interface TaskTusUploadOptions {
     ownerId: string;
     uploadUrl: string | null;
     signal: AbortSignal;
+    onCheckpoint: (uploadUrl: string) => Promise<void>;
     onProgress: (progress: FetchProgress) => void;
     onUploadAvailable: (upload: TusUploadResult) => void;
 }
 
 export async function uploadVideoTus(
     file: File,
-    { ownerId, uploadUrl, signal, onProgress, onUploadAvailable }: TaskTusUploadOptions,
+    {
+        ownerId,
+        uploadUrl,
+        signal,
+        onCheckpoint,
+        onProgress,
+        onUploadAvailable,
+    }: TaskTusUploadOptions,
 ): Promise<TusUploadResult> {
     signal.throwIfAborted();
 
@@ -114,6 +122,28 @@ export async function uploadVideoTus(
                 const token = getAccessToken();
                 if (token) {
                     request.setHeader('Authorization', `Bearer ${token}`);
+                }
+            },
+            onAfterResponse: async (request, response) => {
+                if (!isActive()) return;
+                if (
+                    request.getMethod() === 'POST' &&
+                    response.getStatus() >= 200 &&
+                    response.getStatus() < 300
+                ) {
+                    try {
+                        const location = response.getHeader('Location');
+                        if (!location) throw new Error('Upload has no location ID');
+                        const url = new URL(location, request.getURL());
+                        if (!url.pathname.split('/').pop())
+                            throw new Error('Upload has no location ID');
+                        await onCheckpoint(url.toString());
+                    } catch (error) {
+                        // Settle with the original persistence error, not Tus's wrapper.
+                        await fail(error);
+                        throw error;
+                    }
+                    if (!isActive()) throw new DOMException('Aborted', 'AbortError');
                 }
             },
             onUploadUrlAvailable: () => {

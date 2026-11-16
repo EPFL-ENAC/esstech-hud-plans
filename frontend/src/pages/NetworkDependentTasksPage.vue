@@ -6,7 +6,12 @@
     >
         <page-header :title="t('tasks.title')" />
 
-        <p class="text-grey-8">{{ t('tasks.memoryOnly') }}</p>
+        <p class="text-grey-8">{{ t('tasks.persisted') }}</p>
+
+        <q-banner v-if="queue.storageError" class="bg-red-1 text-negative q-mb-md" role="alert">
+            {{ queue.storageError }}
+        </q-banner>
+        <p v-if="queue.isRestoring" role="status">{{ t('tasks.restoring') }}</p>
 
         <q-banner v-if="!queue.isOnline" class="bg-warning text-dark q-mb-md" role="status">
             <template #avatar>
@@ -24,14 +29,18 @@
         </q-banner>
 
         <p v-if="hasWaitingTasks" class="text-grey-8">{{ t('tasks.waitingHelp') }}</p>
-        <p v-if="queue.tasks.length === 0" role="status">{{ t('tasks.empty') }}</p>
+        <p v-if="!queue.isRestoring && queue.tasks.length === 0" role="status">
+            {{ t('tasks.empty') }}
+        </p>
 
         <q-list v-else bordered separator class="rounded-borders">
             <network-dependent-task-item
                 v-for="task in queue.tasks"
                 :key="task.id"
                 :task="task"
-                :retry-disabled="!queue.isOnline || queue.authenticationRequired"
+                :retry-disabled="
+                    queue.isRestoring || !queue.isOnline || queue.authenticationRequired
+                "
                 @retry="queue.retry"
                 @cancel="queue.cancel"
             />

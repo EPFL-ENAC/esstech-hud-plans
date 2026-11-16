@@ -128,9 +128,13 @@ failure still returns `503` with retained IDs to the original caller, and a repl
 then returns `204`. Failed acceptance rolls back its resources and allows retrying
 the same key. The frontend uses its task ID as the key. Submission returns either
 the immediate result or queued success when offline or after a retryable failure.
-Queued work stays in memory and retries on reconnect or manually from Pending
-tasks; closing or reloading the app discards it. Retained-ID scheduling failures
-complete submission with a warning.
+Pending tasks are committed to IndexedDB before submission succeeds. They are
+scoped to the signed-in account and resume when the app reopens. Video files are
+stored once, separately from metadata checkpoints; upload URLs are saved before
+transferring video bytes. Sign-out pauses tasks without deleting them. Task
+callbacks are session-only and are not restored. Clearing local data removes all
+saved tasks and files. V1 assumes one app window; tasks do not run while it is
+closed. Retained-ID scheduling failures complete submission with a warning.
 
 Deleting a reconstruction removes its generated artifacts and preserves the
 source video. Deleting an upload removes its metadata while retaining the

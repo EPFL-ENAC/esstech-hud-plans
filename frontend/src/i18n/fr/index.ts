@@ -4,8 +4,9 @@ export default {
     tasks: {
         title: 'Tâches en attente',
         empty: 'Aucune tâche en attente.',
-        memoryOnly:
-            'Gardez cette application ouverte. La fermer ou la recharger supprimera les tâches en attente.',
+        persisted:
+            'Les tâches en attente sont enregistrées sur cet appareil et reprennent à la réouverture de l’application.',
+        restoring: 'Restauration des tâches en attente…',
         offline: 'Vous êtes hors ligne. Les tâches reprendront à la reconnexion.',
         authenticationRequired: 'Connectez-vous pour poursuivre les tâches en attente.',
         waitingHelp:

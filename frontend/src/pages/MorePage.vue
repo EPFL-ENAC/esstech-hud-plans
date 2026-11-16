@@ -191,6 +191,7 @@ function handleDeleteAllData() {
 function confirmDeleteAllData() {
     deleting.value = true;
     deleteAllData()
+        .then(() => networkTasks.clearSaved())
         .then(clearLocalData)
         .then(() => {
             $q.dialog({

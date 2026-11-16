@@ -2,7 +2,8 @@ export default {
     tasks: {
         title: 'Pending tasks',
         empty: 'No pending tasks.',
-        memoryOnly: 'Keep this app open. Closing or reloading it will discard pending tasks.',
+        persisted: 'Pending tasks are saved on this device and resume when you reopen the app.',
+        restoring: 'Restoring pending tasks…',
         offline: 'You are offline. Pending tasks will continue when you reconnect.',
         authenticationRequired: 'Sign in before continuing pending tasks.',
         waitingHelp: 'Interrupted tasks retry when you reconnect. You can also retry manually.',

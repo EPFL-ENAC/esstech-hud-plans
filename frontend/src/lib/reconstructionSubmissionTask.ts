@@ -14,6 +14,8 @@ import {
     NetworkDependentTask,
     type FailureAction,
     type TaskOptions,
+    type SerializedTask,
+    type TaskSnapshot,
 } from 'src/lib/networkDependentTasks';
 
 export type ReconstructionSubmission = BuildingSelection & {
@@ -34,7 +36,12 @@ export interface ReconstructionSubmissionResult {
 
 type SubmissionResponse = Reconstruction | BuildingFromReconstruction;
 
+export interface ReconstructionSubmissionData {
+    submission: ReconstructionSubmission;
+}
+
 export class ReconstructionSubmissionTask extends NetworkDependentTask<ReconstructionSubmissionResult> {
+    private readonly submission: ReconstructionSubmission;
     private readonly buildingId: string | null;
     private readonly path: string;
     private readonly body: string;
@@ -45,6 +52,9 @@ export class ReconstructionSubmissionTask extends NetworkDependentTask<Reconstru
 
     constructor({ submission, ...options }: ReconstructionSubmissionTaskOptions) {
         super(options);
+
+        this.submission = JSON.parse(JSON.stringify(submission)) as ReconstructionSubmission;
+        submission = this.submission;
 
         this.buildingId = submission.buildingId;
 
@@ -63,6 +73,34 @@ export class ReconstructionSubmissionTask extends NetworkDependentTask<Reconstru
                 settings: submission.settings,
             });
         }
+    }
+
+    serialize(): SerializedTask<ReconstructionSubmissionData> {
+        return {
+            snapshot: {
+                ...this.serializeBase(),
+                type: 'reconstruction-submission',
+                data: {
+                    submission: JSON.parse(
+                        JSON.stringify(this.submission),
+                    ) as ReconstructionSubmission,
+                },
+            },
+        };
+    }
+
+    static deserialize(
+        snapshot: TaskSnapshot<ReconstructionSubmissionData>,
+    ): ReconstructionSubmissionTask {
+        const task = new ReconstructionSubmissionTask({
+            id: snapshot.id,
+            createdAt: snapshot.createdAt,
+            ownerId: snapshot.ownerId,
+            label: snapshot.label,
+            submission: snapshot.data.submission,
+        });
+        task.restoreState(snapshot.state);
+        return task;
     }
 
     protected override async resume(signal: AbortSignal): Promise<ReconstructionSubmissionResult> {

@@ -5,6 +5,9 @@ import {
     NetworkDependentTask,
     type FailureAction,
     type TaskOptions,
+    type SerializedTask,
+    type TaskSnapshot,
+    type TaskFiles,
 } from 'src/lib/networkDependentTasks';
 import { uploadVideoTus } from 'src/lib/utils/taskTusUpload';
 
@@ -21,6 +24,11 @@ export interface VideoUploadTaskOptions extends TaskOptions<VideoUploadResult> {
 export interface VideoUploadState {
     uploadId: string | null;
     resumed: boolean;
+}
+
+export interface VideoUploadData {
+    uploadUrl: string | null;
+    uploadState: VideoUploadState;
 }
 
 export class VideoUploadTask extends NetworkDependentTask<VideoUploadResult> {
@@ -46,10 +54,42 @@ export class VideoUploadTask extends NetworkDependentTask<VideoUploadResult> {
 
         this.file = file;
         this.onUploadAvailable = onUploadAvailable;
-        this.mutableState.progress = {
+        this.setProgress({
             completed: 0,
             total: file.size,
+        });
+    }
+
+    serialize(): SerializedTask<VideoUploadData> {
+        return {
+            snapshot: {
+                ...this.serializeBase(),
+                type: 'video-upload',
+                data: {
+                    uploadUrl: this.uploadUrl,
+                    uploadState: { ...this.mutableUploadState },
+                },
+            },
+            files: { video: this.file },
         };
+    }
+
+    static async deserialize(
+        snapshot: TaskSnapshot<VideoUploadData>,
+        files: TaskFiles,
+    ): Promise<VideoUploadTask> {
+        const data = snapshot.data;
+        const task = new VideoUploadTask({
+            id: snapshot.id,
+            createdAt: snapshot.createdAt,
+            ownerId: snapshot.ownerId,
+            label: snapshot.label,
+            file: await files.get('video'),
+        });
+        task.uploadUrl = data.uploadUrl;
+        Object.assign(task.mutableUploadState, data.uploadState);
+        task.restoreState(snapshot.state);
+        return task;
     }
 
     protected override async resume(signal: AbortSignal): Promise<VideoUploadResult> {
@@ -61,13 +101,17 @@ export class VideoUploadTask extends NetworkDependentTask<VideoUploadResult> {
             ownerId: this.ownerId,
             uploadUrl: this.uploadUrl,
             signal,
+            onCheckpoint: async (uploadUrl) => {
+                this.uploadUrl = uploadUrl;
+                await this.checkpoint();
+            },
             onProgress: ({ loaded, total }) => {
                 if (signal.aborted) return;
 
-                this.mutableState.progress = {
+                this.setProgress({
                     completed: loaded,
                     total: total > 0 ? total : this.file.size,
-                };
+                });
             },
             onUploadAvailable: (upload) => {
                 if (signal.aborted) return;
@@ -88,10 +132,10 @@ export class VideoUploadTask extends NetworkDependentTask<VideoUploadResult> {
 
         this.mutableUploadState.uploadId = result.uploadId;
         this.mutableUploadState.resumed ||= result.resumed;
-        this.mutableState.progress = {
+        this.setProgress({
             completed: this.file.size,
             total: this.file.size,
-        };
+        });
 
         return {
             uploadId: result.uploadId,

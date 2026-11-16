@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { createPinia, disposePinia, setActivePinia } from 'pinia';
 import { effectScope, isProxy, isReadonly, watchEffect } from 'vue';
 import { deferred, importTypeScript } from './helpers/typescript.mjs';
+import { MemoryTasksDatabase } from './helpers/tasksDatabase.mjs';
 
 function enqueue(queue, task) {
     const submission = queue.submit(task);
@@ -57,9 +58,11 @@ async function setup(t, { online = true } = {}) {
         }
     });
 
-    const { NetworkDependentTask } = await importTypeScript(t, 'src/lib/networkDependentTasks.ts', {
+    const taskModule = await importTypeScript(t, 'src/lib/networkDependentTasks.ts', {
         vue: import.meta.resolve('vue'),
     });
+    const { NetworkDependentTask } = taskModule;
+    const database = new MemoryTasksDatabase();
     const connection = await importTypeScript(t, 'src/composables/useOnlineConnection.ts', {
         vue: import.meta.resolve('vue'),
     });
@@ -82,23 +85,51 @@ async function setup(t, { online = true } = {}) {
             pinia: import.meta.resolve('pinia'),
             'src/composables/useOnlineConnection': connection,
             'src/composables/useAuthentication': authentication,
+            'src/lib/networkDependentTasks': taskModule,
+            'src/lib/tasksDatabase': {
+                TasksDatabase: class {
+                    constructor() {
+                        return database;
+                    }
+                },
+            },
+            'src/lib/taskRegistry': {
+                async deserializeTask(snapshot) {
+                    const task = new TestTask({
+                        id: snapshot.id,
+                        createdAt: snapshot.createdAt,
+                        ownerId: snapshot.ownerId,
+                        action: snapshot.data.action,
+                    });
+                    task.restoreState(snapshot.state);
+                    return task;
+                },
+            },
         },
     );
 
     class TestTask extends NetworkDependentTask {
         constructor({
+            id,
+            createdAt,
             ownerId = 'owner',
             operation = () => Promise.resolve(),
             action = 'failed',
             onCompleted,
         } = {}) {
-            super({ ownerId, label: 'Test task', onCompleted });
+            super({ id, createdAt, ownerId, label: 'Test task', onCompleted });
             this.operation = operation;
             this.action = action;
             this.calls = 0;
             this.interruptions = [];
             this.cleanup = null;
             this.signal = null;
+        }
+
+        serialize() {
+            return {
+                snapshot: { ...this.serializeBase(), type: 'test', data: { action: this.action } },
+            };
         }
 
         async resume(signal) {
@@ -117,7 +148,7 @@ async function setup(t, { online = true } = {}) {
         }
 
         report(completed, total, message = null) {
-            this.mutableState.progress = { completed, total };
+            this.setProgress({ completed, total });
             this.mutableState.message = message;
         }
     }
@@ -128,6 +159,8 @@ async function setup(t, { online = true } = {}) {
 
     return {
         queue,
+        database,
+        taskModule,
         TestTask,
         connection,
         browserWindow,
@@ -592,7 +625,7 @@ test('repeated calls share an attempt and cannot revive a cancelled task', async
     assert.equal(task.state.status, 'cancelled');
 });
 
-test('account changes synchronously hide and cancel previous tasks', async (t) => {
+test('account changes synchronously hide and suspend previous tasks', async (t) => {
     const { queue, TestTask, setAuth } = await setup(t);
     const task = new TestTask({ operation: untilAborted });
     enqueue(queue, task);
@@ -604,7 +637,7 @@ test('account changes synchronously hide and cancel previous tasks', async (t) =
     const next = new TestTask({ ownerId: 'other' });
     enqueue(queue, next);
     await flush();
-    assert.equal(task.state.status, 'cancelled');
+    assert.equal(task.state.status, 'queued');
     assert.equal(next.state.status, 'completed');
 });
 
@@ -629,7 +662,7 @@ test('focus detects expired auth and renewed auth resumes queued work', async (t
     assert.equal(task.state.status, 'completed');
 });
 
-test('disposal cancels tasks, removes listeners, and prevents pending execution', async (t) => {
+test('disposal suspends tasks, removes listeners, and prevents pending execution', async (t) => {
     const { queue, TestTask, connect, authListeners } = await setup(t);
     const task = new TestTask({ operation: untilAborted });
     enqueue(queue, task);
@@ -642,7 +675,7 @@ test('disposal cancels tasks, removes listeners, and prevents pending execution'
     connect(false);
     assert.equal(queue.isOnline, true);
     await flush();
-    assert.equal(task.state.status, 'cancelled');
+    assert.equal(task.state.status, 'queued');
     assert.equal(pending.calls, 0);
     connect(true);
     await flush();
@@ -720,4 +753,345 @@ test('auth subscriptions observe token changes, cross-tab changes and clearing l
     unsubscribe();
     auth.setAccessToken('another-token');
     assert.equal(calls, 5);
+});
+
+test('admission waits for a committed create before starting or returning queued success', async (t) => {
+    const { queue, database, TestTask, connect } = await setup(t, { online: false });
+    const commit = deferred();
+    const create = database.create.bind(database);
+    t.mock.method(database, 'create', async (value) => {
+        await commit.promise;
+        await create(value);
+    });
+    const task = new TestTask();
+    let settled = false;
+    const submission = queue.submit(task).then((result) => {
+        settled = true;
+        return result;
+    });
+    await flush();
+    assert.equal(settled, false);
+    assert.equal(task.calls, 0);
+    commit.resolve();
+    assert.equal((await submission).status, 'queued');
+    assert.equal(database.records.has(database.key(task.ownerId, task.id)), true);
+    connect(true);
+    await flush();
+    assert.equal(task.calls, 1);
+});
+
+test('quota and unavailable storage reject admission without sending a request', async (t) => {
+    const { queue, database, TestTask, taskModule } = await setup(t);
+    t.mock.method(database, 'create', async () => {
+        throw new DOMException('Full', 'QuotaExceededError');
+    });
+    const task = new TestTask();
+    await assert.rejects(
+        queue.submit(task),
+        (error) => error instanceof taskModule.TaskPersistenceError,
+    );
+    assert.equal(task.calls, 0);
+    assert.equal(queue.pendingCount, 0);
+    assert.match(queue.storageError, /Full/);
+    assert.equal(database.records.size, 0);
+});
+
+test('a failed checkpoint keeps the task blocked until a successful save on manual retry', async (t) => {
+    const { queue, database, TestTask, taskModule } = await setup(t);
+    const save = database.save.bind(database);
+    let failing = true;
+    t.mock.method(database, 'save', async (snapshot) => {
+        if (failing) throw new Error('Storage offline');
+        await save(snapshot);
+    });
+    const task = new TestTask();
+    await assert.rejects(
+        queue.submit(task),
+        (error) => error instanceof taskModule.TaskPersistenceError,
+    );
+    assert.equal(task.calls, 0);
+    assert.equal(task.state.status, 'blocked');
+    assert.equal(queue.get(task.id), task);
+    failing = false;
+    await queue.retry(task.id);
+    assert.equal(task.calls, 1);
+    assert.equal(task.state.status, 'completed');
+    assert.equal(database.records.size, 0);
+});
+
+test('a committed terminal marker prevents replay when deletion fails', async (t) => {
+    const { queue, database, TestTask, setAuth } = await setup(t);
+    const remove = database.delete.bind(database);
+    let failing = true;
+    t.mock.method(database, 'delete', async (...args) => {
+        if (failing) throw new Error('Deletion unavailable');
+        return remove(...args);
+    });
+    const task = new TestTask();
+    assert.equal((await queue.submit(task)).status, 'completed');
+    assert.equal(
+        database.records.get(database.key(task.ownerId, task.id)).state.status,
+        'completed',
+    );
+    failing = false;
+    setAuth('other', true);
+    await queue.initialize();
+    setAuth('owner', true);
+    await queue.initialize();
+    await flush();
+    assert.equal(task.calls, 1);
+    assert.equal(queue.pendingCount, 0);
+    assert.equal(database.records.size, 0);
+});
+
+test('sign-out retains tasks per owner and restored blocked tasks require manual retry', async (t) => {
+    const { queue, database, TestTask, setAuth } = await setup(t, { online: false });
+    const task = new TestTask();
+    await queue.submit(task);
+    task.mutableState.status = 'blocked';
+    task.mutableState.error = 'Needs authentication';
+    await flush();
+    setAuth(null, false);
+    assert.equal(queue.pendingCount, 0);
+    await queue.initialize();
+    assert.equal(database.records.size, 1);
+    setAuth('other', true);
+    await queue.initialize();
+    assert.equal(queue.pendingCount, 0);
+    setAuth('owner', true);
+    await queue.initialize();
+    const restored = queue.get(task.id);
+    assert.notEqual(restored, task);
+    assert.equal(restored.state.status, 'blocked');
+    assert.equal(restored.state.error, 'Needs authentication');
+    assert.equal(restored.calls, 0);
+});
+
+test('clearSaved drains pending writes and cannot recreate records afterward', async (t) => {
+    const { queue, database, TestTask } = await setup(t, { online: false });
+    const task = new TestTask();
+    await queue.submit(task);
+    const commit = deferred();
+    const save = database.save.bind(database);
+    t.mock.method(database, 'save', async (snapshot) => {
+        await commit.promise;
+        await save(snapshot);
+    });
+    task.report(1, 10);
+    const saving = task.checkpoint();
+    await flush();
+    const clearing = queue.clearSaved();
+    commit.resolve();
+    await clearing;
+    await saving;
+    assert.equal(database.records.size, 0);
+    assert.equal(queue.pendingCount, 0);
+    task.report(4, 10);
+    await flush();
+    assert.equal(database.records.size, 0);
+    assert.throws(() => queue.submit(new TestTask()), /stopped/);
+});
+
+test('progress saves are throttled and cannot overwrite a later durable checkpoint', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const { queue, database, TestTask } = await setup(t, { online: false });
+    const task = new TestTask();
+    await queue.submit(task);
+    for (let bytes = 1; bytes <= 9; bytes++) task.report(bytes, 10);
+    await flush();
+    assert.equal(database.writes.length, 1);
+    t.mock.timers.tick(1000);
+    await flush();
+    assert.equal(database.writes.length, 2);
+    assert.equal(database.writes[1][1].state.progress.completed, 9);
+    task.report(10, 10);
+    await queue.cancel(task.id);
+    t.mock.timers.tick(1000);
+    await flush();
+    assert.equal(database.records.size, 0);
+    assert.equal(database.writes.at(-1)[0], 'delete');
+});
+
+test('a failed cancellation retains its intent and is cleaned up after restoration', async (t) => {
+    const { queue, database, TestTask, setAuth } = await setup(t, { online: false });
+    const task = new TestTask();
+    await queue.submit(task);
+    const save = database.save.bind(database);
+    let failing = true;
+    t.mock.method(database, 'save', async (snapshot) => {
+        if (failing) throw new Error('Storage busy');
+        return save(snapshot);
+    });
+    await queue.cancel(task.id);
+    assert.equal(task.state.status, 'cancelling');
+    assert.equal(queue.get(task.id), task);
+    assert.equal(task.calls, 0);
+    failing = false;
+    setAuth(null, false);
+    await queue.initialize();
+    assert.equal(
+        database.records.get(database.key(task.ownerId, task.id)).state.status,
+        'cancelling',
+    );
+    setAuth('owner', true);
+    await queue.initialize();
+    assert.equal(queue.get(task.id), undefined);
+    assert.equal(database.records.size, 0);
+    assert.equal(task.calls, 0);
+});
+
+test('cancellation during admission removes the eventual committed record', async (t) => {
+    const { queue, database, TestTask, setAuth } = await setup(t, { online: false });
+    const commit = deferred();
+    const create = database.create.bind(database);
+    t.mock.method(database, 'create', async (serialized) => {
+        await commit.promise;
+        return create(serialized);
+    });
+    const task = new TestTask();
+    const rejected = assert.rejects(queue.submit(task), { name: 'AbortError' });
+    await flush();
+    await queue.cancel(task.id);
+    commit.resolve();
+    await rejected;
+    assert.equal(task.calls, 0);
+    assert.equal(database.records.size, 0);
+    setAuth('other', true);
+    await queue.initialize();
+    setAuth('owner', true);
+    await queue.initialize();
+    assert.equal(queue.pendingCount, 0);
+});
+
+test('an account change during admission preserves the record without publishing or executing it', async (t) => {
+    const { queue, database, TestTask, setAuth } = await setup(t, { online: false });
+    const commit = deferred();
+    const create = database.create.bind(database);
+    t.mock.method(database, 'create', async (serialized) => {
+        await commit.promise;
+        return create(serialized);
+    });
+    const task = new TestTask();
+    const rejected = assert.rejects(queue.submit(task), { name: 'AbortError' });
+    await flush();
+    setAuth('other', true);
+    commit.resolve();
+    await rejected;
+    await queue.initialize();
+    assert.equal(task.calls, 0);
+    assert.equal(queue.pendingCount, 0);
+    assert.equal(database.records.size, 1);
+    setAuth('owner', true);
+    await queue.initialize();
+    assert.equal(queue.get(task.id).state.status, 'queued');
+});
+
+test('a failed progress checkpoint aborts execution and requires a durable manual retry', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const { queue, database, TestTask, taskModule } = await setup(t);
+    const task = new TestTask({
+        operation: async (signal, current) => {
+            if (current.calls === 1) await untilAborted(signal);
+            return 'accepted';
+        },
+    });
+    const rejected = assert.rejects(
+        queue.submit(task),
+        (error) => error instanceof taskModule.TaskPersistenceError,
+    );
+    await flush();
+    const save = database.save.bind(database);
+    let failing = true;
+    t.mock.method(database, 'save', async (snapshot) => {
+        if (failing) throw new Error('Storage offline');
+        return save(snapshot);
+    });
+    task.report(1, 10);
+    t.mock.timers.tick(1000);
+    await rejected;
+    assert.equal(task.signal.aborted, true);
+    assert.equal(task.state.status, 'blocked');
+    assert.match(queue.storageError, /Storage offline/);
+    await queue.retry(task.id);
+    assert.equal(task.calls, 1);
+    failing = false;
+    await queue.retry(task.id);
+    assert.equal(task.calls, 2);
+    assert.equal(task.state.status, 'completed');
+    assert.equal(queue.pendingCount, 0);
+    assert.equal(database.records.size, 0);
+});
+
+test('completion checkpoint failure preserves the result and retries only cleanup', async (t) => {
+    const { queue, database, TestTask } = await setup(t);
+    const save = database.save.bind(database);
+    let failing = true;
+    t.mock.method(database, 'save', async (snapshot) => {
+        if (failing && snapshot.state.status === 'completed') throw new Error('Storage offline');
+        return save(snapshot);
+    });
+    const completed = [];
+    const task = new TestTask({
+        operation: async () => 'accepted',
+        onCompleted: (result) => completed.push(result),
+    });
+    assert.equal((await queue.submit(task)).result, 'accepted');
+    assert.equal(task.state.status, 'completed');
+    assert.equal(task.failure, null);
+    assert.equal(queue.get(task.id), task);
+    assert.match(queue.storageError, /Storage offline/);
+    failing = false;
+    await queue.retry(task.id);
+    assert.equal(task.calls, 1);
+    assert.deepEqual(completed, ['accepted']);
+    assert.equal(queue.pendingCount, 0);
+    assert.equal(database.records.size, 0);
+});
+
+test('failed cancellation retries its cleanup without executing the task', async (t) => {
+    const { queue, database, TestTask } = await setup(t, { online: false });
+    const task = new TestTask();
+    await queue.submit(task);
+    const save = database.save.bind(database);
+    let failing = true;
+    t.mock.method(database, 'save', async (snapshot) => {
+        if (failing) throw new Error('Storage offline');
+        return save(snapshot);
+    });
+    await queue.cancel(task.id);
+    assert.equal(task.state.status, 'cancelling');
+    assert.equal(queue.get(task.id), task);
+    failing = false;
+    // Cleanup retries use the existing task Retry action once online.
+    Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
+    window.dispatchEvent(new Event('online'));
+    await queue.retry(task.id);
+    assert.equal(task.state.status, 'cancelled');
+    assert.equal(task.calls, 0);
+    assert.equal(database.records.size, 0);
+});
+
+test('account changes while removing an initial failure still reject with AbortError', async (t) => {
+    const { queue, database, TestTask, setAuth } = await setup(t);
+    const deleting = deferred();
+    const deleted = deferred();
+    const remove = database.delete.bind(database);
+    t.mock.method(database, 'delete', async (...args) => {
+        deleting.resolve();
+        await deleted.promise;
+        return remove(...args);
+    });
+    const task = new TestTask({
+        operation: async () => {
+            throw new Error('Rejected');
+        },
+    });
+    const rejected = assert.rejects(queue.submit(task), { name: 'AbortError' });
+    await deleting.promise;
+    setAuth('other', true);
+    deleted.resolve();
+    await rejected;
+    await queue.initialize();
+    assert.equal(queue.pendingCount, 0);
+    assert.equal(database.records.size, 0);
 });

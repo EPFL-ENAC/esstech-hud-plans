@@ -407,6 +407,7 @@ test('real Tus never replaces a missing pinned upload or uses URL storage', asyn
                 ownerId: 'owner',
                 uploadUrl,
                 signal: new AbortController().signal,
+                onCheckpoint: () => Promise.resolve(),
                 onProgress() {
                     assert.fail('Missing uploads cannot report progress');
                 },
@@ -457,6 +458,7 @@ test('real Tus creates once and resumes from the confirmed offset after a lost P
         ownerId: 'owner',
         uploadUrl: null,
         signal: new AbortController().signal,
+        onCheckpoint: () => Promise.resolve(),
         onProgress() {},
         onUploadAvailable: (value) => available.push(value),
     });
@@ -470,5 +472,65 @@ test('real Tus creates once and resumes from the confirmed offset after a lost P
     assert.deepEqual(
         available.map(({ resumed }) => resumed),
         [false, true],
+    );
+});
+
+test('real Tus waits for a durable creation URL before availability or PATCH', async (t) => {
+    const commit = deferred();
+    const checkpointStarted = deferred();
+    const available = [];
+    const transport = await realTransport(t, (request) => {
+        if (request.method === 'POST') return tusResponse(201, { Location: '/tus/files/durable' });
+        return tusResponse(204, { 'Upload-Offset': '5' });
+    });
+    const pending = transport.uploadVideoTus(new File(['video'], 'clip.mp4'), {
+        ownerId: 'owner',
+        uploadUrl: null,
+        signal: new AbortController().signal,
+        async onCheckpoint(url) {
+            assert.equal(url, 'https://hud.test/tus/files/durable');
+            checkpointStarted.resolve();
+            await commit.promise;
+        },
+        onProgress() {},
+        onUploadAvailable: (value) => available.push(value),
+    });
+    await checkpointStarted.promise;
+    assert.deepEqual(
+        transport.requests.map(({ method }) => method),
+        ['POST'],
+    );
+    assert.deepEqual(available, []);
+    commit.resolve();
+    assert.equal((await pending).uploadId, 'durable');
+    assert.deepEqual(
+        transport.requests.map(({ method }) => method),
+        ['POST', 'PATCH'],
+    );
+    assert.equal(available.length, 1);
+});
+
+test('a creation checkpoint failure preserves its error and never transfers bytes', async (t) => {
+    const failure = new Error('Task storage failed');
+    const transport = await realTransport(t, () =>
+        tusResponse(201, { Location: '/tus/files/durable' }),
+    );
+    await assert.rejects(
+        transport.uploadVideoTus(new File(['video'], 'clip.mp4'), {
+            ownerId: 'owner',
+            uploadUrl: null,
+            signal: new AbortController().signal,
+            onCheckpoint: () => Promise.reject(failure),
+            onProgress() {},
+            onUploadAvailable() {
+                assert.fail('Uncommitted uploads must not be announced');
+            },
+        }),
+        (error) => error === failure,
+    );
+    await nextTurn();
+    assert.deepEqual(
+        transport.requests.map(({ method }) => method),
+        ['POST'],
     );
 });

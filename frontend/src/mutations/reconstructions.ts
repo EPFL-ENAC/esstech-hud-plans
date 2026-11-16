@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { i18n } from 'src/i18n/instance';
 import { ApiError } from 'src/lib/api';
 import { getAuthSubject } from 'src/lib/auth';
+import { TaskPersistenceError } from 'src/lib/networkDependentTasks';
 import type { Page } from 'src/lib/pagination';
 import {
     ReconstructionSubmissionTask,
@@ -151,7 +152,9 @@ export function useSubmitReconstructionMutation() {
         mutation.error.value === null ||
         (mutation.error.value instanceof DOMException && mutation.error.value.name === 'AbortError')
             ? ''
-            : getReconstructionSubmissionErrorMessage(mutation.error.value),
+            : mutation.error.value instanceof TaskPersistenceError
+              ? mutation.error.value.message
+              : getReconstructionSubmissionErrorMessage(mutation.error.value),
     );
 
     return {

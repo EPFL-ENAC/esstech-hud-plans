@@ -74,6 +74,11 @@ try {
                         this.failOnce = failOnce;
                         this.finish = null;
                     }
+                    serialize() {
+                        return {
+                            snapshot: { ...this.serializeBase(), type: 'browser-test', data: {} },
+                        };
+                    }
                     resume(signal) {
                         if (this.failOnce) {
                             this.failOnce = false;
@@ -90,7 +95,7 @@ try {
                         return 'retry';
                     }
                     report(completed, total) {
-                        this.mutableState.progress = { completed, total };
+                        this.setProgress({ completed, total });
                     }
                 }
                 window.taskHarness = {

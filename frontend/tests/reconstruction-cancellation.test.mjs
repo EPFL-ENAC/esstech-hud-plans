@@ -45,6 +45,7 @@ async function fixture(t) {
             'src/lib/buildings': buildings,
             'src/i18n/instance': { i18n: {} },
             'src/lib/api': { ApiError: buildings.ApiError },
+            'src/lib/networkDependentTasks': { TaskPersistenceError: class extends Error {} },
             'src/lib/reconstructionSubmissionTask': { ReconstructionSubmissionTask: class {} },
             'src/stores/networkDependentTasks': { useNetworkDependentTasks() {} },
         },

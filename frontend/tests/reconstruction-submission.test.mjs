@@ -5,6 +5,7 @@ import { createApp, effectScope } from 'vue';
 import { createPinia, disposePinia, setActivePinia } from 'pinia';
 import { PiniaColada, useQueryCache } from '@pinia/colada';
 import { deferred, importTypeScript } from './helpers/typescript.mjs';
+import { MemoryTasksDatabase } from './helpers/tasksDatabase.mjs';
 
 async function fixture(t, { online = true } = {}) {
     const submissions = [];
@@ -68,11 +69,25 @@ async function fixture(t, { online = true } = {}) {
     const connection = await importTypeScript(t, 'src/composables/useOnlineConnection.ts', {
         vue: import.meta.resolve('vue'),
     });
+    const database = new MemoryTasksDatabase();
     const queueModule = await importTypeScript(t, 'src/stores/networkDependentTasks.ts', {
         vue: import.meta.resolve('vue'),
         pinia: import.meta.resolve('pinia'),
         'src/composables/useAuthentication': authentication,
         'src/composables/useOnlineConnection': connection,
+        'src/lib/networkDependentTasks': tasks,
+        'src/lib/tasksDatabase': {
+            TasksDatabase: class {
+                constructor() {
+                    return database;
+                }
+            },
+        },
+        'src/lib/taskRegistry': {
+            async deserializeTask(snapshot) {
+                return reconstructionTasks.ReconstructionSubmissionTask.deserialize(snapshot);
+            },
+        },
     });
     const { useSubmitReconstructionMutation } = await importTypeScript(
         t,
@@ -85,6 +100,7 @@ async function fixture(t, { online = true } = {}) {
             'src/lib/api': api,
             'src/lib/buildings': buildings,
             'src/lib/reconstructionSubmissionTask': reconstructionTasks,
+            'src/lib/networkDependentTasks': tasks,
             'src/stores/networkDependentTasks': queueModule,
         },
     );
