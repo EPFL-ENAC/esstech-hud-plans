@@ -2,14 +2,13 @@ import { DetailedError, Upload } from 'tus-js-client';
 import { tusEndpoint } from 'src/boot/api';
 import { ApiError } from 'src/lib/api';
 import { getAccessToken, getAuthSubject } from 'src/lib/auth';
+import type { RemoteUpload } from 'src/lib/localUploadsRegistry';
 import type { FetchProgress } from './fetchProgress';
 
 const UPLOAD_CHUNK_BYTES = 64 * 1024 * 1024;
 const UPLOAD_RETRY_DELAYS = [0, 1000, 3000, 5000, 10000, 20000];
 
-export interface TusUploadResult {
-    uploadId: string;
-    uploadUrl: string;
+export interface TusUploadResult extends RemoteUpload {
     resumed: boolean;
 }
 
@@ -17,7 +16,7 @@ export interface TaskTusUploadOptions {
     ownerId: string;
     uploadUrl: string | null;
     signal: AbortSignal;
-    onCheckpoint: (uploadUrl: string) => Promise<void>;
+    onCheckpoint: (remote: RemoteUpload) => Promise<void>;
     onProgress: (progress: FetchProgress) => void;
     onUploadAvailable: (upload: TusUploadResult) => void;
 }
@@ -135,9 +134,13 @@ export async function uploadVideoTus(
                         const location = response.getHeader('Location');
                         if (!location) throw new Error('Upload has no location ID');
                         const url = new URL(location, request.getURL());
-                        if (!url.pathname.split('/').pop())
-                            throw new Error('Upload has no location ID');
-                        await onCheckpoint(url.toString());
+                        const uploadId = url.pathname.split('/').pop();
+                        if (!uploadId) throw new Error('Upload has no location ID');
+
+                        await onCheckpoint({
+                            uploadId,
+                            uploadUrl: url.toString(),
+                        });
                     } catch (error) {
                         // Settle with the original persistence error, not Tus's wrapper.
                         await fail(error);

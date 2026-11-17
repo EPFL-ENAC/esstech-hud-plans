@@ -3,12 +3,17 @@ import { computed, markRaw, onScopeDispose, readonly, ref, shallowReactive } fro
 import { useAuthentication } from 'src/composables/useAuthentication';
 import { useOnlineConnection } from 'src/composables/useOnlineConnection';
 import { TaskPersistenceError, type NetworkDependentTask } from 'src/lib/networkDependentTasks';
+import { LocalUploadsRegistry } from 'src/lib/localUploadsRegistry';
 import { TasksDatabase } from 'src/lib/tasksDatabase';
 import { deserializeTask } from 'src/lib/taskRegistry';
 
 export type TaskSubmission<TResult> =
     | { status: 'completed'; taskId: string; result: TResult }
     | { status: 'queued'; taskId: string };
+
+export interface SubmitTaskOptions {
+    waitForFirstTry?: boolean;
+}
 
 type AnyTask = NetworkDependentTask<unknown>;
 
@@ -18,6 +23,7 @@ function aborted(): DOMException {
 
 export const useNetworkDependentTasks = defineStore('networkDependentTasks', () => {
     const database = new TasksDatabase();
+    const uploads = new LocalUploadsRegistry();
     const entries = shallowReactive(new Map<string, AnyTask>());
     const pendingSubmissions = new Map<AnyTask, Promise<unknown>>();
     // Only failed checkpoints need to survive account suspension in memory.
@@ -135,14 +141,11 @@ export const useNetworkDependentTasks = defineStore('networkDependentTasks', () 
                             attach(saved);
                             continue;
                         }
-                        const task = await deserializeTask(
-                            snapshot,
-                            database.files(ownerId, snapshot.id),
-                        );
+                        const task = deserializeTask(snapshot, uploads);
                         if (epoch !== generation || stopped) return;
                         attach(task);
                     } catch (error) {
-                        // Unsupported records and missing attachments remain stored.
+                        // Unsupported records remain stored.
                         if (epoch === generation && !stopped) report(error);
                     }
                 }
@@ -169,25 +172,22 @@ export const useNetworkDependentTasks = defineStore('networkDependentTasks', () 
             throw aborted();
     }
 
-    async function admit<TResult>(
-        task: NetworkDependentTask<TResult>,
-        ready: Promise<void>,
-        epoch: number,
-    ): Promise<TaskSubmission<TResult>> {
-        await ready;
+    async function admit(task: AnyTask, epoch: number): Promise<void> {
         assertCurrent(task, epoch);
-        if (restoreFailure) throw restoreFailure;
+
         try {
             await database.create(task.serialize());
         } catch (error) {
             throw report(error);
         }
-        // Bind even when the account changed during the commit, so suspension
-        // can flush this task before the next account restoration reads it.
+
+        // Bind before checking again so a task committed during an account change
+        // can still be suspended or cancelled durably.
         task.bindPersistence({
             save: (snapshot) => database.save(snapshot),
             delete: () => database.delete(task.ownerId, task.id),
         });
+
         try {
             assertCurrent(task, epoch);
         } catch (error) {
@@ -197,93 +197,173 @@ export const useNetworkDependentTasks = defineStore('networkDependentTasks', () 
             } else {
                 await suspend(task);
             }
+
             throw error;
         }
+
         attach(task);
-        const canRun = isOnline.value && auth.refreshAuthentication();
-        assertCurrent(task, epoch);
-        if (!canRun) {
-            return { status: 'queued', taskId: task.id };
-        }
+    }
+
+    async function execute<TResult>(
+        task: NetworkDependentTask<TResult>,
+    ): Promise<TResult | undefined> {
         const result = await task.retryOrResume();
         await task.waitUntilIdle();
-        // Background retries wait for this submission, keeping this outcome stable.
-        const status = task.state.status;
-        const failure = task.failure;
-        assertCurrent(task, epoch);
-        removeFinished(task);
-        if (status === 'completed') {
-            return { status: 'completed', taskId: task.id, result: result as TResult };
-        }
-        if (task.storageFailure) throw task.storageFailure;
-        if (status === 'failed' || status === 'blocked') {
-            // The failed state is already durable. Removing an immediately
-            // rejected submission does not change its failure or lifecycle.
-            try {
-                await database.delete(task.ownerId, task.id);
-            } catch (error) {
-                report(error);
-            }
-            if (entries.get(task.id) === task) entries.delete(task.id);
-            assertCurrent(task, epoch);
-            throw failure;
-        }
-        return { status: 'queued', taskId: task.id };
+        return result;
     }
 
     function submit<TResult>(
         task: NetworkDependentTask<TResult>,
+        { waitForFirstTry = true }: SubmitTaskOptions = {},
     ): Promise<TaskSubmission<TResult>> {
         if (stopped) throw new Error('Task queue is stopped');
-        if (!auth.refreshAuthentication()) throw new Error('Sign in before submitting tasks');
-        if (task.ownerId !== auth.ownerId.value) throw new Error('Task belongs to another account');
+
+        if (!auth.refreshAuthentication()) {
+            throw new Error('Sign in before submitting tasks');
+        }
+
+        if (task.ownerId !== auth.ownerId.value) {
+            throw new Error('Task belongs to another account');
+        }
+
         if (
             entries.has(task.id) ||
             [...pendingSubmissions.keys()].some((entry) => entry.id === task.id)
         ) {
             throw new Error('Task is already enqueued');
         }
-        if (task.state.status !== 'queued') throw new Error('Only queued tasks can be submitted');
+
+        if (task.state.status !== 'queued') {
+            throw new Error('Only queued tasks can be submitted');
+        }
+
         const ready = initialize();
-        const submission = admit(task, ready, generation).finally(() => {
+        const epoch = generation;
+
+        const submission = (async (): Promise<TaskSubmission<TResult>> => {
+            await ready;
+            assertCurrent(task, epoch);
+
+            if (restoreFailure) throw restoreFailure;
+
+            await admit(task, epoch);
+
+            const canRun = isOnline.value && auth.refreshAuthentication();
+            assertCurrent(task, epoch);
+
+            if (!canRun) {
+                return { status: 'queued', taskId: task.id };
+            }
+
+            if (!waitForFirstTry) {
+                void execute(task)
+                    .then(() => {
+                        removeFinished(task);
+                    })
+                    .catch((error: unknown) => {
+                        report(error);
+                    });
+
+                // This acknowledges durable admission; execution may already be running.
+                return { status: 'queued', taskId: task.id };
+            }
+
+            const result = await execute(task);
+            const status = task.state.status;
+            const failure = task.failure;
+
+            assertCurrent(task, epoch);
+            removeFinished(task);
+
+            if (status === 'completed') {
+                return {
+                    status: 'completed',
+                    taskId: task.id,
+                    result: result as TResult,
+                };
+            }
+
+            if (task.storageFailure) throw task.storageFailure;
+
+            if (status === 'failed' || status === 'blocked') {
+                // Preserve foreground submission behavior: remove an immediately
+                // rejected task and reject the caller.
+                try {
+                    await database.delete(task.ownerId, task.id);
+                } catch (error) {
+                    report(error);
+                }
+
+                if (entries.get(task.id) === task) {
+                    entries.delete(task.id);
+                }
+
+                assertCurrent(task, epoch);
+                throw failure;
+            }
+
+            return { status: 'queued', taskId: task.id };
+        })().finally(() => {
             pendingSubmissions.delete(task);
         });
+
         pendingSubmissions.set(task, submission);
         return submission;
     }
 
-    async function execute(task: AnyTask, retryWaiting = false): Promise<void> {
+    async function resumeTask(task: AnyTask, retryWaiting: boolean): Promise<void> {
         await pendingSubmissions.get(task)?.catch(() => undefined);
         await task.waitUntilIdle();
+
         if (
             stopped ||
             !auth.refreshAuthentication() ||
             entries.get(task.id) !== task ||
             !isOnline.value ||
             task.storageFailure
-        )
+        ) {
             return;
-        if (retryWaiting && task.state.status === 'waiting') task.requestRetry();
-        await task.retryOrResume();
+        }
+
+        if (retryWaiting && task.state.status === 'waiting') {
+            task.requestRetry();
+        }
+
+        await execute(task);
         removeFinished(task);
     }
 
     async function retry(id: string): Promise<void> {
         const task = entries.get(id);
-        if (!task || stopped || !isOnline.value || !auth.refreshAuthentication()) return;
+
+        if (!task || stopped || !isOnline.value || !auth.refreshAuthentication()) {
+            return;
+        }
+
         await pendingSubmissions.get(task)?.catch(() => undefined);
         await task.waitUntilIdle();
-        if (entries.get(id) !== task || stopped) return;
+
+        if (
+            stopped ||
+            entries.get(id) !== task ||
+            !isOnline.value ||
+            !auth.refreshAuthentication()
+        ) {
+            return;
+        }
+
         if (['completed', 'cancelled', 'cancelling'].includes(task.state.status)) {
             await task.retryPersistence();
-            removeFinished(task);
         } else {
             task.requestRetry();
-            // The base class must commit the new attempt before resume().
-            await task.retryOrResume();
-            removeFinished(task);
+            await execute(task);
         }
-        if (!task.storageFailure) reportedError.value = null;
+
+        removeFinished(task);
+
+        if (!task.storageFailure) {
+            reportedError.value = null;
+        }
     }
 
     async function cancel(id: string): Promise<void> {
@@ -330,7 +410,9 @@ export const useNetworkDependentTasks = defineStore('networkDependentTasks', () 
                 ['queued', 'pausing'].includes(task.state.status) ||
                 (retryWaiting && task.state.status === 'waiting')
             ) {
-                void execute(task, retryWaiting);
+                void resumeTask(task, retryWaiting).catch((error: unknown) => {
+                    report(error);
+                });
             }
         }
     }

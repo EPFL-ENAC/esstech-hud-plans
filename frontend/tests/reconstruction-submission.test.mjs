@@ -6,6 +6,7 @@ import { createPinia, disposePinia, setActivePinia } from 'pinia';
 import { PiniaColada, useQueryCache } from '@pinia/colada';
 import { deferred, importTypeScript } from './helpers/typescript.mjs';
 import { MemoryTasksDatabase } from './helpers/tasksDatabase.mjs';
+import { MemoryLocalUploadsRegistry } from './helpers/localUploadsRegistry.mjs';
 
 async function fixture(t, { online = true } = {}) {
     const submissions = [];
@@ -76,6 +77,9 @@ async function fixture(t, { online = true } = {}) {
         'src/composables/useAuthentication': authentication,
         'src/composables/useOnlineConnection': connection,
         'src/lib/networkDependentTasks': tasks,
+        'src/lib/localUploadsRegistry': {
+            LocalUploadsRegistry: MemoryLocalUploadsRegistry,
+        },
         'src/lib/tasksDatabase': {
             TasksDatabase: class {
                 constructor() {
@@ -84,7 +88,7 @@ async function fixture(t, { online = true } = {}) {
             },
         },
         'src/lib/taskRegistry': {
-            async deserializeTask(snapshot) {
+            deserializeTask(snapshot) {
                 return reconstructionTasks.ReconstructionSubmissionTask.deserialize(snapshot);
             },
         },

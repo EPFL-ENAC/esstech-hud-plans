@@ -46,15 +46,6 @@ export interface TaskSnapshot<TData = unknown> {
     data: TData;
 }
 
-export interface SerializedTask<TData = unknown> {
-    snapshot: TaskSnapshot<TData>;
-    files?: Record<string, File>;
-}
-
-export interface TaskFiles {
-    get(name: string): Promise<File>;
-}
-
 export class TaskPersistenceError extends Error {
     constructor(cause: unknown) {
         super('Could not save pending tasks on this device.', { cause });
@@ -102,7 +93,7 @@ export abstract class NetworkDependentTask<TResult = void> {
         this.onCompleted = onCompleted;
     }
 
-    abstract serialize(): SerializedTask;
+    abstract serialize(): TaskSnapshot;
 
     bindPersistence(persistence: TaskPersistence): void {
         this.persistence = persistence;
@@ -119,7 +110,7 @@ export abstract class NetworkDependentTask<TResult = void> {
 
     protected checkpoint(): Promise<void> {
         this.stopProgressCheckpoint();
-        const snapshot = this.serialize().snapshot;
+        const snapshot = this.serialize();
         const saving = (this.persistence?.save(snapshot) ?? Promise.resolve()).then(
             () => {
                 this.persistenceFailure.value = null;

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { importTypeScript } from './helpers/typescript.mjs';
+import { MemoryLocalUploadsRegistry } from './helpers/localUploadsRegistry.mjs';
 
 async function fixture(t) {
     const api = {
@@ -30,6 +31,10 @@ async function fixture(t) {
             },
         },
     });
+    const localUploads = await importTypeScript(t, 'src/lib/localUploadsRegistry.ts', {
+        'src/lib/api': api,
+    });
+    const uploads = new MemoryLocalUploadsRegistry();
     const video = await importTypeScript(t, 'src/lib/videoUploadTask.ts', {
         vue: import.meta.resolve('vue'),
         'src/lib/api': api,
@@ -39,10 +44,13 @@ async function fixture(t) {
                 return 'failed';
             },
         },
+        'src/lib/localUploadsRegistry': localUploads,
         'src/lib/utils/taskTusUpload': {
             async uploadVideoTus(file, options) {
                 const uploadUrl = options.uploadUrl ?? 'https://hud.test/tus/files/video';
-                await options.onCheckpoint(uploadUrl);
+                if (options.uploadUrl === null) {
+                    await options.onCheckpoint({ uploadId: 'video', uploadUrl });
+                }
                 const result = {
                     uploadId: 'video',
                     uploadUrl,
@@ -57,7 +65,7 @@ async function fixture(t) {
         'src/lib/reconstructionSubmissionTask': reconstruction,
         'src/lib/videoUploadTask': video,
     });
-    return { ...reconstruction, ...video, ...registry };
+    return { ...reconstruction, ...video, ...registry, uploads };
 }
 
 for (const buildingId of ['existing', null]) {
@@ -82,7 +90,7 @@ for (const buildingId of ['existing', null]) {
             },
         });
         submission.settings.ffmpeg.fps = 99;
-        const { snapshot } = task.serialize();
+        const snapshot = task.serialize();
         snapshot.state.status = 'running';
         snapshot.state.attempts = 3;
         const restored = f.ReconstructionSubmissionTask.deserialize(structuredClone(snapshot));
@@ -90,8 +98,8 @@ for (const buildingId of ['existing', null]) {
         assert.equal(restored.createdAt, 123);
         assert.equal(restored.state.status, 'queued');
         assert.equal(restored.state.attempts, 3);
-        assert.equal(restored.serialize().snapshot.data.submission.settings.ffmpeg.fps, 4);
-        assert.deepEqual(Object.keys(restored.serialize().snapshot).sort(), [
+        assert.equal(restored.serialize().data.submission.settings.ffmpeg.fps, 4);
+        assert.deepEqual(Object.keys(restored.serialize()).sort(), [
             'createdAt',
             'data',
             'id',
@@ -102,19 +110,30 @@ for (const buildingId of ['existing', null]) {
         ]);
         assert.equal(JSON.stringify(snapshot).includes('onCompleted'), false);
         snapshot.data.submission.settings.ffmpeg.fps = 1000;
-        assert.equal(task.serialize().snapshot.data.submission.settings.ffmpeg.fps, 4);
+        assert.equal(task.serialize().data.submission.settings.ffmpeg.fps, 4);
     });
 }
 
-test('video round-trips the File, exact URL, upload state and identity without callbacks', async (t) => {
+test('video snapshots contain only the local reference and restore without file reads', async (t) => {
     const f = await fixture(t);
-    const file = new File(['video bytes'], 'scan.mp4', { type: 'video/mp4', lastModified: 42 });
+    const file = new File(['video bytes'], 'scan.mp4', {
+        type: 'video/mp4',
+        lastModified: 42,
+    });
+    const upload = await f.uploads.create('owner', file);
+
+    await f.uploads.setRemote('owner', upload.id, {
+        uploadId: 'video',
+        uploadUrl: 'https://hud.test/tus/files/video',
+    });
+
     const task = new f.VideoUploadTask({
-        id: 'video-id',
+        id: 'video-task-id',
         createdAt: 123,
         ownerId: 'owner',
         label: 'Upload',
-        file,
+        localUploadId: upload.id,
+        uploads: f.uploads,
         onCompleted() {
             assert.fail('Callback must not be restored');
         },
@@ -122,42 +141,79 @@ test('video round-trips the File, exact URL, upload state and identity without c
             assert.fail('Callback must not be restored');
         },
     });
-    const serialized = task.serialize();
-    serialized.snapshot.data = {
-        uploadUrl: 'https://hud.test/tus/files/video',
-        uploadState: { uploadId: 'video', resumed: true },
-    };
-    serialized.snapshot.state.status = 'pausing';
-    serialized.snapshot.state.progress = { completed: 5, total: file.size };
-    const restored = await f.deserializeTask(structuredClone(serialized.snapshot), {
-        async get(name) {
-            assert.equal(name, 'video');
-            return serialized.files.video;
-        },
-    });
+
+    const snapshot = structuredClone(task.serialize());
+    snapshot.state.status = 'pausing';
+    snapshot.state.progress = { completed: 5, total: file.size };
+
+    const getFile = t.mock.method(f.uploads, 'getFile');
+    const restored = f.deserializeTask(snapshot, f.uploads);
+
     assert.equal(restored.id, task.id);
+    assert.notEqual(restored.id, restored.localUploadId);
+    assert.equal(restored.localUploadId, upload.id);
     assert.equal(restored.createdAt, 123);
     assert.equal(restored.state.status, 'queued');
-    assert.deepEqual(restored.uploadState, { uploadId: 'video', resumed: true });
-    assert.equal(await restored.file.text(), 'video bytes');
-    assert.equal(restored.file.name, 'scan.mp4');
-    assert.equal(restored.file.lastModified, 42);
-    assert.deepEqual(await restored.retryOrResume(), { uploadId: 'video', resumed: true });
+    assert.deepEqual(restored.serialize().data, { localUploadId: upload.id });
+    assert.equal(getFile.mock.callCount(), 0);
+    assert.equal(JSON.stringify(snapshot).includes('onUploadAvailable'), false);
+    assert.equal(JSON.stringify(snapshot).includes('uploadUrl'), false);
+
+    assert.deepEqual(await restored.retryOrResume(), {
+        uploadId: 'video',
+        resumed: true,
+    });
+    assert.equal(getFile.mock.callCount(), 1);
+
+    const savedFile = await f.uploads.getFile('owner', upload.id);
+    assert.equal(await savedFile.text(), 'video bytes');
+    assert.equal(savedFile.name, 'scan.mp4');
+    assert.equal(savedFile.lastModified, 42);
 });
 
-test('unknown types and missing files reject restoration', async (t) => {
+test('unknown and obsolete task formats reject restoration', async (t) => {
     const f = await fixture(t);
+    const upload = await f.uploads.create('owner', new File(['x'], 'x.mp4'));
     const task = new f.VideoUploadTask({
         ownerId: 'owner',
         label: 'Upload',
-        file: new File(['x'], 'x.mp4'),
+        localUploadId: upload.id,
+        uploads: f.uploads,
     });
-    const snapshot = task.serialize().snapshot;
-    const files = {
-        async get() {
-            throw new Error('File missing');
-        },
-    };
-    await assert.rejects(f.deserializeTask({ ...snapshot, type: 'unknown' }, files), /Unknown/);
-    await assert.rejects(f.deserializeTask(snapshot, files), /File missing/);
+    const snapshot = task.serialize();
+
+    assert.throws(() => f.deserializeTask({ ...snapshot, type: 'unknown' }, f.uploads), /Unknown/);
+    assert.throws(
+        () =>
+            f.deserializeTask(
+                {
+                    ...snapshot,
+                    data: {
+                        uploadUrl: null,
+                        uploadState: { uploadId: null, resumed: false },
+                    },
+                },
+                f.uploads,
+            ),
+        /no local upload ID/,
+    );
+});
+
+test('a missing file fails execution without preventing task restoration', async (t) => {
+    const f = await fixture(t);
+    const upload = await f.uploads.create('owner', new File(['x'], 'x.mp4'));
+    const task = new f.VideoUploadTask({
+        ownerId: 'owner',
+        label: 'Upload',
+        localUploadId: upload.id,
+        uploads: f.uploads,
+    });
+
+    f.uploads.files.clear();
+
+    const restored = f.deserializeTask(task.serialize(), f.uploads);
+    await restored.retryOrResume();
+
+    assert.equal(restored.state.status, 'failed');
+    assert.match(restored.failure.message, /file is missing/);
 });

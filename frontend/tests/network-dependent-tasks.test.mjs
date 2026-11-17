@@ -4,6 +4,7 @@ import { createPinia, disposePinia, setActivePinia } from 'pinia';
 import { effectScope, isProxy, isReadonly, watchEffect } from 'vue';
 import { deferred, importTypeScript } from './helpers/typescript.mjs';
 import { MemoryTasksDatabase } from './helpers/tasksDatabase.mjs';
+import { MemoryLocalUploadsRegistry } from './helpers/localUploadsRegistry.mjs';
 
 function enqueue(queue, task) {
     const submission = queue.submit(task);
@@ -93,8 +94,11 @@ async function setup(t, { online = true } = {}) {
                     }
                 },
             },
+            'src/lib/localUploadsRegistry': {
+                LocalUploadsRegistry: MemoryLocalUploadsRegistry,
+            },
             'src/lib/taskRegistry': {
-                async deserializeTask(snapshot) {
+                deserializeTask(snapshot) {
                     const task = new TestTask({
                         id: snapshot.id,
                         createdAt: snapshot.createdAt,
@@ -128,7 +132,9 @@ async function setup(t, { online = true } = {}) {
 
         serialize() {
             return {
-                snapshot: { ...this.serializeBase(), type: 'test', data: { action: this.action } },
+                ...this.serializeBase(),
+                type: 'test',
+                data: { action: this.action },
             };
         }
 
@@ -1094,4 +1100,190 @@ test('account changes while removing an initial failure still reject with AbortE
     await queue.initialize();
     assert.equal(queue.pendingCount, 0);
     assert.equal(database.records.size, 0);
+});
+
+test('background submission waits for admission but not the first attempt', async (t) => {
+    const { queue, database, TestTask } = await setup(t);
+    const commit = deferred();
+    const create = database.create.bind(database);
+    t.mock.method(database, 'create', async (snapshot) => {
+        await commit.promise;
+        await create(snapshot);
+    });
+    const task = new TestTask({ operation: untilAborted });
+    let settled = false;
+    const submission = queue.submit(task, { waitForFirstTry: false }).then((outcome) => {
+        settled = true;
+        return outcome;
+    });
+    await flush();
+    assert.equal(settled, false);
+    assert.equal(task.calls, 0);
+    assert.equal(database.records.size, 0);
+
+    commit.resolve();
+    assert.deepEqual(await submission, { status: 'queued', taskId: task.id });
+    await flush();
+    assert.equal(queue.get(task.id), task);
+    assert.equal(database.records.has(database.key(task.ownerId, task.id)), true);
+    assert.equal(task.calls, 1);
+    assert.equal(task.state.status, 'running');
+    await queue.cancel(task.id);
+});
+
+test('offline background submission resolves and reconnect starts execution', async (t) => {
+    const { queue, database, TestTask, connect } = await setup(t, { online: false });
+    const task = new TestTask({ operation: untilAborted });
+    assert.deepEqual(await queue.submit(task, { waitForFirstTry: false }), {
+        status: 'queued',
+        taskId: task.id,
+    });
+    assert.equal(task.calls, 0);
+    assert.equal(task.state.status, 'queued');
+    assert.equal(database.records.has(database.key(task.ownerId, task.id)), true);
+    connect(true);
+    await flush();
+    assert.equal(task.calls, 1);
+    assert.equal(task.state.status, 'running');
+    await queue.cancel(task.id);
+});
+
+test('background failures stay durable and manual retry uses the same task', async (t) => {
+    const { queue, database, TestTask } = await setup(t);
+    const failure = new Error('Transfer rejected');
+    const task = new TestTask({
+        operation: async (_signal, current) => {
+            if (current.calls === 1) throw failure;
+            return 'accepted';
+        },
+    });
+    assert.equal((await queue.submit(task, { waitForFirstTry: false })).status, 'queued');
+    await flush();
+    assert.equal(task.state.status, 'failed');
+    assert.equal(task.failure, failure);
+    assert.equal(queue.get(task.id), task);
+    assert.equal(database.records.get(database.key(task.ownerId, task.id)).state.status, 'failed');
+    await queue.retry(task.id);
+    assert.equal(task.calls, 2);
+    assert.equal(task.state.status, 'completed');
+    assert.equal(queue.pendingCount, 0);
+    assert.equal(database.records.size, 0);
+});
+
+test('background admission rejects storage failure without starting execution', async (t) => {
+    const { queue, database, TestTask, taskModule } = await setup(t);
+    t.mock.method(database, 'create', async () => {
+        throw new DOMException('Full', 'QuotaExceededError');
+    });
+    const task = new TestTask();
+    await assert.rejects(
+        queue.submit(task, { waitForFirstTry: false }),
+        (error) => error instanceof taskModule.TaskPersistenceError,
+    );
+    assert.equal(task.calls, 0);
+    assert.equal(queue.pendingCount, 0);
+    assert.equal(database.records.size, 0);
+});
+
+test('a background checkpoint failure cannot reject successful admission', async (t) => {
+    const { queue, database, TestTask } = await setup(t);
+    t.mock.method(database, 'save', async () => {
+        throw new Error('Storage unavailable');
+    });
+    const task = new TestTask();
+    assert.equal((await queue.submit(task, { waitForFirstTry: false })).status, 'queued');
+    await flush();
+    assert.equal(task.calls, 0);
+    assert.equal(task.state.status, 'blocked');
+    assert.equal(queue.get(task.id), task);
+    assert.match(queue.storageError, /Storage unavailable/);
+});
+
+test('background submission rejects duplicate IDs during admission', async (t) => {
+    const { queue, database, TestTask } = await setup(t, { online: false });
+    const commit = deferred();
+    const create = database.create.bind(database);
+    t.mock.method(database, 'create', async (snapshot) => {
+        await commit.promise;
+        await create(snapshot);
+    });
+    const task = new TestTask();
+    const submission = queue.submit(task, { waitForFirstTry: false });
+    assert.throws(() => queue.submit(task, { waitForFirstTry: false }), /already enqueued/);
+    assert.throws(
+        () => queue.submit(new TestTask({ id: task.id }), { waitForFirstTry: false }),
+        /already enqueued/,
+    );
+    commit.resolve();
+    await submission;
+    assert.equal(database.records.size, 1);
+});
+
+test('cancellation during background admission removes the committed record', async (t) => {
+    const { queue, database, TestTask } = await setup(t, { online: false });
+    const commit = deferred();
+    const create = database.create.bind(database);
+    t.mock.method(database, 'create', async (snapshot) => {
+        await commit.promise;
+        await create(snapshot);
+    });
+    const task = new TestTask();
+    const rejected = assert.rejects(queue.submit(task, { waitForFirstTry: false }), {
+        name: 'AbortError',
+    });
+    await flush();
+    await queue.cancel(task.id);
+    commit.resolve();
+    await rejected;
+    assert.equal(task.calls, 0);
+    assert.equal(queue.pendingCount, 0);
+    assert.equal(database.records.size, 0);
+});
+
+test('account changes during background admission retain the old account record', async (t) => {
+    const { queue, database, TestTask, setAuth } = await setup(t, { online: false });
+    const commit = deferred();
+    const create = database.create.bind(database);
+    t.mock.method(database, 'create', async (snapshot) => {
+        await commit.promise;
+        await create(snapshot);
+    });
+    const task = new TestTask();
+    const rejected = assert.rejects(queue.submit(task, { waitForFirstTry: false }), {
+        name: 'AbortError',
+    });
+    await flush();
+    setAuth('other', true);
+    commit.resolve();
+    await rejected;
+    await queue.initialize();
+    assert.equal(task.calls, 0);
+    assert.equal(queue.pendingCount, 0);
+    assert.equal(database.records.size, 1);
+    setAuth('owner', true);
+    await queue.initialize();
+    assert.equal(queue.get(task.id).state.status, 'queued');
+});
+
+test('clearSaved drains background admission before erasing records', async (t) => {
+    const { queue, database, TestTask } = await setup(t, { online: false });
+    const commit = deferred();
+    const create = database.create.bind(database);
+    t.mock.method(database, 'create', async (snapshot) => {
+        await commit.promise;
+        await create(snapshot);
+    });
+    const task = new TestTask();
+    const rejected = assert.rejects(queue.submit(task, { waitForFirstTry: false }), {
+        name: 'AbortError',
+    });
+    await flush();
+    const clearing = queue.clearSaved();
+    commit.resolve();
+    await rejected;
+    await clearing;
+    assert.equal(task.calls, 0);
+    assert.equal(queue.pendingCount, 0);
+    assert.equal(database.records.size, 0);
+    assert.throws(() => queue.submit(new TestTask(), { waitForFirstTry: false }), /stopped/);
 });

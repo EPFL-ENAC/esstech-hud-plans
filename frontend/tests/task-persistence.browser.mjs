@@ -110,6 +110,7 @@ try {
             const { useNetworkDependentTasks } =
                 await import('/src/stores/networkDependentTasks.ts');
             const { TasksDatabase } = await import('/src/lib/tasksDatabase.ts');
+            const { LocalUploadsRegistry } = await import('/src/lib/localUploadsRegistry.ts');
             const { VideoUploadTask } = await import('/src/lib/videoUploadTask.ts');
             const { ReconstructionSubmissionTask } =
                 await import('/src/lib/reconstructionSubmissionTask.ts');
@@ -117,6 +118,8 @@ try {
             window.persistenceHarness = {
                 queue: app.runWithContext(useNetworkDependentTasks),
                 database: new TasksDatabase(),
+                uploads: new LocalUploadsRegistry(),
+                LocalUploadsRegistry,
                 TasksDatabase,
                 VideoUploadTask,
                 ReconstructionSubmissionTask,
@@ -137,11 +140,46 @@ try {
 
     await page.goto(`${origin}/#/more/tasks`);
     await harness();
+    await page.evaluate(async () => {
+        const { uploads } = window.persistenceHarness;
+        try {
+            await uploads.create('validation-owner', new File([], 'empty.mp4'));
+            throw new Error('Empty registration unexpectedly succeeded');
+        } catch (error) {
+            if (error.status !== 400) throw error;
+        }
+
+        const originalAdd = IDBObjectStore.prototype.add;
+        IDBObjectStore.prototype.add = function (...args) {
+            if (this.name === 'files') {
+                throw new DOMException('Full', 'QuotaExceededError');
+            }
+            return originalAdd.apply(this, args);
+        };
+        try {
+            try {
+                await uploads.create('validation-owner', new File(['video'], 'quota.mp4'));
+                throw new Error('Quota failure unexpectedly succeeded');
+            } catch (error) {
+                if (error.cause?.name !== 'QuotaExceededError') throw error;
+            }
+        } finally {
+            IDBObjectStore.prototype.add = originalAdd;
+        }
+        if ((await uploads.list('validation-owner')).length !== 0) {
+            throw new Error('Failed registration left partial metadata');
+        }
+    });
     await offline(true);
     const identity = await page.evaluate(async () => {
-        const { queue, VideoUploadTask, ReconstructionSubmissionTask } = window.persistenceHarness;
+        const { queue, ReconstructionSubmissionTask } = window.persistenceHarness;
+        const { useScheduleVideoUploadMutation } = await import('/src/mutations/uploads.ts');
+        const app = document.querySelector('#q-app').__vue_app__;
+        const mutation = app.runWithContext(useScheduleVideoUploadMutation);
         const file = new File(['video'], 'scan.mp4', { type: 'video/mp4', lastModified: 42 });
-        const video = new VideoUploadTask({ ownerId: 'owner', label: 'Durable video', file });
+        const prepared = await mutation.mutateAsync({ file });
+        const video = queue.get(prepared.taskId);
+        if (!video) throw new Error('Prepared upload task is missing from the queue');
         const reconstruction = new ReconstructionSubmissionTask({
             ownerId: 'owner',
             label: 'Durable reconstruction',
@@ -151,35 +189,41 @@ try {
                 settings: { ffmpeg: { fps: 4 } },
             },
         });
-        const videoResult = await queue.submit(video);
         const reconstructionResult = await queue.submit(reconstruction);
-        if (videoResult.status !== 'queued' || reconstructionResult.status !== 'queued')
-            throw new Error('Expected durable queued success');
+        if (reconstructionResult.status !== 'queued') {
+            throw new Error('Expected a durable queued reconstruction');
+        }
         return {
-            videoId: video.id,
+            videoId: prepared.taskId,
+            localUploadId: prepared.localUploadId,
             reconstructionId: reconstruction.id,
             createdAt: video.createdAt,
         };
     });
     await reload();
     assert.deepEqual(
-        await page.evaluate(async ({ videoId, reconstructionId, createdAt }) => {
-            const { queue } = window.persistenceHarness;
+        await page.evaluate(async ({ videoId, localUploadId, reconstructionId, createdAt }) => {
+            const { queue, uploads } = window.persistenceHarness;
             const video = queue.get(videoId);
+            const file = await uploads.getFile('owner', localUploadId);
             return {
                 count: queue.pendingCount,
                 reconstructed: Boolean(queue.get(reconstructionId)),
                 sameDate: video.createdAt === createdAt,
-                bytes: await video.file.text(),
-                name: video.file.name,
-                type: video.file.type,
-                lastModified: video.file.lastModified,
+                sameLocalId: video.localUploadId === localUploadId,
+                independentIds: video.id !== localUploadId,
+                bytes: await file.text(),
+                name: file.name,
+                type: file.type,
+                lastModified: file.lastModified,
             };
         }, identity),
         {
             count: 2,
             reconstructed: true,
             sameDate: true,
+            sameLocalId: true,
+            independentIds: true,
             bytes: 'video',
             name: 'scan.mp4',
             type: 'video/mp4',
@@ -188,18 +232,29 @@ try {
     );
 
     await page.evaluate(() => {
-        const { TasksDatabase } = window.persistenceHarness;
-        const save = TasksDatabase.prototype.save;
+        const { LocalUploadsRegistry } = window.persistenceHarness;
+        const setRemote = LocalUploadsRegistry.prototype.setRemote;
+        const put = IDBObjectStore.prototype.put;
+        const add = IDBObjectStore.prototype.add;
         let held = false;
-        TasksDatabase.prototype.save = async function (snapshot) {
-            if (!held && snapshot.type === 'video-upload' && snapshot.data.uploadUrl !== null) {
+        window.registryFileWrites = 0;
+        IDBObjectStore.prototype.put = function (...args) {
+            if (this.name === 'files') window.registryFileWrites++;
+            return put.apply(this, args);
+        };
+        IDBObjectStore.prototype.add = function (...args) {
+            if (this.name === 'files') window.registryFileWrites++;
+            return add.apply(this, args);
+        };
+        LocalUploadsRegistry.prototype.setRemote = async function (...args) {
+            if (!held) {
                 held = true;
                 window.checkpointWaiting = true;
                 await new Promise((resolve) => {
                     window.releaseCheckpoint = resolve;
                 });
             }
-            return save.call(this, snapshot);
+            return setRemote.apply(this, args);
         };
     });
     await offline(false);
@@ -218,17 +273,18 @@ try {
         (id) => window.persistenceHarness.queue.get(id)?.state.status === 'queued',
         identity.videoId,
     );
-    const savedUrl = await page.evaluate(async () => {
-        const rows = await window.persistenceHarness.database.list('owner');
-        return rows.find(({ type }) => type === 'video-upload').data.uploadUrl;
-    });
+    const savedUrl = await page.evaluate(async (localUploadId) => {
+        const record = await window.persistenceHarness.uploads.get('owner', localUploadId);
+        return record.remote.uploadUrl;
+    }, identity.localUploadId);
     assert.equal(savedUrl, `${origin}/persist-api/tus/files/video`);
+    assert.equal(await page.evaluate(() => window.registryFileWrites), 0);
     await reload();
     assert.equal(
-        await page.evaluate(
-            (id) => window.persistenceHarness.queue.get(id).serialize().snapshot.data.uploadUrl,
-            identity.videoId,
-        ),
+        await page.evaluate(async (localUploadId) => {
+            const record = await window.persistenceHarness.uploads.get('owner', localUploadId);
+            return record.remote.uploadUrl;
+        }, identity.localUploadId),
         savedUrl,
     );
     await offline(false);
@@ -242,19 +298,69 @@ try {
         ),
         0,
     );
-    assert.equal(
-        await page.evaluate(async (id) => {
-            try {
-                await window.persistenceHarness.database.files('owner', id).get('video');
-                return false;
-            } catch {
-                return true;
-            }
-        }, identity.videoId),
-        true,
+    assert.deepEqual(
+        await page.evaluate(async (localUploadId) => {
+            const { uploads } = window.persistenceHarness;
+            const record = await uploads.get('owner', localUploadId);
+            const file = await uploads.getFile('owner', localUploadId);
+            return { remote: record.remote, bytes: await file.text() };
+        }, identity.localUploadId),
+        {
+            remote: { uploadId: 'video', uploadUrl: savedUrl },
+            bytes: 'video',
+        },
     );
+
+    const patchCount = requests.filter(({ method }) => method === 'PATCH').length;
+    const headCount = requests.filter(({ method }) => method === 'HEAD').length;
+    const replacement = await page.evaluate(async (localUploadId) => {
+        const { queue, uploads, VideoUploadTask } = window.persistenceHarness;
+        const task = new VideoUploadTask({
+            ownerId: 'owner',
+            label: 'Already transferred video',
+            localUploadId,
+            uploads,
+        });
+        const outcome = await queue.submit(task);
+        return { taskId: task.id, outcome };
+    }, identity.localUploadId);
+
+    assert.notEqual(replacement.taskId, identity.videoId);
+    assert.equal(replacement.outcome.status, 'completed');
+    assert.deepEqual(replacement.outcome.result, { uploadId: 'video', resumed: true });
+    assert.equal(creations, 1);
+    assert.equal(requests.filter(({ method }) => method === 'PATCH').length, patchCount);
+    assert.equal(requests.filter(({ method }) => method === 'HEAD').length, headCount + 1);
+
+    await page.evaluate(async (localUploadId) => {
+        const { uploads } = window.persistenceHarness;
+        const remote = (await uploads.get('owner', localUploadId)).remote;
+        await uploads.setRemote('owner', localUploadId, remote);
+        try {
+            await uploads.setRemote('owner', localUploadId, {
+                uploadId: 'replacement',
+                uploadUrl: 'https://hud.test/tus/files/replacement',
+            });
+            throw new Error('Remote replacement unexpectedly succeeded');
+        } catch (error) {
+            if (!error.cause?.message.includes('different remote upload')) throw error;
+        }
+        try {
+            await uploads.setRemote('owner', 'missing', remote);
+            throw new Error('Remote write recreated a missing upload');
+        } catch (error) {
+            if (!error.cause?.message.includes('Local upload is missing')) throw error;
+        }
+        const saved = await uploads.get('owner', localUploadId);
+        if (
+            saved.remote.uploadId !== remote.uploadId ||
+            saved.remote.uploadUrl !== remote.uploadUrl
+        ) {
+            throw new Error('Rejected write changed the remote reference');
+        }
+    }, identity.localUploadId);
     console.log(
-        'Reload: File metadata/bytes, task identities, exact URL, commit-before-PATCH and attachment cleanup passed',
+        'Registry: reload, retained files, metadata-only checkpoints, and completed-upload reuse passed',
     );
 
     const replayId = await page.evaluate(async () => {
@@ -282,21 +388,70 @@ try {
     );
 
     await offline(true);
-    const accountTaskId = await page.evaluate(async () => {
-        const { queue, VideoUploadTask } = window.persistenceHarness;
+    await page.evaluate(async () => {
+        const { queue, uploads, TasksDatabase, VideoUploadTask } = window.persistenceHarness;
+        const upload = await uploads.create('owner', new File(['video'], 'retained.mp4'));
+        const task = new VideoUploadTask({
+            ownerId: 'owner',
+            label: 'Admission failure',
+            localUploadId: upload.id,
+            uploads,
+        });
+        const create = TasksDatabase.prototype.create;
+        TasksDatabase.prototype.create = async function () {
+            throw new Error('Task admission failed');
+        };
+        try {
+            try {
+                await queue.submit(task);
+                throw new Error('Admission unexpectedly succeeded');
+            } catch (error) {
+                if (error.cause?.message !== 'Task admission failed') throw error;
+            }
+        } finally {
+            TasksDatabase.prototype.create = create;
+        }
+        const record = await uploads.get('owner', upload.id);
+        const file = await uploads.getFile('owner', upload.id);
+        if (record.id !== upload.id || (await file.text()) !== 'video') {
+            throw new Error('Failed task admission lost the registered upload');
+        }
+        if (queue.get(task.id)) throw new Error('Failed admission left an active task');
+    });
+
+    const accountUpload = await page.evaluate(async () => {
+        const { queue, uploads, VideoUploadTask } = window.persistenceHarness;
+        const upload = await uploads.create('owner', new File(['video'], 'owner.mp4'));
         const task = new VideoUploadTask({
             ownerId: 'owner',
             label: 'Account video',
-            file: new File(['video'], 'owner.mp4'),
+            localUploadId: upload.id,
+            uploads,
         });
         await queue.submit(task);
-        return task.id;
+        return { taskId: task.id, localUploadId: upload.id };
     });
+    const accountTaskId = accountUpload.taskId;
     await page.evaluate(async (accessToken) => {
         const { setAccessToken } = await import('/src/lib/auth.ts');
         setAccessToken(accessToken);
         await window.persistenceHarness.queue.initialize();
     }, token('other'));
+    assert.deepEqual(
+        await page.evaluate(() => window.persistenceHarness.uploads.list('other')),
+        [],
+    );
+    assert.equal(
+        await page.evaluate(async (localUploadId) => {
+            try {
+                await window.persistenceHarness.uploads.get('other', localUploadId);
+                return false;
+            } catch {
+                return true;
+            }
+        }, accountUpload.localUploadId),
+        true,
+    );
     assert.equal(await page.evaluate(() => window.persistenceHarness.queue.pendingCount), 0);
     assert.equal(
         await page.evaluate(
@@ -320,6 +475,13 @@ try {
         await window.persistenceHarness.queue.cancel(id);
     }, accountTaskId);
     assert.equal(
+        await page.evaluate(async (localUploadId) => {
+            const file = await window.persistenceHarness.uploads.getFile('owner', localUploadId);
+            return file.text();
+        }, accountUpload.localUploadId),
+        'video',
+    );
+    assert.equal(
         await page.evaluate(
             async () => (await window.persistenceHarness.database.list('owner')).length,
         ),
@@ -337,7 +499,7 @@ try {
                 settings: { ffmpeg: { fps: 4 } },
             },
         }).serialize();
-        serialized.snapshot.type = 'retired-task-type';
+        serialized.type = 'retired-task-type';
         await database.create(serialized);
     });
     await reload();
@@ -356,11 +518,13 @@ try {
         const { clearLocalData } = await import('/src/lib/auth.ts');
         await clearLocalData();
     });
-    assert.equal(
+    assert.deepEqual(
         await page.evaluate(async () =>
-            (await indexedDB.databases()).some(({ name }) => name === 'hud-network-tasks'),
+            (await indexedDB.databases())
+                .map(({ name }) => name)
+                .filter((name) => ['hud-network-tasks', 'hud-local-uploads'].includes(name)),
         ),
-        false,
+        [],
     );
     assert.deepEqual(errors, []);
     console.log(

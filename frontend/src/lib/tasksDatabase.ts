@@ -1,18 +1,14 @@
-import type { SerializedTask, TaskFiles, TaskSnapshot } from 'src/lib/networkDependentTasks';
+import type { TaskSnapshot } from 'src/lib/networkDependentTasks';
 import type { StoredTaskSnapshot } from 'src/lib/taskRegistry';
 
 export class TasksDatabase {
     private pending: Promise<void> = Promise.resolve();
     private closed = false;
 
-    create({ snapshot, files = {} }: SerializedTask): Promise<void> {
+    create(snapshot: TaskSnapshot): Promise<void> {
         return this.enqueue(() =>
             this.transaction('readwrite', (transaction) => {
                 transaction.objectStore('tasks').add(snapshot);
-                const store = transaction.objectStore('files');
-                for (const [name, file] of Object.entries(files)) {
-                    store.add(file, [snapshot.ownerId, snapshot.id, name]);
-                }
             }),
         );
     }
@@ -40,36 +36,10 @@ export class TasksDatabase {
         return request!.result;
     }
 
-    files(ownerId: string, taskId: string): TaskFiles {
-        return {
-            get: async (name) => {
-                let request: IDBRequest<File | undefined>;
-                await this.enqueue(() =>
-                    this.transaction('readonly', (transaction) => {
-                        request = transaction.objectStore('files').get([ownerId, taskId, name]);
-                    }),
-                );
-                const file = request!.result;
-                if (file === undefined) throw new Error('Saved task file is missing.');
-                return file;
-            },
-        };
-    }
-
     delete(ownerId: string, taskId: string): Promise<void> {
         return this.enqueue(() =>
             this.transaction('readwrite', (transaction) => {
                 transaction.objectStore('tasks').delete([ownerId, taskId]);
-                const store = transaction.objectStore('files');
-                const request = store.openKeyCursor(
-                    IDBKeyRange.bound([ownerId, taskId], [ownerId, taskId, []]),
-                );
-                request.onsuccess = () => {
-                    const cursor = request.result;
-                    if (!cursor) return;
-                    store.delete(cursor.primaryKey);
-                    cursor.continue();
-                };
             }),
         );
     }
@@ -87,7 +57,6 @@ export class TasksDatabase {
     private clearRecords(): Promise<void> {
         return this.transaction('readwrite', (transaction) => {
             transaction.objectStore('tasks').clear();
-            transaction.objectStore('files').clear();
         });
     }
 
@@ -106,7 +75,6 @@ export class TasksDatabase {
                 const database = request.result;
                 const tasks = database.createObjectStore('tasks', { keyPath: ['ownerId', 'id'] });
                 tasks.createIndex('ownerId', 'ownerId');
-                database.createObjectStore('files');
             };
             request.onsuccess = () => {
                 if (blocked) request.result.close();
@@ -128,7 +96,7 @@ export class TasksDatabase {
         const database = await this.open();
         try {
             await new Promise<void>((resolve, reject) => {
-                const transaction = database.transaction(['tasks', 'files'], mode);
+                const transaction = database.transaction(['tasks'], mode);
                 transaction.oncomplete = () => resolve();
                 transaction.onabort = () =>
                     reject(transaction.error ?? new Error('Task storage transaction failed.'));

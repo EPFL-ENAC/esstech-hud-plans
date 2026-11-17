@@ -1,4 +1,5 @@
-import type { NetworkDependentTask, TaskFiles, TaskSnapshot } from 'src/lib/networkDependentTasks';
+import type { LocalUploadsRegistry } from 'src/lib/localUploadsRegistry';
+import type { NetworkDependentTask, TaskSnapshot } from 'src/lib/networkDependentTasks';
 import {
     ReconstructionSubmissionTask,
     type ReconstructionSubmissionData,
@@ -9,13 +10,13 @@ export type StoredTaskSnapshot =
     | (TaskSnapshot<VideoUploadData> & { type: 'video-upload' })
     | (TaskSnapshot<ReconstructionSubmissionData> & { type: 'reconstruction-submission' });
 
-export async function deserializeTask(
+export function deserializeTask(
     snapshot: StoredTaskSnapshot,
-    files: TaskFiles,
-): Promise<NetworkDependentTask<unknown>> {
+    uploads: LocalUploadsRegistry,
+): NetworkDependentTask<unknown> {
     switch (snapshot.type) {
         case 'video-upload':
-            return VideoUploadTask.deserialize(snapshot, files);
+            return VideoUploadTask.deserialize(snapshot, uploads);
         case 'reconstruction-submission':
             return ReconstructionSubmissionTask.deserialize(snapshot);
         default:

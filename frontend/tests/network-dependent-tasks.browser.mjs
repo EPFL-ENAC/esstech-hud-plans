@@ -76,7 +76,9 @@ try {
                     }
                     serialize() {
                         return {
-                            snapshot: { ...this.serializeBase(), type: 'browser-test', data: {} },
+                            ...this.serializeBase(),
+                            type: 'browser-test',
+                            data: {},
                         };
                     }
                     resume(signal) {

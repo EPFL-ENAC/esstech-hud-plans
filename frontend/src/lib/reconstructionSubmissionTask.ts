@@ -14,7 +14,6 @@ import {
     NetworkDependentTask,
     type FailureAction,
     type TaskOptions,
-    type SerializedTask,
     type TaskSnapshot,
 } from 'src/lib/networkDependentTasks';
 
@@ -75,16 +74,12 @@ export class ReconstructionSubmissionTask extends NetworkDependentTask<Reconstru
         }
     }
 
-    serialize(): SerializedTask<ReconstructionSubmissionData> {
+    serialize(): TaskSnapshot<ReconstructionSubmissionData> {
         return {
-            snapshot: {
-                ...this.serializeBase(),
-                type: 'reconstruction-submission',
-                data: {
-                    submission: JSON.parse(
-                        JSON.stringify(this.submission),
-                    ) as ReconstructionSubmission,
-                },
+            ...this.serializeBase(),
+            type: 'reconstruction-submission',
+            data: {
+                submission: JSON.parse(JSON.stringify(this.submission)) as ReconstructionSubmission,
             },
         };
     }

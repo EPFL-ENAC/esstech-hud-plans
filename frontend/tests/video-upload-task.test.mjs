@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { setImmediate as nextTurn } from 'node:timers/promises';
 import { test } from 'node:test';
-import { isReadonly } from 'vue';
 import { deferred, importTypeScript } from './helpers/typescript.mjs';
+import { MemoryLocalUploadsRegistry } from './helpers/localUploadsRegistry.mjs';
 
 class ApiError extends Error {
     constructor(message, status, body) {
@@ -75,28 +75,54 @@ async function fixture(t, { abortPromise = Promise.resolve() } = {}) {
     const idempotency = await importTypeScript(t, 'src/lib/idempotentRequests.ts', {
         'src/lib/api': api,
     });
+    const localUploads = await importTypeScript(t, 'src/lib/localUploadsRegistry.ts', {
+        'src/lib/api': api,
+    });
+    const registry = new MemoryLocalUploadsRegistry();
+    const localUpload = await registry.create(
+        'owner',
+        new File(['video'], 'clip.mp4', { type: 'video/mp4' }),
+    );
     const { VideoUploadTask } = await importTypeScript(t, 'src/lib/videoUploadTask.ts', {
         vue: import.meta.resolve('vue'),
         'src/lib/api': api,
         'src/lib/idempotentRequests': idempotency,
         'src/lib/networkDependentTasks': tasks,
         'src/lib/utils/taskTusUpload': transport,
+        'src/lib/localUploadsRegistry': localUploads,
     });
 
     return {
         uploads,
+        registry,
+        localUpload,
+        LocalUploadStorageError: localUploads.LocalUploadStorageError,
         task: (options = {}) =>
             new VideoUploadTask({
                 ownerId: 'owner',
                 label: 'Upload video',
-                file: new File(['video'], 'clip.mp4', {
-                    type: 'video/mp4',
-                }),
+                localUploadId: localUpload.id,
+                uploads: registry,
                 ...options,
             }),
-        announce(index, url = 'https://hud.test/tus/files/upload-id') {
-            uploads[index].url = url;
-            uploads[index].options.onUploadUrlAvailable();
+        async announce(index, url = 'https://hud.test/tus/files/upload-id') {
+            const upload = uploads[index];
+            if (upload.options.uploadUrl === null) {
+                try {
+                    await upload.options.onAfterResponse(
+                        {
+                            getMethod: () => 'POST',
+                            getURL: () => 'https://hud.test/tus/files/',
+                        },
+                        tusResponse(201, { Location: url }),
+                    );
+                } catch {
+                    return;
+                }
+            }
+            if (upload.aborts.length > 0) return;
+            upload.url = url;
+            upload.options.onUploadUrlAvailable();
         },
         setOwner(value) {
             ownerId = value;
@@ -107,10 +133,12 @@ async function fixture(t, { abortPromise = Promise.resolve() } = {}) {
     };
 }
 
-test('empty files fail before transport creation', async (t) => {
+test('missing local uploads fail before transport creation', async (t) => {
     const f = await fixture(t);
-
-    assert.throws(() => f.task({ file: new File([], 'empty.mp4') }), { status: 400 });
+    const task = f.task({ localUploadId: 'missing' });
+    await task.retryOrResume();
+    assert.equal(task.state.status, 'failed');
+    assert.match(task.failure.message, /Local upload is missing/);
     assert.equal(f.uploads.length, 0);
 });
 
@@ -123,17 +151,18 @@ test('publishes progress, early availability, and completion', async (t) => {
         onCompleted: (result) => completed.push(result),
     });
 
-    assert.equal(isReadonly(task.uploadState), true);
-
     const attempt = task.retryOrResume();
     await nextTurn();
 
-    f.announce(0);
-    f.announce(0);
+    await f.announce(0);
+    await f.announce(0);
     f.uploads[0].options.onProgress(2, 5);
 
     assert.deepEqual(available, ['upload-id']);
-    assert.equal(task.uploadState.uploadId, 'upload-id');
+    assert.deepEqual((await f.registry.get('owner', task.localUploadId)).remote, {
+        uploadId: 'upload-id',
+        uploadUrl: 'https://hud.test/tus/files/upload-id',
+    });
     assert.equal(task.state.status, 'running');
     assert.deepEqual(task.state.progress, {
         completed: 2,
@@ -165,7 +194,7 @@ test('retry uses the exact URL without discovery or replacement', async (t) => {
     assert.equal(f.uploads[0].options.storeFingerprintForResuming, false);
     assert.equal(f.uploads[0].options.removeFingerprintOnSuccess, false);
 
-    f.announce(0);
+    await f.announce(0);
     assert.equal(f.uploads[0].options.endpoint, null);
 
     await task.pause();
@@ -179,7 +208,7 @@ test('retry uses the exact URL without discovery or replacement', async (t) => {
     assert.equal(upload.options.endpoint, null);
     assert.deepEqual(upload.options.retryDelays, [0, 1000, 3000, 5000, 10000, 20000]);
 
-    f.announce(1);
+    await f.announce(1);
     upload.options.onSuccess();
 
     assert.deepEqual(await secondAttempt, {
@@ -233,7 +262,7 @@ test('cancellation waits for cleanup and suppresses late callbacks', async (t) =
     const attempt = task.retryOrResume();
     await nextTurn();
 
-    f.announce(0);
+    await f.announce(0);
     f.uploads[0].options.onProgress(2, 5);
 
     const cancellation = task.cancel();
@@ -291,7 +320,7 @@ test('invalid locations produce permanent failures', async (t) => {
     const attempt = task.retryOrResume();
     await nextTurn();
 
-    f.announce(0, 'https://hud.test/tus/files/');
+    await f.announce(0, 'https://hud.test/tus/files/');
     await attempt;
 
     assert.equal(task.state.status, 'failed');
@@ -310,7 +339,7 @@ test('availability callback failure does not fail the upload', async (t) => {
     const attempt = task.retryOrResume();
     await nextTurn();
 
-    f.announce(0);
+    await f.announce(0);
     await nextTurn();
     f.uploads[0].options.onSuccess();
     await attempt;
@@ -487,8 +516,11 @@ test('real Tus waits for a durable creation URL before availability or PATCH', a
         ownerId: 'owner',
         uploadUrl: null,
         signal: new AbortController().signal,
-        async onCheckpoint(url) {
-            assert.equal(url, 'https://hud.test/tus/files/durable');
+        async onCheckpoint(remote) {
+            assert.deepEqual(remote, {
+                uploadId: 'durable',
+                uploadUrl: 'https://hud.test/tus/files/durable',
+            });
             checkpointStarted.resolve();
             await commit.promise;
         },
@@ -533,4 +565,64 @@ test('a creation checkpoint failure preserves its error and never transfers byte
         transport.requests.map(({ method }) => method),
         ['POST'],
     );
+});
+
+test('failed remote writes block and retry saves the same location before resuming', async (t) => {
+    const f = await fixture(t);
+    const originalSetRemote = f.registry.setRemote.bind(f.registry);
+    let writes = 0;
+
+    t.mock.method(f.registry, 'setRemote', async (...args) => {
+        writes++;
+        if (writes === 1) {
+            throw new f.LocalUploadStorageError(new DOMException('Full', 'QuotaExceededError'));
+        }
+        return originalSetRemote(...args);
+    });
+
+    const task = f.task();
+    const firstAttempt = task.retryOrResume();
+    await nextTurn();
+    await f.announce(0);
+    await firstAttempt;
+
+    assert.equal(task.state.status, 'blocked');
+    assert.equal((await f.registry.get('owner', task.localUploadId)).remote, null);
+
+    task.requestRetry();
+    const secondAttempt = task.retryOrResume();
+    await nextTurn();
+
+    assert.equal(writes, 2);
+    assert.equal(f.uploads[1].options.uploadUrl, 'https://hud.test/tus/files/upload-id');
+    assert.equal(f.uploads[1].options.endpoint, null);
+
+    await f.announce(1);
+    f.uploads[1].options.onSuccess();
+    await secondAttempt;
+    assert.equal(task.state.status, 'completed');
+});
+
+test('a new task can use an upload retained after completion', async (t) => {
+    const f = await fixture(t);
+    const first = f.task();
+    const firstAttempt = first.retryOrResume();
+    await nextTurn();
+    await f.announce(0);
+    f.uploads[0].options.onSuccess();
+    await firstAttempt;
+
+    const second = f.task();
+    assert.notEqual(second.id, first.id);
+    assert.equal(second.localUploadId, first.localUploadId);
+
+    const secondAttempt = second.retryOrResume();
+    await nextTurn();
+    assert.equal(f.uploads[1].options.uploadUrl, 'https://hud.test/tus/files/upload-id');
+    assert.equal(f.uploads[1].options.endpoint, null);
+    await f.announce(1);
+    f.uploads[1].options.onSuccess();
+
+    assert.deepEqual(await secondAttempt, { uploadId: 'upload-id', resumed: true });
+    assert.equal(await (await f.registry.getFile('owner', first.localUploadId)).text(), 'video');
 });
