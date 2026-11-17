@@ -170,9 +170,80 @@ try {
             throw new Error('Failed registration left partial metadata');
         }
     });
+
+    await page.evaluate(async () => {
+        const { uploads, LocalUploadsRegistry } = window.persistenceHarness;
+        const local = await uploads.create('owner', new File(['video'], 'same-tab.mp4'));
+        const controller = new AbortController();
+        const waiting = uploads.waitForRemote('owner', local.id, controller.signal);
+        const remote = {
+            uploadId: 'same-tab-upload',
+            uploadUrl: `${location.origin}/persist-api/tus/files/same-tab-upload`,
+        };
+        await new LocalUploadsRegistry().setRemote('owner', local.id, remote);
+        if ((await waiting).uploadId !== remote.uploadId) {
+            throw new Error('Same-tab registry notification did not resolve its waiter');
+        }
+    });
+
+    // Open the writer before admitting the task so only the first tab restores it.
+    const writer = await context.newPage();
+    writer.setDefaultTimeout(15_000);
+    await writer.goto(`${origin}/#/more/tasks`);
+    await writer.waitForFunction(() => document.querySelector('#q-app')?.__vue_app__);
+    await writer.evaluate(async () => {
+        const { useNetworkDependentTasks } = await import('/src/stores/networkDependentTasks.ts');
+        const app = document.querySelector('#q-app').__vue_app__;
+        await app.runWithContext(useNetworkDependentTasks).initialize();
+    });
+
+    const localSubmission = await page.evaluate(async () => {
+        const { uploads } = window.persistenceHarness;
+        const { useSubmitReconstructionMutation } =
+            await import('/src/mutations/reconstructions.ts');
+        const local = await uploads.create('owner', new File(['video'], 'waiting.mp4'));
+        const app = document.querySelector('#q-app').__vue_app__;
+        const mutation = app.runWithContext(useSubmitReconstructionMutation);
+        const outcome = await mutation.mutateAsync({
+            buildingId: 'building',
+            localUploadId: local.id,
+            settings: { ffmpeg: { fps: 4 } },
+        });
+        if (outcome.status !== 'queued') throw new Error('Local submission did not return queued');
+        return { localUploadId: local.id, taskId: outcome.taskId };
+    });
+    await page.waitForFunction(
+        (id) => window.persistenceHarness.queue.get(id)?.state.status === 'running',
+        localSubmission.taskId,
+    );
+    assert.equal(
+        requests.some(({ key }) => key === localSubmission.taskId),
+        false,
+    );
+    await reload();
+    await page.waitForFunction(
+        (id) => window.persistenceHarness.queue.get(id)?.state.status === 'running',
+        localSubmission.taskId,
+    );
+    assert.equal(
+        requests.some(({ key }) => key === localSubmission.taskId),
+        false,
+    );
+    await writer.evaluate(async (localUploadId) => {
+        const { LocalUploadsRegistry } = await import('/src/lib/localUploadsRegistry.ts');
+        await new LocalUploadsRegistry().setRemote('owner', localUploadId, {
+            uploadId: 'cross-tab-upload',
+            uploadUrl: `${location.origin}/persist-api/tus/files/cross-tab-upload`,
+        });
+    }, localSubmission.localUploadId);
+    await page.waitForFunction(() => window.persistenceHarness.queue.pendingCount === 0);
+    assert.equal(requests.filter(({ key }) => key === localSubmission.taskId).length, 1);
+    await writer.close();
+    console.log('Local submission: queued immediately, restored its wait, and woke across tabs');
+
     await offline(true);
     const identity = await page.evaluate(async () => {
-        const { queue, ReconstructionSubmissionTask } = window.persistenceHarness;
+        const { queue, uploads, ReconstructionSubmissionTask } = window.persistenceHarness;
         const { useScheduleVideoUploadMutation } = await import('/src/mutations/uploads.ts');
         const app = document.querySelector('#q-app').__vue_app__;
         const mutation = app.runWithContext(useScheduleVideoUploadMutation);
@@ -181,6 +252,7 @@ try {
         const video = queue.get(prepared.taskId);
         if (!video) throw new Error('Prepared upload task is missing from the queue');
         const reconstruction = new ReconstructionSubmissionTask({
+            uploads,
             ownerId: 'owner',
             label: 'Durable reconstruction',
             submission: {
@@ -364,8 +436,9 @@ try {
     );
 
     const replayId = await page.evaluate(async () => {
-        const { queue, ReconstructionSubmissionTask } = window.persistenceHarness;
+        const { queue, uploads, ReconstructionSubmissionTask } = window.persistenceHarness;
         const task = new ReconstructionSubmissionTask({
+            uploads,
             ownerId: 'owner',
             label: 'Replay',
             submission: {
@@ -489,8 +562,9 @@ try {
     );
 
     await page.evaluate(async () => {
-        const { database, ReconstructionSubmissionTask } = window.persistenceHarness;
+        const { database, uploads, ReconstructionSubmissionTask } = window.persistenceHarness;
         const serialized = new ReconstructionSubmissionTask({
+            uploads,
             ownerId: 'owner',
             label: 'Unknown',
             submission: {

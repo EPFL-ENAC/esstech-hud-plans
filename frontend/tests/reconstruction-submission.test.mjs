@@ -52,6 +52,17 @@ async function fixture(t, { online = true } = {}) {
     const idempotency = await importTypeScript(t, 'src/lib/idempotentRequests.ts', {
         'src/lib/api': api,
     });
+    const localUploads = await importTypeScript(t, 'src/lib/localUploadsRegistry.ts', {
+        'src/lib/api': api,
+    });
+    const uploads = new MemoryLocalUploadsRegistry();
+    const injectedUploads = {
+        LocalUploadsRegistry: class {
+            constructor() {
+                return uploads;
+            }
+        },
+    };
     const reconstructionTasks = await importTypeScript(
         t,
         'src/lib/reconstructionSubmissionTask.ts',
@@ -61,6 +72,7 @@ async function fixture(t, { online = true } = {}) {
             'src/lib/buildings': buildings,
             'src/lib/idempotentRequests': idempotency,
             'src/lib/networkDependentTasks': tasks,
+            'src/lib/localUploadsRegistry': localUploads,
         },
     );
     const authentication = await importTypeScript(t, 'src/composables/useAuthentication.ts', {
@@ -77,9 +89,7 @@ async function fixture(t, { online = true } = {}) {
         'src/composables/useAuthentication': authentication,
         'src/composables/useOnlineConnection': connection,
         'src/lib/networkDependentTasks': tasks,
-        'src/lib/localUploadsRegistry': {
-            LocalUploadsRegistry: MemoryLocalUploadsRegistry,
-        },
+        'src/lib/localUploadsRegistry': injectedUploads,
         'src/lib/tasksDatabase': {
             TasksDatabase: class {
                 constructor() {
@@ -88,8 +98,11 @@ async function fixture(t, { online = true } = {}) {
             },
         },
         'src/lib/taskRegistry': {
-            deserializeTask(snapshot) {
-                return reconstructionTasks.ReconstructionSubmissionTask.deserialize(snapshot);
+            deserializeTask(snapshot, registry) {
+                return reconstructionTasks.ReconstructionSubmissionTask.deserialize(
+                    snapshot,
+                    registry,
+                );
             },
         },
     });
@@ -104,6 +117,7 @@ async function fixture(t, { online = true } = {}) {
             'src/lib/api': api,
             'src/lib/buildings': buildings,
             'src/lib/reconstructionSubmissionTask': reconstructionTasks,
+            'src/lib/localUploadsRegistry': injectedUploads,
             'src/lib/networkDependentTasks': tasks,
             'src/stores/networkDependentTasks': queueModule,
         },
@@ -128,6 +142,7 @@ async function fixture(t, { online = true } = {}) {
     });
     return {
         submissions,
+        uploads,
         invalidation,
         queue,
         scope,
@@ -182,6 +197,69 @@ function assertInvalidations(f, buildingId) {
         f.invalidation.mock.calls.map((call) => call.arguments[0]),
         expectedInvalidations(buildingId),
     );
+}
+
+for (const buildingId of ['existing-building', null]) {
+    for (const alreadyAssigned of [false, true]) {
+        test(`local submission for ${buildingId} returns queued with remote ${alreadyAssigned ? 'present' : 'pending'}`, async (t) => {
+            const f = await fixture(t);
+            const local = await f.uploads.create('test-user', new File(['video'], 'scan.mp4'));
+            const remote = {
+                uploadId: 'remote',
+                uploadUrl: 'https://hud.test/tus/files/remote',
+            };
+            if (alreadyAssigned) await f.uploads.setRemote('test-user', local.id, remote);
+            const mutation = f.mutation();
+            const { uploadId: _uploadId, ...input } = variables(buildingId);
+            const outcome = await mutation.mutateAsync({ ...input, localUploadId: local.id });
+            assert.equal(outcome.status, 'queued');
+            assert.equal(mutation.isLoading.value, false);
+            assert.equal(mutation.destinationBuildingId.value, buildingId);
+            assert.equal(f.invalidation.mock.callCount(), 0);
+            const task = f.queue.get(outcome.taskId);
+            assert.ok(task);
+            assert.equal(task.serialize().data.submission.localUploadId, local.id);
+
+            await nextTurn();
+            if (!alreadyAssigned) {
+                assert.equal(f.submissions.length, 0);
+                await f.uploads.setRemote('test-user', local.id, remote);
+                await nextTurn();
+            }
+            assert.equal(JSON.parse(f.submissions[0].init.body).upload_id, remote.uploadId);
+            respond(f.submissions[0], {
+                id: 'reconstruction',
+                building_id: buildingId ?? 'created-building',
+            });
+            await task.waitUntilIdle();
+            await nextTurn();
+            assert.equal(mutation.data.value, outcome);
+            assert.equal(f.queue.pendingCount, 0);
+            assertInvalidations(f, buildingId ?? 'created-building');
+        });
+    }
+}
+
+for (const nextSubject of [null, 'another-user']) {
+    test(`changing account to ${nextSubject} stops a local dependency wait`, async (t) => {
+        const f = await fixture(t);
+        const local = await f.uploads.create('test-user', new File(['video'], 'scan.mp4'));
+        const { uploadId: _uploadId, ...input } = variables();
+        const outcome = await f.mutation().mutateAsync({ ...input, localUploadId: local.id });
+        const task = f.queue.get(outcome.taskId);
+        await nextTurn();
+        f.setSubject(nextSubject);
+        await f.queue.initialize();
+        await f.uploads.setRemote('test-user', local.id, {
+            uploadId: 'remote',
+            uploadUrl: 'https://hud.test/tus/files/remote',
+        });
+        await nextTurn();
+        assert.equal(f.submissions.length, 0);
+        assert.equal(f.uploads.waiters.size, 0);
+        assert.equal(task.state.status, 'queued');
+        assert.equal(f.invalidation.mock.callCount(), 0);
+    });
 }
 
 for (const buildingId of ['existing-building', null]) {

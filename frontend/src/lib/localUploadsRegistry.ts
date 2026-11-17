@@ -1,5 +1,12 @@
 import { ApiError } from 'src/lib/api';
 
+const UPLOADS_CHANNEL = 'hud-local-uploads';
+
+interface LocalUploadChanged {
+    ownerId: string;
+    localUploadId: string;
+}
+
 export interface RemoteUpload {
     uploadId: string;
     uploadUrl: string;
@@ -125,6 +132,77 @@ export class LocalUploadsRegistry {
                     abort(error);
                 }
             };
+        });
+
+        const channel = new BroadcastChannel(UPLOADS_CHANNEL);
+
+        try {
+            channel.postMessage({ ownerId, localUploadId } satisfies LocalUploadChanged);
+        } finally {
+            channel.close();
+        }
+    }
+
+    waitForRemote(
+        ownerId: string,
+        localUploadId: string,
+        signal: AbortSignal,
+    ): Promise<RemoteUpload> {
+        signal.throwIfAborted();
+
+        const channel = new BroadcastChannel(UPLOADS_CHANNEL);
+
+        return new Promise<RemoteUpload>((resolve, reject) => {
+            let settled = false;
+
+            const cleanup = (): void => {
+                settled = true;
+                channel.close();
+                signal.removeEventListener('abort', onAbort);
+            };
+
+            const onAbort = (): void => {
+                if (settled) return;
+
+                cleanup();
+                reject(
+                    signal.reason instanceof Error
+                        ? signal.reason
+                        : new DOMException('Aborted', 'AbortError'),
+                );
+            };
+
+            const check = async (): Promise<void> => {
+                if (settled) return;
+
+                try {
+                    const record = await this.get(ownerId, localUploadId);
+                    if (settled || record.remote === null) return;
+
+                    cleanup();
+                    resolve(record.remote);
+                } catch (error) {
+                    if (settled) return;
+
+                    cleanup();
+                    reject(error instanceof Error ? error : new LocalUploadStorageError(error));
+                }
+            };
+
+            channel.onmessage = (event: MessageEvent<LocalUploadChanged | null>): void => {
+                if (
+                    event.data?.ownerId === ownerId &&
+                    event.data?.localUploadId === localUploadId
+                ) {
+                    void check();
+                }
+            };
+
+            signal.addEventListener('abort', onAbort, { once: true });
+
+            // Subscribe first, then read, so assignment cannot be missed.
+            if (signal.aborted) onAbort();
+            else void check();
         });
     }
 

@@ -19,20 +19,21 @@ async function fixture(t) {
         'src/lib/api': api,
         'src/lib/resumableDownload': { ResumableDownload: {} },
     });
+    const localUploads = await importTypeScript(t, 'src/lib/localUploadsRegistry.ts', {
+        'src/lib/api': api,
+    });
     const reconstruction = await importTypeScript(t, 'src/lib/reconstructionSubmissionTask.ts', {
         vue: import.meta.resolve('vue'),
         'src/lib/api': api,
         'src/lib/buildings': buildings,
         'src/lib/networkDependentTasks': tasks,
+        'src/lib/localUploadsRegistry': localUploads,
         'src/lib/idempotentRequests': {
             requestIdempotentJson() {},
             idempotentRequestFailureAction() {
                 return 'failed';
             },
         },
-    });
-    const localUploads = await importTypeScript(t, 'src/lib/localUploadsRegistry.ts', {
-        'src/lib/api': api,
     });
     const uploads = new MemoryLocalUploadsRegistry();
     const video = await importTypeScript(t, 'src/lib/videoUploadTask.ts', {
@@ -85,6 +86,7 @@ for (const buildingId of ['existing', null]) {
             ownerId: 'owner',
             label: 'Reconstruct',
             submission,
+            uploads: f.uploads,
             onCompleted() {
                 assert.fail('Callbacks must not be restored');
             },
@@ -93,7 +95,10 @@ for (const buildingId of ['existing', null]) {
         const snapshot = task.serialize();
         snapshot.state.status = 'running';
         snapshot.state.attempts = 3;
-        const restored = f.ReconstructionSubmissionTask.deserialize(structuredClone(snapshot));
+        const restored = f.ReconstructionSubmissionTask.deserialize(
+            structuredClone(snapshot),
+            f.uploads,
+        );
         assert.equal(restored.id, task.id);
         assert.equal(restored.createdAt, 123);
         assert.equal(restored.state.status, 'queued');

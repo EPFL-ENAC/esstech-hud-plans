@@ -1,6 +1,7 @@
 export class MemoryLocalUploadsRegistry {
     records = new Map();
     files = new Map();
+    waiters = new Set();
 
     key(ownerId, localUploadId) {
         return JSON.stringify([ownerId, localUploadId]);
@@ -63,6 +64,38 @@ export class MemoryLocalUploadsRegistry {
         this.records.set(this.key(ownerId, localUploadId), {
             ...record,
             remote: structuredClone(remote),
+        });
+
+        for (const notify of this.waiters) notify(ownerId, localUploadId, remote);
+    }
+
+    waitForRemote(ownerId, localUploadId, signal) {
+        signal.throwIfAborted();
+
+        return new Promise((resolve, reject) => {
+            const cleanup = () => {
+                this.waiters.delete(notify);
+                signal.removeEventListener('abort', abort);
+            };
+            const abort = () => {
+                cleanup();
+                reject(signal.reason);
+            };
+            const notify = (owner, id, remote) => {
+                if (owner !== ownerId || id !== localUploadId || remote === null) return;
+                cleanup();
+                resolve(structuredClone(remote));
+            };
+
+            this.waiters.add(notify);
+            signal.addEventListener('abort', abort, { once: true });
+            void this.get(ownerId, localUploadId).then(
+                (record) => notify(ownerId, localUploadId, record.remote),
+                (error) => {
+                    cleanup();
+                    reject(error);
+                },
+            );
         });
     }
 }

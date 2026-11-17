@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { setImmediate as nextTurn } from 'node:timers/promises';
 import { test } from 'node:test';
-import { isReadonly, watchEffect } from 'vue';
+import { isReadonly, reactive, watchEffect } from 'vue';
+import { MemoryLocalUploadsRegistry } from './helpers/localUploadsRegistry.mjs';
 import { deferred, importTypeScript } from './helpers/typescript.mjs';
 
 async function fixture(t) {
@@ -28,6 +29,10 @@ async function fixture(t) {
     const idempotentRequests = await importTypeScript(t, 'src/lib/idempotentRequests.ts', {
         'src/lib/api': api,
     });
+    const localUploads = await importTypeScript(t, 'src/lib/localUploadsRegistry.ts', {
+        'src/lib/api': api,
+    });
+    const uploads = new MemoryLocalUploadsRegistry();
     const { ReconstructionSubmissionTask } = await importTypeScript(
         t,
         'src/lib/reconstructionSubmissionTask.ts',
@@ -37,15 +42,20 @@ async function fixture(t) {
             'src/lib/buildings': buildings,
             'src/lib/networkDependentTasks': tasks,
             'src/lib/idempotentRequests': idempotentRequests,
+            'src/lib/localUploadsRegistry': localUploads,
         },
     );
     return {
         requests,
+        uploads,
+        LocalUploadStorageError: localUploads.LocalUploadStorageError,
+        restore: (snapshot) => ReconstructionSubmissionTask.deserialize(snapshot, uploads),
         task: (submission) =>
             new ReconstructionSubmissionTask({
                 ownerId: 'owner',
                 label: 'Submit reconstruction',
                 submission,
+                uploads,
             }),
     };
 }
@@ -62,6 +72,163 @@ function submission(buildingId = 'existing/building') {
             : { buildingId }),
     };
 }
+
+function localSubmission(localUploadId, buildingId = 'existing/building') {
+    const { uploadId: _uploadId, ...input } = submission(buildingId);
+    return { ...input, localUploadId };
+}
+
+const remote = { uploadId: 'remote', uploadUrl: 'https://hud.test/tus/files/remote' };
+
+for (const buildingId of ['existing/building', null]) {
+    for (const alreadyAssigned of [false, true]) {
+        test(`local upload for ${buildingId} submits with remote ID assigned ${alreadyAssigned ? 'before' : 'after'} starting`, async (t) => {
+            const f = await fixture(t);
+            const local = await f.uploads.create('owner', new File(['video'], 'scan.mp4'));
+            if (alreadyAssigned) await f.uploads.setRemote('owner', local.id, remote);
+
+            const task = f.task(localSubmission(local.id, buildingId));
+            t.after(() => task.cancel());
+            const fileReads = t.mock.method(f.uploads, 'getFile');
+            const attempt = task.retryOrResume();
+            await nextTurn();
+            if (!alreadyAssigned) {
+                assert.equal(f.requests.length, 0);
+                assert.equal(task.state.status, 'running');
+                await f.uploads.setRemote('owner', local.id, remote);
+                await nextTurn();
+            }
+
+            assert.equal(f.requests.length, 1);
+            assert.deepEqual(JSON.parse(f.requests[0].init.body), {
+                upload_id: remote.uploadId,
+                settings: { ffmpeg: { fps: 4 } },
+                ...(buildingId === null ? { building: submission(null).building } : {}),
+            });
+            assert.equal(fileReads.mock.callCount(), 0);
+            assert.equal(f.requests[0].init.headers.get('Idempotency-Key'), task.id);
+
+            f.requests[0].gate.reject(new TypeError('Connection lost'));
+            await attempt;
+            task.requestRetry();
+            const retry = task.retryOrResume();
+            await nextTurn();
+            assert.equal(f.requests[1].init.body, f.requests[0].init.body);
+            assert.equal(f.requests[1].init.headers.get('Idempotency-Key'), task.id);
+            respond(f.requests[1], null, 204);
+            await retry;
+            assert.equal(task.state.status, 'completed');
+        });
+    }
+}
+
+test('remote references never read the local registry', async (t) => {
+    const f = await fixture(t);
+    const read = t.mock.method(f.uploads, 'get');
+    const wait = t.mock.method(f.uploads, 'waitForRemote');
+    const task = f.task(submission());
+    const attempt = task.retryOrResume();
+    await nextTurn();
+    respond(f.requests[0], null, 204);
+    await attempt;
+    assert.equal(read.mock.callCount(), 0);
+    assert.equal(wait.mock.callCount(), 0);
+});
+
+test('cancelling a dependency wait cannot submit later or change the upload', async (t) => {
+    const f = await fixture(t);
+    const local = await f.uploads.create('owner', new File(['video'], 'scan.mp4'));
+    const task = f.task(localSubmission(local.id));
+    const attempt = task.retryOrResume();
+    await nextTurn();
+    await task.cancel();
+    await attempt;
+    assert.equal(f.uploads.waiters.size, 0);
+    await f.uploads.setRemote('owner', local.id, remote);
+    await nextTurn();
+    assert.equal(task.state.status, 'cancelled');
+    assert.equal(f.requests.length, 0);
+    assert.deepEqual((await f.uploads.get('owner', local.id)).remote, remote);
+});
+
+test('a paused dependency wait resumes by checking the registry again', async (t) => {
+    const f = await fixture(t);
+    const local = await f.uploads.create('owner', new File(['video'], 'scan.mp4'));
+    const task = f.task(localSubmission(local.id));
+    const attempt = task.retryOrResume();
+    await nextTurn();
+    await task.pause();
+    await attempt;
+    assert.equal(task.state.status, 'queued');
+    assert.equal(f.uploads.waiters.size, 0);
+    await f.uploads.setRemote('owner', local.id, remote);
+    assert.equal(f.requests.length, 0);
+    const resumed = task.retryOrResume();
+    await nextTurn();
+    respond(f.requests[0], null, 204);
+    await resumed;
+    assert.equal(task.state.status, 'completed');
+});
+
+test('a restored waiting submission retains its local reference, input and identity', async (t) => {
+    const f = await fixture(t);
+    const local = await f.uploads.create('owner', new File(['video'], 'scan.mp4'));
+    const input = reactive(localSubmission(local.id, null));
+    const task = f.task(input);
+    const attempt = task.retryOrResume();
+    await nextTurn();
+    input.settings.ffmpeg.fps = 99;
+    input.building.name = 'Changed';
+    const snapshot = structuredClone(task.serialize());
+    await task.pause();
+    await attempt;
+
+    const restored = f.restore(snapshot);
+    t.after(() => restored.cancel());
+    assert.equal(restored.id, task.id);
+    assert.equal(restored.createdAt, task.createdAt);
+    assert.equal(restored.state.status, 'queued');
+    assert.deepEqual(restored.serialize().data.submission, localSubmission(local.id, null));
+    const resumed = restored.retryOrResume();
+    await nextTurn();
+    assert.equal(f.requests.length, 0);
+    await f.uploads.setRemote('owner', local.id, remote);
+    await nextTurn();
+    assert.equal(f.requests[0].init.headers.get('Idempotency-Key'), task.id);
+    assert.equal(JSON.parse(f.requests[0].init.body).settings.ffmpeg.fps, 4);
+    respond(f.requests[0], null, 204);
+    await resumed;
+    assert.equal(restored.state.status, 'completed');
+});
+
+test('a missing local upload fails without sending a request', async (t) => {
+    const f = await fixture(t);
+    const task = f.task(localSubmission('missing'));
+    await task.retryOrResume();
+    assert.equal(task.state.status, 'failed');
+    assert.equal(task.state.error, 'Local upload is missing.');
+    assert.equal(f.requests.length, 0);
+});
+
+test('local storage failures block the task and permit manual retry', async (t) => {
+    const f = await fixture(t);
+    const local = await f.uploads.create('owner', new File(['video'], 'scan.mp4'));
+    const task = f.task(localSubmission(local.id));
+    const wait = t.mock.method(f.uploads, 'waitForRemote', async () => {
+        throw new f.LocalUploadStorageError(new Error('Read failed'));
+    });
+    await task.retryOrResume();
+    assert.equal(task.state.status, 'blocked');
+    assert.equal(f.requests.length, 0);
+    wait.mock.restore();
+    await f.uploads.setRemote('owner', local.id, remote);
+    task.requestRetry();
+    const retry = task.retryOrResume();
+    await nextTurn();
+    respond(f.requests[0], null, 204);
+    await retry;
+    assert.equal(task.state.status, 'completed');
+});
 
 function respond(request, body, status = 202) {
     request.gate.resolve(

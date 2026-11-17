@@ -18,7 +18,7 @@ export function deserializeTask(
         case 'video-upload':
             return VideoUploadTask.deserialize(snapshot, uploads);
         case 'reconstruction-submission':
-            return ReconstructionSubmissionTask.deserialize(snapshot);
+            return ReconstructionSubmissionTask.deserialize(snapshot, uploads);
         default:
             throw new Error('Unknown saved task type.');
     }

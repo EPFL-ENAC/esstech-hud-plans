@@ -10,6 +10,7 @@ import {
     getReconstructionSubmissionErrorMessage,
 } from 'src/lib/buildings';
 import { idempotentRequestFailureAction, requestIdempotentJson } from 'src/lib/idempotentRequests';
+import { LocalUploadStorageError, type LocalUploadsRegistry } from 'src/lib/localUploadsRegistry';
 import {
     NetworkDependentTask,
     type FailureAction,
@@ -17,13 +18,18 @@ import {
     type TaskSnapshot,
 } from 'src/lib/networkDependentTasks';
 
-export type ReconstructionSubmission = BuildingSelection & {
-    uploadId: string;
-    settings: SplatGenerationSettings;
-};
+export type ReconstructionUploadReference =
+    | { uploadId: string; localUploadId?: never }
+    | { localUploadId: string; uploadId?: never };
+
+export type ReconstructionSubmission = BuildingSelection &
+    ReconstructionUploadReference & {
+        settings: SplatGenerationSettings;
+    };
 
 export interface ReconstructionSubmissionTaskOptions extends TaskOptions<ReconstructionSubmissionResult> {
     submission: ReconstructionSubmission;
+    uploads: LocalUploadsRegistry;
 }
 
 export interface ReconstructionSubmissionResult {
@@ -41,37 +47,24 @@ export interface ReconstructionSubmissionData {
 
 export class ReconstructionSubmissionTask extends NetworkDependentTask<ReconstructionSubmissionResult> {
     private readonly submission: ReconstructionSubmission;
+    private readonly uploads: LocalUploadsRegistry;
     private readonly buildingId: string | null;
     private readonly path: string;
-    private readonly body: string;
 
     private readonly mutableResult = shallowRef<ReconstructionSubmissionResult | null>(null);
 
     readonly result = readonly(this.mutableResult);
 
-    constructor({ submission, ...options }: ReconstructionSubmissionTaskOptions) {
+    constructor({ submission, uploads, ...options }: ReconstructionSubmissionTaskOptions) {
         super(options);
 
         this.submission = JSON.parse(JSON.stringify(submission)) as ReconstructionSubmission;
-        submission = this.submission;
-
-        this.buildingId = submission.buildingId;
-
-        if (submission.buildingId === null) {
-            this.path = '/buildings/from-reconstruction/from-upload';
-            this.body = JSON.stringify({
-                building: submission.building,
-                upload_id: submission.uploadId,
-                settings: submission.settings,
-            });
-        } else {
-            const buildingId = encodeURIComponent(submission.buildingId);
-            this.path = `/buildings/${buildingId}/reconstructions/from-upload`;
-            this.body = JSON.stringify({
-                upload_id: submission.uploadId,
-                settings: submission.settings,
-            });
-        }
+        this.uploads = uploads;
+        this.buildingId = this.submission.buildingId;
+        this.path =
+            this.buildingId === null
+                ? '/buildings/from-reconstruction/from-upload'
+                : `/buildings/${encodeURIComponent(this.buildingId)}/reconstructions/from-upload`;
     }
 
     serialize(): TaskSnapshot<ReconstructionSubmissionData> {
@@ -86,6 +79,7 @@ export class ReconstructionSubmissionTask extends NetworkDependentTask<Reconstru
 
     static deserialize(
         snapshot: TaskSnapshot<ReconstructionSubmissionData>,
+        uploads: LocalUploadsRegistry,
     ): ReconstructionSubmissionTask {
         const task = new ReconstructionSubmissionTask({
             id: snapshot.id,
@@ -93,20 +87,43 @@ export class ReconstructionSubmissionTask extends NetworkDependentTask<Reconstru
             ownerId: snapshot.ownerId,
             label: snapshot.label,
             submission: snapshot.data.submission,
+            uploads,
         });
         task.restoreState(snapshot.state);
         return task;
+    }
+
+    private async resolveUploadId(signal: AbortSignal): Promise<string> {
+        const submission = this.submission;
+        if (submission.localUploadId === undefined) return submission.uploadId;
+
+        const remote = await this.uploads.waitForRemote(
+            this.ownerId,
+            submission.localUploadId,
+            signal,
+        );
+        return remote.uploadId;
     }
 
     protected override async resume(signal: AbortSignal): Promise<ReconstructionSubmissionResult> {
         signal.throwIfAborted();
 
         try {
+            const uploadId = await this.resolveUploadId(signal);
+            signal.throwIfAborted();
+
+            const submission = this.submission;
+            const body = JSON.stringify({
+                upload_id: uploadId,
+                settings: submission.settings,
+                ...(submission.buildingId === null ? { building: submission.building } : {}),
+            });
+
             const response = await requestIdempotentJson<SubmissionResponse>(this.path, {
                 idempotencyKey: this.id,
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: this.body,
+                body,
                 signal,
             });
 
@@ -169,6 +186,8 @@ export class ReconstructionSubmissionTask extends NetworkDependentTask<Reconstru
     }
 
     protected override failureAction(error: unknown): FailureAction {
+        if (error instanceof LocalUploadStorageError) return 'blocked';
+
         return idempotentRequestFailureAction(error);
     }
 }

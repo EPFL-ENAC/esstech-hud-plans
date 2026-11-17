@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { i18n } from 'src/i18n/instance';
 import { ApiError } from 'src/lib/api';
 import { getAuthSubject } from 'src/lib/auth';
+import { LocalUploadsRegistry } from 'src/lib/localUploadsRegistry';
 import { TaskPersistenceError } from 'src/lib/networkDependentTasks';
 import type { Page } from 'src/lib/pagination';
 import {
@@ -116,6 +117,7 @@ function invalidateSubmissionQueries(
 }
 
 export function useSubmitReconstructionMutation() {
+    const uploads = new LocalUploadsRegistry();
     const queue = useNetworkDependentTasks();
     const queryCache = useQueryCache();
     const subject = getAuthSubject();
@@ -133,10 +135,12 @@ export function useSubmitReconstructionMutation() {
                     ownerId: subject,
                     label: i18n.global.t('capture.submittingReconstruction'),
                     submission,
+                    uploads,
                     onCompleted: ({ buildingId }) => {
                         invalidateSubmissionQueries(queryCache, subject, buildingId);
                     },
                 }),
+                { waitForFirstTry: submission.localUploadId === undefined },
             );
         },
     });
