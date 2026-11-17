@@ -43,6 +43,11 @@ async function fixture(t) {
             '@pinia/colada': import.meta.resolve('@pinia/colada'),
             'src/lib/auth': { getAuthSubject: () => 'test-user' },
             'src/lib/buildings': buildings,
+            'src/i18n/instance': { i18n: {} },
+            'src/lib/api': { ApiError: buildings.ApiError },
+            'src/lib/networkDependentTasks': { TaskPersistenceError: class extends Error {} },
+            'src/lib/reconstructionSubmissionTask': { ReconstructionSubmissionTask: class {} },
+            'src/stores/networkDependentTasks': { useNetworkDependentTasks() {} },
         },
     );
     const { useReconstructionsQuery } = await importTypeScript(

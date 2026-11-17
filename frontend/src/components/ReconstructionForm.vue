@@ -66,13 +66,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import { useI18n } from 'vue-i18n';
 import BuildingPicker from 'src/components/BuildingPicker.vue';
 import ReconstructionSettings from 'src/components/ReconstructionSettings.vue';
 import type { BuildingSelection } from 'src/lib/buildings';
+import { getAuthSubject } from 'src/lib/auth';
 import {
     type ReconstructionPreset,
     type ReconstructionSettingsConfig,
@@ -99,11 +100,22 @@ const $q = useQuasar();
 const {
     mutateAsync: submitReconstruction,
     isLoading: submitting,
+    data: submissionResult,
     destinationBuildingId,
     errorMessage: mutationError,
 } = useSubmitReconstructionMutation();
 const navigationError = ref('');
-const submissionError = computed(() => navigationError.value || mutationError.value);
+const submissionWarning = computed(() =>
+    submissionResult.value?.status === 'completed' ? submissionResult.value.result.warning : null,
+);
+const submissionError = computed(
+    () => navigationError.value || mutationError.value || submissionWarning.value,
+);
+const subject = getAuthSubject();
+let mounted = true;
+onBeforeUnmount(() => {
+    mounted = false;
+});
 const hasValidBuilding = ref(false);
 const presetOptions = computed(() => [
     { value: 'indoors', label: t('capture.presets.indoors') },
@@ -113,7 +125,7 @@ const presetOptions = computed(() => [
 const hasValidSettings = computed(
     () => preset.value !== 'advanced' || isValidReconstructionSettings(advancedSettings.value),
 );
-const locked = computed(() => submitting.value || destinationBuildingId.value !== null);
+const locked = computed(() => submitting.value || submissionResult.value !== undefined);
 const canSubmit = computed(
     () => !props.disabled && !locked.value && hasValidSettings.value && hasValidBuilding.value,
 );
@@ -127,31 +139,38 @@ async function startProcessing(): Promise<void> {
             : makeDefaultReconstructionSettings(preset.value),
     );
     navigationError.value = '';
-    // Colada exposes submission errors through mutationError, including retained IDs.
-    await submitReconstruction({
+    const outcome = await submitReconstruction({
         uploadId: props.uploadId,
         settings,
         ...buildingSelection.value,
     }).catch(() => undefined);
 
-    if (destinationBuildingId.value === null) return;
+    if (!outcome || !mounted || getAuthSubject() !== subject) return;
+    const warning = outcome.status === 'completed' ? outcome.result.warning : null;
     $q.notify({
-        type: mutationError.value ? 'negative' : 'positive',
-        message: mutationError.value || t('reconstructions.submitted'),
+        type: warning ? 'negative' : 'positive',
+        message:
+            warning ||
+            t(outcome.status === 'queued' ? 'reconstructions.queued' : 'reconstructions.submitted'),
         position: 'top',
     });
     await openBuilding(destinationBuildingId.value);
 }
 
-async function openBuilding(buildingId: string): Promise<void> {
+async function openBuilding(buildingId: string | null): Promise<void> {
+    if (!mounted || getAuthSubject() !== subject) return;
     ui.setBackground('library');
     try {
-        const failure = await router.push(`/building/${encodeURIComponent(buildingId)}`);
-        if (failure) {
+        const failure = await router.push(
+            buildingId === null ? '/library' : `/building/${encodeURIComponent(buildingId)}`,
+        );
+        if (failure && mounted && getAuthSubject() === subject) {
             navigationError.value = t('buildings.savedNavigationFailed');
         }
     } catch {
-        navigationError.value = t('buildings.savedNavigationFailed');
+        if (mounted && getAuthSubject() === subject) {
+            navigationError.value = t('buildings.savedNavigationFailed');
+        }
     }
 }
 defineExpose({ locked });

@@ -1,6 +1,36 @@
 import type enUS from '../en-US';
 
 export default {
+    tasks: {
+        title: 'Tâches en attente',
+        empty: 'Aucune tâche en attente.',
+        persisted:
+            'Les tâches en attente sont enregistrées sur cet appareil et reprennent à la réouverture de l’application.',
+        restoring: 'Restauration des tâches en attente…',
+        offline: 'Vous êtes hors ligne. Les tâches reprendront à la reconnexion.',
+        authenticationRequired: 'Connectez-vous pour poursuivre les tâches en attente.',
+        waitingHelp:
+            'Les tâches interrompues reprendront à la reconnexion. Vous pouvez aussi réessayer manuellement.',
+        cancelHint:
+            'L’annulation arrête le travail local. Elle ne peut pas annuler un travail déjà accepté par le serveur.',
+        attempts: 'Tentatives : {count}',
+        retryLabel: 'Réessayer : {label}',
+        cancelLabel: 'Annuler : {label}',
+        progress: 'Progression : {label}',
+        progressValue: '{completed} / {total}',
+        unknownError: 'La tâche n’a pas pu être terminée.',
+        status: {
+            queued: 'En file d’attente',
+            running: 'En cours',
+            pausing: 'Mise en pause',
+            waiting: 'En attente de connexion',
+            blocked: 'Intervention requise',
+            failed: 'Échec',
+            cancelling: 'Annulation en cours',
+            cancelled: 'Annulée',
+            completed: 'Terminée',
+        },
+    },
     pwa: {
         install: 'Installer HUD Plans',
         installIos:
@@ -336,6 +366,7 @@ export default {
         new: 'Nouvelle reconstruction',
         named: 'Reconstruction {id}',
         submitted: 'Reconstruction envoyée.',
+        queued: 'Reconstruction en attente. Elle sera envoyée dès que la connexion sera disponible.',
         refreshFailed: 'Impossible d’actualiser les reconstructions.',
         loadFailed: 'Impossible de charger les reconstructions.',
         loading: 'Chargement des reconstructions',

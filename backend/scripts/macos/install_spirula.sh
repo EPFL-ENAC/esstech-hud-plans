@@ -17,6 +17,10 @@ log() {
     echo "[install spirula] $1"
 }
 
+have() {
+    command -v "$1" >/dev/null 2>&1
+}
+
 have curl || { log "curl is required"; exit 1; }
 have hdiutil || { log "hdiutil is required"; exit 1; }
 
