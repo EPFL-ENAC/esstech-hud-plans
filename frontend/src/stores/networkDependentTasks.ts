@@ -19,7 +19,7 @@ function aborted(): DOMException {
 export const useNetworkDependentTasks = defineStore('networkDependentTasks', () => {
     const database = new TasksDatabase();
     const entries = shallowReactive(new Map<string, AnyTask>());
-    const submissions = new Map<AnyTask, Promise<unknown>>();
+    const pendingSubmissions = new Map<AnyTask, Promise<unknown>>();
     // Only failed checkpoints need to survive account suspension in memory.
     const retained = new Set<AnyTask>();
     const tasks = computed<readonly AnyTask[]>(() => [...entries.values()]);
@@ -103,8 +103,8 @@ export const useNetworkDependentTasks = defineStore('networkDependentTasks', () 
         if (requestedOwner === ownerId && restoreFailure === null) return restoration;
         requestedOwner = ownerId;
         const epoch = ++generation;
-        const previous = new Set([...entries.values(), ...submissions.keys(), ...retained]);
-        const pending = [...submissions.values()];
+        const previous = new Set([...entries.values(), ...pendingSubmissions.keys(), ...retained]);
+        const pending = [...pendingSubmissions.values()];
         entries.clear();
         isRestoring.value = true;
         restoreFailure = null;
@@ -237,20 +237,23 @@ export const useNetworkDependentTasks = defineStore('networkDependentTasks', () 
         if (stopped) throw new Error('Task queue is stopped');
         if (!auth.refreshAuthentication()) throw new Error('Sign in before submitting tasks');
         if (task.ownerId !== auth.ownerId.value) throw new Error('Task belongs to another account');
-        if (entries.has(task.id) || [...submissions.keys()].some((entry) => entry.id === task.id)) {
+        if (
+            entries.has(task.id) ||
+            [...pendingSubmissions.keys()].some((entry) => entry.id === task.id)
+        ) {
             throw new Error('Task is already enqueued');
         }
         if (task.state.status !== 'queued') throw new Error('Only queued tasks can be submitted');
         const ready = initialize();
         const submission = admit(task, ready, generation).finally(() => {
-            submissions.delete(task);
+            pendingSubmissions.delete(task);
         });
-        submissions.set(task, submission);
+        pendingSubmissions.set(task, submission);
         return submission;
     }
 
     async function execute(task: AnyTask, retryWaiting = false): Promise<void> {
-        await submissions.get(task)?.catch(() => undefined);
+        await pendingSubmissions.get(task)?.catch(() => undefined);
         await task.waitUntilIdle();
         if (
             stopped ||
@@ -268,7 +271,7 @@ export const useNetworkDependentTasks = defineStore('networkDependentTasks', () 
     async function retry(id: string): Promise<void> {
         const task = entries.get(id);
         if (!task || stopped || !isOnline.value || !auth.refreshAuthentication()) return;
-        await submissions.get(task)?.catch(() => undefined);
+        await pendingSubmissions.get(task)?.catch(() => undefined);
         await task.waitUntilIdle();
         if (entries.get(id) !== task || stopped) return;
         if (['completed', 'cancelled', 'cancelling'].includes(task.state.status)) {
@@ -284,7 +287,8 @@ export const useNetworkDependentTasks = defineStore('networkDependentTasks', () 
     }
 
     async function cancel(id: string): Promise<void> {
-        const task = entries.get(id) ?? [...submissions.keys()].find((entry) => entry.id === id);
+        const task =
+            entries.get(id) ?? [...pendingSubmissions.keys()].find((entry) => entry.id === id);
         if (!task) return;
         await task.cancel();
         removeFinished(task);
@@ -292,7 +296,7 @@ export const useNetworkDependentTasks = defineStore('networkDependentTasks', () 
 
     async function clear(): Promise<void> {
         await Promise.all(
-            [...new Set([...entries.values(), ...submissions.keys()])].map((task) =>
+            [...new Set([...entries.values(), ...pendingSubmissions.keys()])].map((task) =>
                 cancel(task.id),
             ),
         );
@@ -301,11 +305,11 @@ export const useNetworkDependentTasks = defineStore('networkDependentTasks', () 
     async function clearSaved(): Promise<void> {
         stopped = true;
         ++generation;
-        const previous = new Set([...entries.values(), ...submissions.keys(), ...retained]);
+        const previous = new Set([...entries.values(), ...pendingSubmissions.keys(), ...retained]);
         entries.clear();
         await Promise.all([...previous].map(suspend));
         await restoration;
-        await Promise.allSettled([...submissions.values()]);
+        await Promise.allSettled([...pendingSubmissions.values()]);
         retained.clear();
         await database.clearAndClose();
     }
@@ -334,7 +338,7 @@ export const useNetworkDependentTasks = defineStore('networkDependentTasks', () 
     onScopeDispose(() => {
         stopped = true;
         ++generation;
-        const previous = new Set([...entries.values(), ...submissions.keys()]);
+        const previous = new Set([...entries.values(), ...pendingSubmissions.keys()]);
         entries.clear();
         for (const task of previous) void suspend(task);
     });
