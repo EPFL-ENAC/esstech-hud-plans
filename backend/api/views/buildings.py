@@ -4,7 +4,7 @@ import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -28,6 +28,7 @@ from api.services.buildings import (
     ReconstructionStatusFilter,
     SortOrder,
 )
+from api.services.idempotency import IdempotencyInProgressError, IdempotencyService
 from api.services.reconstructions import (
     ReconstructionConflictError,
     ReconstructionCreationError,
@@ -37,6 +38,7 @@ from api.services.reconstructions import (
 from api.services.uploads import UserUploadsService
 from api.views.reconstruction_submission import (
     BuildingFromUploadReconstructionSubmission,
+    get_idempotency_service,
     get_reconstruction_service,
     validate_user_upload,
 )
@@ -104,50 +106,68 @@ async def create_building(
     status_code=status.HTTP_202_ACCEPTED,
     response_model=BuildingFromReconstructionRead,
     responses={
+        204: {"description": "This operation was already accepted."},
         401: {"description": "Authentication is required."},
         404: {"description": "The upload is unknown or belongs to another user."},
-        409: {"description": "The upload has failed."},
+        409: {
+            "description": "The operation is being accepted or the upload has failed."
+        },
         422: {"description": "Invalid upload ID, building, or workflow settings."},
         503: {"model": BuildingFromReconstructionError},
     },
 )
 async def create_building_from_reconstruction_upload(
     payload: BuildingFromUploadReconstructionSubmission,
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1)],
     current_user: Annotated[User, Depends(require_user)],
+    idempotency: Annotated[IdempotencyService, Depends(get_idempotency_service)],
     buildings: Annotated[BuildingService, Depends(get_building_service)],
     reconstructions: Annotated[
         ReconstructionService,
         Depends(get_reconstruction_service),
     ],
     uploads: Annotated[UserUploadsService, Depends(get_uploads_service)],
-) -> BuildingFromReconstructionRead:
+) -> BuildingFromReconstructionRead | Response:
     """Create a building and reconstruction from a pending or completed upload."""
 
-    upload = await validate_user_upload(
-        payload.upload_id,
-        user_id=current_user.id,
-        uploads=uploads,
-    )
     try:
-        created_building = await buildings.create(
-            user_id=current_user.id,
-            payload=payload.building,
-        )
+        async with idempotency.operation(
+            owner_id=current_user.id,
+            idempotency_key=idempotency_key,
+        ) as should_run:
+            if not should_run:
+                return Response(status_code=status.HTTP_204_NO_CONTENT)
+            upload = await validate_user_upload(
+                payload.upload_id,
+                user_id=current_user.id,
+                uploads=uploads,
+            )
+            created_building = await buildings.add(
+                user_id=current_user.id,
+                payload=payload.building,
+            )
+            reconstruction = await reconstructions.add_from_upload(
+                user_id=current_user.id,
+                building_id=created_building.id,
+                upload_id=upload.id,
+                settings=payload.settings,
+            )
+    except IdempotencyInProgressError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "idempotency_in_progress"},
+            headers={"Retry-After": "1"},
+        ) from exc
+    except ReconstructionInputNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ReconstructionConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
     except (OSError, SQLAlchemyError) as exc:
         raise _database_unavailable(exc) from exc
 
     building_read = BuildingRead.model_validate(created_building)
     try:
-        reconstruction = await reconstructions.create_from_upload(
-            user_id=current_user.id,
-            building_id=building_read.id,
-            upload_id=upload.id,
-            settings=payload.settings,
-        )
-    except ReconstructionInputNotFoundError as exc:
-        raise HTTPException(404, str(exc)) from exc
-    except ReconstructionConflictError as exc:
-        raise HTTPException(409, str(exc)) from exc
+        reconstruction = await reconstructions.schedule_if_ready(reconstruction.id)
     except ReconstructionCreationError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

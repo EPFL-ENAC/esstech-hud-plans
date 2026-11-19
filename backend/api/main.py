@@ -52,6 +52,7 @@ app.add_middleware(
         "Content-Range",
         "ETag",
         "Location",
+        "Retry-After",
         "Upload-Offset",
         "Upload-Length",
         "Upload-Expires",

@@ -1,4 +1,32 @@
 export default {
+    tasks: {
+        title: 'Pending tasks',
+        empty: 'No pending tasks.',
+        persisted: 'Pending tasks are saved on this device and resume when you reopen the app.',
+        restoring: 'Restoring pending tasks…',
+        offline: 'You are offline. Pending tasks will continue when you reconnect.',
+        authenticationRequired: 'Sign in before continuing pending tasks.',
+        waitingHelp: 'Interrupted tasks retry when you reconnect. You can also retry manually.',
+        cancelHint:
+            'Cancelling stops local work. It cannot undo work already accepted by the server.',
+        attempts: 'Attempts: {count}',
+        retryLabel: 'Retry {label}',
+        cancelLabel: 'Cancel {label}',
+        progress: 'Progress for {label}',
+        progressValue: '{completed} / {total}',
+        unknownError: 'The task could not be completed.',
+        status: {
+            queued: 'Queued',
+            running: 'Running',
+            pausing: 'Pausing',
+            waiting: 'Waiting for connection',
+            blocked: 'Needs attention',
+            failed: 'Failed',
+            cancelling: 'Cancelling',
+            cancelled: 'Cancelled',
+            completed: 'Completed',
+        },
+    },
     pwa: {
         install: 'Install HUD Plans',
         installIos:
@@ -315,6 +343,7 @@ export default {
         new: 'New reconstruction',
         named: 'Reconstruction {id}',
         submitted: 'Reconstruction submitted.',
+        queued: 'Reconstruction queued. It will be submitted when the connection is available.',
         refreshFailed: 'Could not refresh reconstructions.',
         loadFailed: 'Could not load reconstructions.',
         loading: 'Loading reconstructions',

@@ -15,14 +15,18 @@ from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from api.config import config
+from api.db import get_session
 from api.lib.workflows import common, splat_generation
-from api.models.building import Building
+from api.models.building import Building, BuildingCreate
+from api.models.idempotency import IdempotencyRecords, IdempotencyStatus
 from api.models.reconstruction import (
     Reconstruction,
     ReconstructionArtifactUpdate,
@@ -31,12 +35,16 @@ from api.models.reconstruction import (
 from api.models.uploads import UploadStatus, UserUploads
 from api.models.user import User
 from api.models.workflows import SplatGenerationWorkflowSettings
+from api.services.auth import require_user
 from api.services.buildings import BuildingService
+from api.services.idempotency import IdempotencyInProgressError, IdempotencyService
 from api.services.reconstructions import (
     ReconstructionInputNotFoundError,
     ReconstructionService,
 )
 from api.services.uploads import UploadConflictError, UserUploadsService
+from api.views import buildings as building_views
+from api.views import reconstructions as reconstruction_views
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("HUD_TEST_POSTGRES") != "1",
@@ -130,6 +138,29 @@ async def wait_for_lock(engine: AsyncEngine, pid: int) -> None:
             if waiting:
                 return
             await asyncio.sleep(0.01)
+
+
+async def submit_reconstruction(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+    building_id: UUID,
+    upload_id: UUID,
+    settings: SplatGenerationWorkflowSettings,
+) -> Reconstruction:
+    service = ReconstructionService(session)
+    async with IdempotencyService(session).operation(
+        owner_id=user_id,
+        idempotency_key=str(uuid4()),
+    ) as should_run:
+        assert should_run
+        reconstruction = await service.add_from_upload(
+            user_id=user_id,
+            building_id=building_id,
+            upload_id=upload_id,
+            settings=settings,
+        )
+    return await service.schedule_if_ready(reconstruction.id)
 
 
 @pytest.mark.parametrize("action", ["cancel", "delete", "running", "complete"])
@@ -378,7 +409,8 @@ def test_creation_revalidates_after_parent_deletion(
                 ) as creating:
                     pid = await creating.scalar(text("SELECT pg_backend_pid()"))
                     creation = asyncio.create_task(
-                        ReconstructionService(creating).create_from_upload(
+                        submit_reconstruction(
+                            creating,
                             user_id=state.user_id,
                             building_id=state.building_id,
                             upload_id=state.upload_id,
@@ -463,7 +495,8 @@ def test_creation_and_completion_never_miss_dispatch(
 
                 monkeypatch.setattr(creating, "commit", commit_with_pause)
                 creation = asyncio.create_task(
-                    ReconstructionService(creating).create_from_upload(
+                    submit_reconstruction(
+                        creating,
                         user_id=state.user_id,
                         building_id=state.building_id,
                         upload_id=state.upload_id,
@@ -564,7 +597,7 @@ def test_cancelled_registration_request_rolls_back_and_releases_lock(
             )
             async with AsyncSession(state.engine, expire_on_commit=False) as session:
                 registration = asyncio.create_task(
-                    ReconstructionService(session)._schedule_if_ready(
+                    ReconstructionService(session).schedule_if_ready(
                         state.reconstruction_id
                     )
                 )
@@ -581,5 +614,298 @@ def test_cancelled_registration_request_rolls_back_and_releases_lock(
                     )
                     assert row.status == ReconstructionStatus.WAITING_FOR_UPLOAD
                     assert row.prefect_workflow_id is None
+
+    asyncio.run(run())
+
+
+def test_idempotent_acceptance_rejects_concurrent_requests_and_replays_after_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def run() -> None:
+        async with database(tmp_path, monkeypatch) as state:
+            key = str(uuid4())
+            async with (
+                AsyncSession(state.engine, expire_on_commit=False) as accepting,
+                AsyncSession(state.engine, expire_on_commit=False) as competing,
+            ):
+                async with IdempotencyService(accepting).operation(
+                    owner_id=state.user_id,
+                    idempotency_key=key,
+                ) as should_run:
+                    assert should_run
+                    record = await accepting.get(
+                        IdempotencyRecords, (state.user_id, key)
+                    )
+                    assert record is not None
+                    assert record.status == IdempotencyStatus.STARTED
+                    building = await BuildingService(accepting).add(
+                        user_id=state.user_id,
+                        payload=BuildingCreate(name="Accepted atomically"),
+                    )
+                    reconstruction = await ReconstructionService(
+                        accepting
+                    ).add_from_upload(
+                        user_id=state.user_id,
+                        building_id=building.id,
+                        upload_id=state.upload_id,
+                        settings=SplatGenerationWorkflowSettings(),
+                    )
+                    # The competitor must fail immediately, rather than waiting
+                    # for either the resource rows or the idempotency record.
+                    async with asyncio.timeout(1):
+                        with pytest.raises(IdempotencyInProgressError):
+                            async with IdempotencyService(competing).operation(
+                                owner_id=state.user_id,
+                                idempotency_key=key,
+                            ):
+                                pytest.fail("Concurrent acceptance must not run")
+                    assert await competing.get(Building, building.id) is None
+                    assert (
+                        await competing.get(IdempotencyRecords, (state.user_id, key))
+                        is None
+                    )
+
+                async with IdempotencyService(competing).operation(
+                    owner_id=state.user_id,
+                    idempotency_key=key,
+                ) as should_run:
+                    assert not should_run
+                saved = await competing.get(Reconstruction, reconstruction.id)
+                assert saved is not None
+                assert saved.building_id == building.id
+                assert saved.status == ReconstructionStatus.WAITING_FOR_UPLOAD
+                assert (
+                    await competing.scalar(
+                        text("SELECT status::text FROM idempotency_records")
+                    )
+                    == "completed"
+                )
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+def test_failed_acceptance_releases_lock_and_rolls_back_all_resources(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    cancel: bool,
+) -> None:
+    async def run() -> None:
+        async with database(tmp_path, monkeypatch) as state:
+            key = str(uuid4())
+            staged = asyncio.Event()
+            release = asyncio.Event()
+            building_id = uuid4()
+
+            async def accept() -> None:
+                nonlocal building_id
+                async with AsyncSession(
+                    state.engine, expire_on_commit=False
+                ) as session:
+                    async with IdempotencyService(session).operation(
+                        owner_id=state.user_id,
+                        idempotency_key=key,
+                    ) as should_run:
+                        assert should_run
+                        building = await BuildingService(session).add(
+                            user_id=state.user_id,
+                            payload=BuildingCreate(name="Must roll back"),
+                        )
+                        building_id = building.id
+                        await ReconstructionService(session).add_from_upload(
+                            user_id=state.user_id,
+                            building_id=building.id,
+                            upload_id=state.upload_id,
+                            settings=SplatGenerationWorkflowSettings(),
+                        )
+                        staged.set()
+                        await release.wait()
+                        raise RuntimeError("Acceptance interrupted")
+
+            acceptance = asyncio.create_task(accept())
+            try:
+                async with asyncio.timeout(5):
+                    await staged.wait()
+            finally:
+                if cancel:
+                    acceptance.cancel()
+                else:
+                    release.set()
+            with pytest.raises(asyncio.CancelledError if cancel else RuntimeError):
+                await asyncio.wait_for(acceptance, 5)
+
+            async with AsyncSession(state.engine, expire_on_commit=False) as session:
+                assert await session.get(Building, building_id) is None
+                assert (
+                    await session.get(IdempotencyRecords, (state.user_id, key)) is None
+                )
+                assert (
+                    await session.scalar(text("SELECT count(*) FROM reconstructions"))
+                    == 1
+                )  # Only the fixture's existing reconstruction remains.
+                async with asyncio.timeout(1):
+                    async with IdempotencyService(session).operation(
+                        owner_id=state.user_id,
+                        idempotency_key=key,
+                    ) as should_run:
+                        assert should_run
+                        await ReconstructionService(session).add_from_upload(
+                            user_id=state.user_id,
+                            building_id=state.building_id,
+                            upload_id=state.upload_id,
+                            settings=SplatGenerationWorkflowSettings(),
+                        )
+
+    asyncio.run(run())
+
+
+def test_idempotency_keys_are_isolated_by_owner_and_survive_resource_deletion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def run() -> None:
+        async with database(tmp_path, monkeypatch) as state:
+            other_owner = uuid4()
+            async with AsyncSession(state.engine, expire_on_commit=False) as session:
+                session.add(User(id=other_owner, keycloak_sub=str(other_owner)))
+                await session.commit()
+
+                async with IdempotencyService(session).operation(
+                    owner_id=state.user_id,
+                    idempotency_key="same-key",
+                ) as should_run:
+                    assert should_run
+                    async with AsyncSession(
+                        state.engine, expire_on_commit=False
+                    ) as other:
+                        async with asyncio.timeout(1):
+                            async with IdempotencyService(other).operation(
+                                owner_id=other_owner,
+                                idempotency_key="same-key",
+                            ) as should_run:
+                                assert should_run
+                            async with IdempotencyService(other).operation(
+                                owner_id=state.user_id,
+                                idempotency_key="different-key",
+                            ) as should_run:
+                                assert should_run
+
+                # Resource deletion must not make an accepted action reusable.
+                building = await session.get(Building, state.building_id)
+                assert building is not None
+                await session.delete(building)
+                await session.commit()
+                async with IdempotencyService(session).operation(
+                    owner_id=state.user_id,
+                    idempotency_key="same-key",
+                ) as should_run:
+                    assert not should_run
+
+                # User deletion cascades only that owner's records.
+                owner = await session.get(User, state.user_id)
+                assert owner is not None
+                await session.delete(owner)
+                await session.commit()
+                assert (
+                    await session.scalar(
+                        text("SELECT count(*) FROM idempotency_records")
+                    )
+                    == 1
+                )
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("new_building", [False, True])
+@pytest.mark.parametrize("pause_during", ["acceptance", "scheduling"])
+def test_submission_http_race_returns_conflict_or_completed_without_waiting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    new_building: bool,
+    pause_during: str,
+) -> None:
+    async def run() -> None:
+        async with database(tmp_path, monkeypatch) as state:
+            paused = asyncio.Event()
+            release = asyncio.Event()
+            original_add = ReconstructionService.add_from_upload
+            schedule = AsyncMock(return_value=uuid4())
+
+            async def add_with_pause(service, **kwargs):
+                reconstruction = await original_add(service, **kwargs)
+                if pause_during == "acceptance":
+                    paused.set()
+                    await release.wait()
+                return reconstruction
+
+            async def register(**kwargs):
+                if pause_during == "scheduling":
+                    paused.set()
+                    await release.wait()
+                return await schedule(**kwargs)
+
+            monkeypatch.setattr(
+                ReconstructionService, "add_from_upload", add_with_pause
+            )
+            monkeypatch.setattr(
+                splat_generation, "schedule_splat_generation_from_upload", register
+            )
+
+            async def session_override() -> AsyncIterator[AsyncSession]:
+                async with AsyncSession(
+                    state.engine, expire_on_commit=False
+                ) as session:
+                    yield session
+
+            app = FastAPI()
+            app.include_router(building_views.router, prefix="/buildings")
+            app.include_router(
+                reconstruction_views.router,
+                prefix="/buildings/{building_id}/reconstructions",
+            )
+            app.dependency_overrides[get_session] = session_override
+            app.dependency_overrides[require_user] = lambda: User(id=state.user_id)
+            url = (
+                "/buildings/from-reconstruction/from-upload"
+                if new_building
+                else f"/buildings/{state.building_id}/reconstructions/from-upload"
+            )
+            headers = {"Idempotency-Key": str(uuid4())}
+            payload = {"upload_id": str(state.upload_id)}
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                first = asyncio.create_task(
+                    client.post(url, headers=headers, json=payload)
+                )
+                try:
+                    async with asyncio.timeout(5):
+                        await paused.wait()
+                    async with asyncio.timeout(1):
+                        second = await client.post(url, headers=headers, json=payload)
+                    if pause_during == "acceptance":
+                        assert second.status_code == 409
+                        assert second.json() == {
+                            "detail": {"code": "idempotency_in_progress"}
+                        }
+                        assert second.headers["Retry-After"] == "1"
+                    else:
+                        assert second.status_code == 204
+                        assert second.content == b""
+                finally:
+                    release.set()
+                    response = await asyncio.wait_for(first, 5)
+                assert response.status_code == 202
+                row = (
+                    response.json()["reconstruction"]
+                    if new_building
+                    else response.json()
+                )
+                assert row["status"] == "scheduled"
+                assert schedule.await_count == 1
+                replay = await client.post(url, headers=headers, json=payload)
+                assert replay.status_code == 204
+                assert replay.content == b""
 
     asyncio.run(run())

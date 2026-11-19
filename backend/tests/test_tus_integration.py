@@ -80,6 +80,9 @@ def real_tus(
         @event.listens_for(engine.sync_engine, "connect")
         def enable_foreign_keys(connection: Any, _: Any) -> None:
             connection.execute("PRAGMA foreign_keys=ON")
+            # SQLite integration tests cover acceptance transactions. Real
+            # advisory lock contention is tested separately on PostgreSQL.
+            connection.create_function("pg_try_advisory_xact_lock", 1, lambda _: True)
 
     hook_secret = secrets.token_hex(32)
     subject_prefix = f"tus-integration-{uuid4().hex}"
@@ -412,6 +415,7 @@ def test_real_tus_upload_is_reusable_for_both_reconstruction_routes(
     location, upload_id = _start_upload(real_tus)
     first = client.post(
         "/buildings/from-reconstruction/from-upload",
+        headers={"Idempotency-Key": str(uuid4())},
         json={"upload_id": upload_id},
     )
     assert first.status_code == 202, first.text
@@ -429,6 +433,7 @@ def test_real_tus_upload_is_reusable_for_both_reconstruction_routes(
     building_id = first.json()["building"]["id"]
     second = client.post(
         f"/buildings/{building_id}/reconstructions/from-upload",
+        headers={"Idempotency-Key": str(uuid4())},
         json={"upload_id": upload_id},
     )
     assert second.status_code == 202, second.text
@@ -471,7 +476,7 @@ def test_submission_racing_completion_never_misses_or_duplicates_scheduling(
         creating = any(
             isinstance(row, Reconstruction)
             and row.status == ReconstructionStatus.WAITING_FOR_UPLOAD
-            for row in session.new
+            for row in session.identity_map.values()
         )
         if not creating:
             await original_commit(session)
@@ -495,6 +500,7 @@ def test_submission_racing_completion_never_misses_or_duplicates_scheduling(
         creation = executor.submit(
             client.post,
             "/buildings/from-reconstruction/from-upload",
+            headers={"Idempotency-Key": str(uuid4())},
             json={"upload_id": upload_id, "settings": {"ffmpeg": {"fps": 4}}},
         )
         try:
@@ -611,6 +617,7 @@ def test_concurrent_hook_delivery_preserves_one_row_and_timestamp(
     for fps in (3, 5):
         created = real_tus.client.post(
             "/buildings/from-reconstruction/from-upload",
+            headers={"Idempotency-Key": str(uuid4())},
             json={"upload_id": upload_id, "settings": {"ffmpeg": {"fps": fps}}},
         )
         assert created.status_code == 202, created.text

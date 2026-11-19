@@ -22,6 +22,25 @@ async function fixture(t) {
         '@pinia/colada': import.meta.resolve('@pinia/colada'),
         'src/lib/api': { ApiError },
         'src/lib/auth': { getAuthSubject: () => subject },
+        'src/lib/localUploadsRegistry': {
+            LocalUploadsRegistry: class {
+                constructor() {
+                    assert.fail('The transfer mutation must not use the registry');
+                }
+            },
+        },
+        'src/lib/videoUploadTask': {
+            VideoUploadTask: class {
+                constructor() {
+                    assert.fail('The transfer mutation must not create tasks');
+                }
+            },
+        },
+        'src/stores/networkDependentTasks': {
+            useNetworkDependentTasks() {
+                assert.fail('The transfer mutation must not use the queue');
+            },
+        },
         'src/lib/utils/tusUpload': {
             uploadVideoResumable(file, options) {
                 const gate = deferred();
