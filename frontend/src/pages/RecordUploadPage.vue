@@ -20,34 +20,44 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useQuasar } from 'quasar';
 import VideoRecorder from 'src/components/VideoRecorder.vue';
+import { useRouteNavigation } from 'src/composables/useRouteNavigation';
 import { getAuthSubject } from 'src/lib/auth';
 import { type RecordedVideo, toCapturedVideo } from 'src/lib/captured-video';
 import { useUploadVideoMutation } from 'src/mutations/uploads';
 
-const router = useRouter();
 const { t } = useI18n();
 const $q = useQuasar();
 const subject = getAuthSubject();
 const { mutateAsync } = useUploadVideoMutation();
+const {
+    navigating: returning,
+    navigationFailed,
+    clearNavigationFailure,
+    replace,
+} = useRouteNavigation();
 
 const submitted = ref(false);
-const returning = ref(false);
-const errorMessage = ref('');
+const recordingError = ref('');
+const errorMessage = computed(
+    () =>
+        recordingError.value ||
+        (navigationFailed.value ? t('uploads.record.navigationFailed') : ''),
+);
 
 async function uploadRecording(recording: RecordedVideo): Promise<void> {
     if (submitted.value || returning.value) return;
 
-    errorMessage.value = '';
+    recordingError.value = '';
+    clearNavigationFailure();
     let file: File;
     try {
         file = toCapturedVideo(recording, null).file;
     } catch (error) {
-        errorMessage.value = error instanceof Error ? error.message : t('capture.openFailed');
+        recordingError.value = error instanceof Error ? error.message : t('capture.openFailed');
         return;
     }
 
@@ -81,15 +91,8 @@ async function uploadInBackground(file: File): Promise<void> {
 async function openUploads(): Promise<void> {
     if (returning.value) return;
 
-    returning.value = true;
-    errorMessage.value = '';
-    try {
-        const failure = await router.replace({ name: 'uploads' });
-        if (failure) errorMessage.value = t('uploads.record.navigationFailed');
-    } catch {
-        errorMessage.value = t('uploads.record.navigationFailed');
-    } finally {
-        returning.value = false;
-    }
+    recordingError.value = '';
+    clearNavigationFailure();
+    await replace({ name: 'uploads' });
 }
 </script>

@@ -39,6 +39,17 @@ const routes: RouteRecordRaw[] = [
                 component: () => import('pages/NewUploadPage.vue'),
             },
             {
+                path: 'capture/new',
+                name: 'capture-new',
+                component: () => import('pages/NewCapturePage.vue'),
+            },
+            {
+                path: 'capture/draft/:draftId',
+                name: 'capture-draft',
+                props: true,
+                component: () => import('pages/CaptureDraftPage.vue'),
+            },
+            {
                 path: 'reconstructions/from-upload',
                 name: 'reconstruction-upload-picker',
                 component: () => import('pages/ReconstructionUploadPickerPage.vue'),
@@ -135,6 +146,11 @@ const routes: RouteRecordRaw[] = [
 
     // Full-screen camera capture page. The page component owns its layout so
     // the main navigation drawer and footer do not affect it.
+    {
+        path: '/capture/record',
+        name: 'capture-record',
+        component: () => import('pages/RecordCapturePage.vue'),
+    },
     {
         path: '/reconstructions/from-upload/record',
         name: 'record-reconstruction-upload',

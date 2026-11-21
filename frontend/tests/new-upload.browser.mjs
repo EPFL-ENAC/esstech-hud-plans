@@ -332,6 +332,22 @@ try {
                     .getByText(/background-failed\.mp4/)
                     .waitFor();
                 assert.ok(page.url().endsWith('/#/more'));
+
+                failPatch = false;
+                await page.locator('a[href="#/uploads"]').click();
+                await page.getByRole('link', { name: text.title, exact: true }).click();
+                await input.setInputFiles(video('background-action.mp4'));
+                await start().click();
+                await waitFor(() => gates.length === 1);
+                await page.locator('a[href="#/more"]:visible').click();
+                await page.waitForURL('**/#/more');
+                gates.shift()();
+                const notification = page
+                    .locator('.q-notification')
+                    .filter({ hasText: 'background-action.mp4' });
+                await notification.getByRole('button', { name: text.view, exact: true }).click();
+                await page.waitForURL('**/#/uploads');
+
                 assert.equal(requests.filter((r) => r.method === 'DELETE').length, 0);
                 assert.deepEqual(pageErrors, []);
                 console.log(
