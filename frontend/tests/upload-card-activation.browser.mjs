@@ -113,8 +113,8 @@ try {
             const listItems = () => page.locator('.uploads-list').getByRole('listitem');
             const row = (filename) => listItems().filter({ hasText: filename });
             const expectSinglePush = async (uploadId) => {
-                await page.waitForURL(`**/#/reconstructions/from-upload/${uploadId}`);
-                assert.deepEqual(await pushNames(), ['reconstruction-from-upload']);
+                await page.waitForURL(`**/#/reconstructions/from-upload/remote/${uploadId}`);
+                assert.deepEqual(await pushNames(), ['reconstruction-from-remote-upload']);
             };
 
             await openPicker();

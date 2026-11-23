@@ -81,11 +81,12 @@ import {
     makeDefaultReconstructionSettings,
     toSplatGenerationSettings,
 } from 'src/lib/reconstruction-settings';
+import type { ReconstructionUploadReference } from 'src/lib/reconstructionSubmissionTask';
 import { useSubmitReconstructionMutation } from 'src/mutations/reconstructions';
 import { useUiStore } from 'src/stores/ui';
 
 const props = defineProps<{
-    uploadId: string;
+    uploadReference: ReconstructionUploadReference;
     disabled?: boolean;
 }>();
 const buildingSelection = defineModel<BuildingSelection>('buildingSelection', { required: true });
@@ -140,7 +141,7 @@ async function startProcessing(): Promise<void> {
     );
     navigationError.value = '';
     const outcome = await submitReconstruction({
-        uploadId: props.uploadId,
+        ...props.uploadReference,
         settings,
         ...buildingSelection.value,
     }).catch(() => undefined);

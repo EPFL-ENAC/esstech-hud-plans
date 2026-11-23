@@ -45,9 +45,20 @@ try {
             const context = await browser.newContext({ viewport, serviceWorkers: 'block' });
             const rows = [];
             const patches = [];
+            const submissions = [];
+            const existingBuilding = {
+                id: 'existing',
+                user_id: 'sources-owner',
+                name: 'Existing building',
+                address: null,
+                latitude: null,
+                longitude: null,
+                created_at: '2026-10-14T10:00:00Z',
+                updated_at: '2026-10-14T10:00:00Z',
+            };
             const query = '?buildingId=existing';
-            let rejectCreation = false;
             let creationRequests = 0;
+            let uploadDetailRequests = 0;
             try {
                 await context.addInitScript(
                     ({ token, locale }) => {
@@ -76,19 +87,23 @@ try {
                             json: { items: rows.toReversed(), total: rows.length },
                         });
                     if (path.startsWith('/uploads/')) {
+                        uploadDetailRequests++;
                         const row = rows.find((row) => row.id === path.split('/').pop());
-                        assert.ok(row, 'Detail must only open after its row exists');
-                        return route.fulfill({ json: row });
+                        return row
+                            ? route.fulfill({ json: row })
+                            : route.fulfill({ status: 404, json: { detail: 'Upload not found' } });
+                    }
+                    if (path === '/buildings/from-reconstruction/from-upload') {
+                        submissions.push(request.postDataJSON());
+                        return route.fulfill({
+                            status: 202,
+                            json: { building_id: 'created', id: 'reconstruction' },
+                        });
                     }
                     if (path.startsWith('/buildings/')) {
                         return path === '/buildings/existing'
                             ? route.fulfill({
-                                  json: {
-                                      id: 'existing',
-                                      name: 'Existing building',
-                                      latitude: null,
-                                      longitude: null,
-                                  },
+                                  json: existingBuilding,
                               })
                             : route.fulfill({
                                   status: 404,
@@ -98,14 +113,7 @@ try {
                     if (path === '/buildings')
                         return route.fulfill({
                             json: {
-                                items: [
-                                    {
-                                        id: 'existing',
-                                        name: 'Existing building',
-                                        latitude: null,
-                                        longitude: null,
-                                    },
-                                ],
+                                items: [{ ...existingBuilding, latest_reconstruction: null }],
                                 total: 1,
                             },
                         });
@@ -113,8 +121,6 @@ try {
                     const headers = { 'Tus-Resumable': '1.0.0' };
                     if (request.method() === 'POST') {
                         creationRequests++;
-                        if (rejectCreation)
-                            return route.fulfill({ status: 400, body: 'Invalid video' });
                         const metadata = Object.fromEntries(
                             request
                                 .headers()
@@ -197,21 +203,62 @@ try {
                 };
                 const record = async () => {
                     await page.locator('.record-btn-rec').click();
-                    await page.getByRole('timer').waitFor();
-                    await delay(300);
+                    await page.getByRole('timer').getByText('00:01', { exact: true }).waitFor();
                     await page.locator('.record-btn-rec').click();
                 };
-                const detail = async (index) => {
-                    const row = rows[index];
-                    await page.waitForURL(`**/#/reconstructions/from-upload/${row.id}${query}`);
-                    await page
-                        .locator('.upload-summary')
-                        .getByText(row.filename, { exact: true })
-                        .waitFor();
-                    await waitFor(() => patches.some((patch) => patch.row.id === row.id));
-                    assert.equal(row.status, 'pending');
-                    assert.equal(await page.locator('input[type=file], video').count(), 0);
-                    const buildingPicker = page.locator('.reconstruction-form .q-select').first();
+                const localForm = page.locator('.reconstruction-form');
+                const setOnline = (online) =>
+                    page.evaluate((online) => {
+                        Object.defineProperty(navigator, 'onLine', {
+                            configurable: true,
+                            value: online,
+                        });
+                        window.dispatchEvent(new Event(online ? 'online' : 'offline'));
+                    }, online);
+                async function readLocalBackup() {
+                    try {
+                        await page.waitForURL(
+                            (url) => url.hash.startsWith('#/reconstructions/from-upload/local/'),
+                            { timeout: 10_000 },
+                        );
+                    } catch (error) {
+                        const alerts = await page.getByRole('alert').allTextContents();
+                        throw new Error(
+                            `Local form did not open: ${[...alerts, ...errors].join(' | ')}`,
+                            { cause: error },
+                        );
+                    }
+                    await localForm.waitFor();
+                    assert.equal(
+                        await page.locator('.upload-summary, input[type=file], video').count(),
+                        0,
+                    );
+                    assert.equal(
+                        await page
+                            .getByRole('button', { name: text.uploads.refresh, exact: true })
+                            .count(),
+                        0,
+                    );
+
+                    const [path, queryString] = new URL(page.url()).hash.split('?');
+                    assert.equal(new URLSearchParams(queryString).get('buildingId'), 'existing');
+                    const localUploadId = path.split('/').at(-1);
+                    return page.evaluate(async (id) => {
+                        const { LocalUploadsRegistry } =
+                            await import('/src/lib/localUploadsRegistry.ts');
+                        const uploads = new LocalUploadsRegistry();
+                        const record = await uploads.get('sources-owner', id);
+                        const file = await uploads.getFile('sources-owner', id);
+                        return { name: file.name, size: file.size, remote: record.remote };
+                    }, localUploadId);
+                }
+                async function finishTransfer(index) {
+                    await waitFor(() => patches.some(({ row }) => row === rows[index]));
+                    patches.find(({ row }) => row === rows[index]).release();
+                    await waitFor(() => rows[index].status === 'uploaded');
+                }
+                async function selectNewBuilding(buildingName) {
+                    const buildingPicker = localForm.locator('.q-select').first();
                     await buildingPicker.getByText('Existing building', { exact: true }).waitFor();
                     await buildingPicker.click();
                     await page
@@ -219,17 +266,9 @@ try {
                         .getByText(text.buildings.picker.createNew, { exact: true })
                         .click();
                     const name = page.getByLabel(text.buildings.fields.name, { exact: true });
-                    await name.fill(`Preserved ${index}`);
-                    patches.find((patch) => patch.row.id === row.id).release();
-                    await page
-                        .locator('.upload-summary')
-                        .getByText(text.uploads.status.uploaded, { exact: false })
-                        .waitFor();
-                    assert.equal(await name.inputValue(), `Preserved ${index}`);
-                    assert.ok(
-                        page.url().endsWith(`/reconstructions/from-upload/${row.id}${query}`),
-                    );
-                };
+                    await name.fill(buildingName);
+                    return name;
+                }
 
                 await picker();
                 await input().setInputFiles([]);
@@ -241,46 +280,68 @@ try {
                 });
                 await page.getByText(text.uploads.new.emptyFile, { exact: true }).waitFor();
                 assert.equal(creationRequests, 0);
-                await input().setInputFiles(file(`selected-${locale}-${size}.mp4`));
-                await waitFor(() => rows.length === 1);
-                await detail(0);
+                await setOnline(false);
+                const filename = `selected-${locale}-${size}.mp4`;
+                await input().setInputFiles(file(filename));
+                assert.deepEqual(await readLocalBackup(), {
+                    name: filename,
+                    size: 1024,
+                    remote: null,
+                });
+                assert.equal(creationRequests, 0);
+
+                const submitOffline = locale === 'en' && size === 'desktop';
+                if (submitOffline) {
+                    await selectNewBuilding('Offline building');
+                    await page
+                        .getByRole('button', { name: text.capture.startProcessing, exact: true })
+                        .click();
+                    await page.waitForURL('**/#/library');
+                    assert.deepEqual(submissions, []);
+                    assert.equal(creationRequests, 0);
+                }
+                await setOnline(true);
+                if (submitOffline) {
+                    await waitFor(() => submissions.length === 1);
+                    assert.equal(submissions[0].upload_id, rows[0].id);
+                    assert.equal(submissions[0].building.name, 'Offline building');
+                }
+                await finishTransfer(0);
                 assert.equal(creationRequests, 1);
 
                 await picker();
                 await camera();
+                await setOnline(false);
                 await record();
-                await waitFor(() => rows.length === 2);
-                assert.match(rows[1].filename, /^capture-.*\.(webm|mp4)$/);
-                await detail(1);
+
+                const recording = await readLocalBackup();
+                assert.match(recording.name, /^capture-.*\.(webm|mp4)$/);
+                assert.ok(recording.size > 0);
+                assert.equal(recording.remote, null);
+                assert.equal(creationRequests, 1);
+                const name = await selectNewBuilding('Preserved building');
+                const localUrl = page.url();
+
+                await setOnline(true);
+                await finishTransfer(1);
+                assert.equal(creationRequests, 2);
+                assert.equal(page.url(), localUrl);
+                assert.equal(await name.inputValue(), 'Preserved building');
+                assert.equal(await page.locator('.upload-summary').count(), 0);
                 await page.screenshot({ path: join(screenshots, `${locale}-${size}.png`) });
                 assert.ok(
                     await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
                 );
 
                 if (locale === 'en' && size === 'desktop') {
-                    // A rejected creation can retry the retained file directly.
                     await picker();
-                    rejectCreation = true;
-                    await input().setInputFiles(file('retry.mp4'));
-                    await page.getByText(text.uploads.new.invalidVideo, { exact: true }).waitFor();
-                    const failedRequests = creationRequests;
-                    rejectCreation = false;
-                    await page
-                        .getByRole('button', { name: text.common.retry, exact: true })
-                        .click();
-                    await waitFor(() => rows.length === 3);
-                    await detail(2);
-                    assert.equal(rows[2].filename, 'retry.mp4');
-                    assert.equal(creationRequests, failedRequests + 1);
-
-                    // An aborted handoff retries navigation, without another creation.
-                    await picker();
+                    await setOnline(false);
                     await page.evaluate(() => {
                         const router =
                             document.querySelector('#q-app').__vue_app__.config.globalProperties
                                 .$router;
                         window.removeUploadGuard = router.beforeEach((to) =>
-                            to.name === 'reconstruction-from-upload' ? false : undefined,
+                            to.name === 'reconstruction-from-local-upload' ? false : undefined,
                         );
                     });
                     await input().setInputFiles(file('navigation.mp4'));
@@ -289,7 +350,6 @@ try {
                             exact: true,
                         })
                         .waitFor();
-                    const previousRequests = creationRequests;
                     await page.evaluate(() => window.removeUploadGuard());
                     await page
                         .getByRole('button', {
@@ -297,7 +357,11 @@ try {
                             exact: true,
                         })
                         .click();
-                    await detail(3);
+                    assert.equal((await readLocalBackup()).name, 'navigation.mp4');
+                    assert.equal(creationRequests, 2);
+                    await setOnline(true);
+                    await finishTransfer(2);
+                    const previousRequests = 3;
                     assert.equal(creationRequests, previousRequests);
 
                     // Recorder discard and interrupted recording create no upload.
@@ -321,9 +385,10 @@ try {
                     await page.getByRole('alert').first().waitFor();
                     assert.equal(creationRequests, previousRequests);
                 }
+                assert.equal(uploadDetailRequests, 0);
                 assert.deepEqual(errors, []);
                 console.log(
-                    `${locale} ${size}: file/camera early handoff, background completion, preserved form passed`,
+                    `${locale} ${size}: local file/camera handoff, background completion, preserved form passed`,
                 );
             } finally {
                 patches.forEach((patch) => patch.release());

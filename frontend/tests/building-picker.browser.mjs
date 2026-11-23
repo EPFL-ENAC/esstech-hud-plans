@@ -128,7 +128,7 @@ try {
                 await delay(120);
             };
             await page.goto(
-                `${origin}/#/reconstructions/from-upload/upload?buildingId=building-200`,
+                `${origin}/#/reconstructions/from-upload/remote/upload?buildingId=building-200`,
             );
             await waitFor(() => releaseSelected !== undefined && offsets.length === 1);
             assert.deepEqual(offsets, [0]);

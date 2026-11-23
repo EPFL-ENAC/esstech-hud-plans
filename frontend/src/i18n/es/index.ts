@@ -344,6 +344,7 @@ export default {
     reconstructions: {
         fromUpload: {
             starting: 'La subida está comenzando',
+            scheduleFailed: 'No se pudo preparar la subida. Inténtalo de nuevo.',
             openForm: 'Abrir el formulario de reconstrucción',
             navigationFailed:
                 'No se pudo abrir el formulario de reconstrucción. Inténtalo de nuevo.',

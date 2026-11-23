@@ -352,6 +352,7 @@ export default {
     reconstructions: {
         fromUpload: {
             starting: 'L’envoi démarre',
+            scheduleFailed: 'Impossible de préparer l’envoi. Veuillez réessayer.',
             openForm: 'Ouvrir le formulaire de reconstruction',
             navigationFailed:
                 'Impossible d’ouvrir le formulaire de reconstruction. Veuillez réessayer.',

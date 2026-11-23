@@ -257,7 +257,7 @@ try {
                     .first()
                     .getByRole('link', { name: text.reconstructions.new, exact: true });
                 await action.press('Enter');
-                await page.waitForURL(`**/reconstructions/from-upload/${rows[0].id}`);
+                await page.waitForURL(`**/reconstructions/from-upload/remote/${rows[0].id}`);
                 await ready();
                 assert.equal(details.at(-1), rows[0].id);
                 assert.equal(await page.locator('input[type=file], video').count(), 0);
@@ -388,7 +388,7 @@ try {
                     .getByRole('link', { name: text.reconstructions.new, exact: true })
                     .click();
                 await page.waitForURL(
-                    `**/#/reconstructions/from-upload/${rows[1].id}?buildingId=existing`,
+                    `**/#/reconstructions/from-upload/remote/${rows[1].id}?buildingId=existing`,
                 );
                 await ready();
                 const buildingPicker = page.locator('.reconstruction-form .q-select').first();
@@ -415,7 +415,7 @@ try {
                 await goto('/reconstructions/from-upload?buildingId=existing');
                 await items.nth(1).getByText(rows[1].filename, { exact: true }).click();
                 await page.waitForURL(
-                    `**/#/reconstructions/from-upload/${rows[1].id}?buildingId=existing`,
+                    `**/#/reconstructions/from-upload/remote/${rows[1].id}?buildingId=existing`,
                 );
                 await buildingPicker.getByText('Existing building', { exact: true }).waitFor();
                 await ready();
@@ -429,13 +429,13 @@ try {
                 assert.equal(submissions[1].body.upload_id, rows[1].id);
                 assert.equal(submissions[1].body.building, undefined);
 
-                await goto(`/reconstructions/from-upload/${rows[2].id}`);
+                await goto(`/reconstructions/from-upload/remote/${rows[2].id}`);
                 await page
                     .getByText(text.reconstructions.fromUpload.failedUpload, { exact: true })
                     .waitFor();
                 assert.equal(await start().isDisabled(), true);
                 for (const id of ['missing', 'malformed']) {
-                    await goto(`/reconstructions/from-upload/${id}`);
+                    await goto(`/reconstructions/from-upload/remote/${id}`);
                     await page
                         .getByText(text.reconstructions.fromUpload.unavailable, { exact: true })
                         .waitFor();
@@ -524,7 +524,7 @@ try {
                 // fails, and complete later without taking over navigation.
                 for (const buildingId of ['existing', null]) {
                     await goto(
-                        `/reconstructions/from-upload/${rows[1].id}${
+                        `/reconstructions/from-upload/remote/${rows[1].id}${
                             buildingId === null ? '' : '?buildingId=existing'
                         }`,
                     );

@@ -16,7 +16,7 @@
             <file-picker-button
                 :model-value="selectedFile"
                 accept="video/*"
-                :disable="busy || uploadId !== null"
+                :disable="busy || localUploadId !== null"
                 @update:model-value="selectFile"
             />
             <q-btn
@@ -25,7 +25,7 @@
                 color="primary"
                 icon="videocam"
                 :label="t('capture.video.takeVideo')"
-                :disable="busy || uploadId !== null"
+                :disable="busy || localUploadId !== null"
                 :to="{
                     name: 'record-reconstruction-upload',
                     query: { buildingId: route.query.buildingId },
@@ -39,7 +39,11 @@
                         no-caps
                         :loading="busy"
                         :label="
-                            t(uploadId ? 'reconstructions.fromUpload.openForm' : 'common.retry')
+                            t(
+                                localUploadId
+                                    ? 'reconstructions.fromUpload.openForm'
+                                    : 'common.retry',
+                            )
                         "
                         @click="retry"
                     />
@@ -57,11 +61,7 @@
                     icon="add"
                     :label="$q.screen.lt.sm ? undefined : t('reconstructions.new')"
                     :aria-label="t('reconstructions.new')"
-                    :to="{
-                        name: 'reconstruction-from-upload',
-                        params: { uploadId: upload.id },
-                        query: { buildingId: route.query.buildingId },
-                    }"
+                    :to="remoteReconstructionRoute(upload)"
                     @click.stop
                 />
             </template>
@@ -74,7 +74,7 @@
 <script setup lang="ts">
 import { shallowRef, useTemplateRef } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useRoute, useRouter } from 'vue-router';
+import { type RouteLocationRaw, useRoute, useRouter } from 'vue-router';
 import PageHeader from 'src/components/PageHeader.vue';
 import MyUploadsList from 'src/components/MyUploadsList.vue';
 import FilePickerButton from 'src/components/FilePickerButton.vue';
@@ -87,20 +87,24 @@ const router = useRouter();
 const route = useRoute();
 const uploadsList = useTemplateRef<InstanceType<typeof MyUploadsList>>('uploadsList');
 const selectedFile = shallowRef<File | null>(null);
-const { startUpload, retry, busy, uploadId, errorMessage } = useUploadForReconstruction();
+const { startUpload, retry, busy, localUploadId, errorMessage } = useUploadForReconstruction();
+
+function remoteReconstructionRoute(upload: UserUpload): RouteLocationRaw {
+    return {
+        name: 'reconstruction-from-remote-upload',
+        params: { remoteUploadId: upload.id },
+        query: { buildingId: route.query.buildingId },
+    };
+}
 
 function openUpload(upload: UserUpload): void {
-    void router.push({
-        name: 'reconstruction-from-upload',
-        params: { uploadId: upload.id },
-        query: { buildingId: route.query.buildingId },
-    });
+    void router.push(remoteReconstructionRoute(upload));
 }
 
 function selectFile(file: File | null): void {
-    if (!file || busy.value || uploadId.value !== null) return;
+    if (!file || busy.value || localUploadId.value !== null) return;
     selectedFile.value = file;
-    startUpload(file);
+    void startUpload(file);
 }
 </script>
 

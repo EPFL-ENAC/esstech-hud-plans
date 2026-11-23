@@ -2,6 +2,7 @@
     <q-page class="reconstruction-from-upload-page">
         <page-header :title="t('reconstructions.new')">
             <q-btn
+                v-if="!isLocalUpload"
                 flat
                 no-caps
                 color="primary"
@@ -12,7 +13,15 @@
             />
         </page-header>
 
+        <reconstruction-form
+            v-if="isLocalUpload"
+            v-model:building-selection="buildingSelection"
+            v-model:preset="preset"
+            v-model:advanced-settings="advancedSettings"
+            :upload-reference="uploadReference"
+        />
         <query-state-switcher
+            v-else
             :state="state"
             :async-status="asyncStatus"
             :retry="refetch"
@@ -46,7 +55,7 @@
                     v-model:building-selection="buildingSelection"
                     v-model:preset="preset"
                     v-model:advanced-settings="advancedSettings"
-                    :upload-id="upload.id"
+                    :upload-reference="{ uploadId: upload.id }"
                     :disabled="!canSubmitUpload"
                 />
             </template>
@@ -55,7 +64,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, toRef, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import PageHeader from 'src/components/PageHeader.vue';
@@ -68,13 +77,16 @@ import {
     type ReconstructionPreset,
     makeDefaultReconstructionSettings,
 } from 'src/lib/reconstruction-settings';
+import type { ReconstructionUploadReference } from 'src/lib/reconstructionSubmissionTask';
 import { formatFileSize } from 'src/lib/utils/formatFileSize';
 import { useUploadQuery } from 'src/queries/uploads';
 
-const props = defineProps<{ uploadId: string }>();
+const props = defineProps<{ uploadReference: ReconstructionUploadReference }>();
 const { t, locale } = useI18n();
 const route = useRoute();
-const { data, state, asyncStatus, isLoading, refetch } = useUploadQuery(toRef(props, 'uploadId'));
+const remoteUploadId = computed(() => props.uploadReference.uploadId ?? '');
+const isLocalUpload = computed(() => props.uploadReference.localUploadId !== undefined);
+const { data, state, asyncStatus, isLoading, refetch } = useUploadQuery(remoteUploadId);
 const loadError = computed(() => {
     const error = state.value.error;
     return error instanceof ApiError && [404, 422].includes(error.status)

@@ -44,10 +44,20 @@ const routes: RouteRecordRaw[] = [
                 component: () => import('pages/ReconstructionUploadPickerPage.vue'),
             },
             {
-                path: 'reconstructions/from-upload/:uploadId',
-                name: 'reconstruction-from-upload',
-                props: true,
+                path: 'reconstructions/from-upload/local/:localUploadId',
+                name: 'reconstruction-from-local-upload',
                 component: () => import('pages/ReconstructionFromUploadPage.vue'),
+                props: ({ params }) => ({
+                    uploadReference: { localUploadId: String(params.localUploadId) },
+                }),
+            },
+            {
+                path: 'reconstructions/from-upload/remote/:remoteUploadId',
+                name: 'reconstruction-from-remote-upload',
+                component: () => import('pages/ReconstructionFromUploadPage.vue'),
+                props: ({ params }) => ({
+                    uploadReference: { uploadId: String(params.remoteUploadId) },
+                }),
             },
             {
                 path: 'more/tasks',

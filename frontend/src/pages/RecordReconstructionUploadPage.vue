@@ -12,7 +12,7 @@
                 flat
                 no-caps
                 :loading="busy"
-                :label="t(uploadId ? 'reconstructions.fromUpload.openForm' : 'common.retry')"
+                :label="t(localUploadId ? 'reconstructions.fromUpload.openForm' : 'common.retry')"
                 @click="retry"
             />
         </template>
@@ -32,7 +32,7 @@ import { type RecordedVideo, toCapturedVideo } from 'src/lib/captured-video';
 const { t } = useI18n();
 const router = useRouter();
 const route = useRoute();
-const { startUpload, retry, busy, uploadId, errorMessage } = useUploadForReconstruction();
+const { startUpload, retry, busy, localUploadId, errorMessage } = useUploadForReconstruction();
 const accepted = ref(false);
 const closing = ref(false);
 const localError = ref('');
@@ -43,7 +43,7 @@ function uploadRecording(recording: RecordedVideo): void {
     try {
         const file = toCapturedVideo(recording, null).file;
         accepted.value = true;
-        startUpload(file);
+        void startUpload(file);
     } catch (error) {
         localError.value = error instanceof Error ? error.message : t('capture.openFailed');
     }
