@@ -13,13 +13,15 @@
             />
         </page-header>
 
-        <reconstruction-form
-            v-if="isLocalUpload"
-            v-model:building-selection="buildingSelection"
-            v-model:preset="preset"
-            v-model:advanced-settings="advancedSettings"
-            :upload-reference="uploadReference"
-        />
+        <template v-if="isLocalUpload">
+            <upload-summary class="q-mb-xl" :upload-reference="uploadReference" />
+            <reconstruction-form
+                v-model:building-selection="buildingSelection"
+                v-model:preset="preset"
+                v-model:advanced-settings="advancedSettings"
+                :upload-reference="uploadReference"
+            />
+        </template>
         <query-state-switcher
             v-else
             :state="state"
@@ -70,6 +72,7 @@ import { useI18n } from 'vue-i18n';
 import PageHeader from 'src/components/PageHeader.vue';
 import QueryStateSwitcher from 'src/components/QueryStateSwitcher.vue';
 import ReconstructionForm from 'src/components/ReconstructionForm.vue';
+import UploadSummary from 'src/components/UploadSummary.vue';
 import UploadTransferProgress from 'src/components/UploadTransferProgress.vue';
 import { ApiError } from 'src/lib/api';
 import type { BuildingSelection } from 'src/lib/buildings';

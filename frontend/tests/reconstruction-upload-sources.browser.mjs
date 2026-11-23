@@ -57,8 +57,8 @@ try {
                 updated_at: '2026-10-14T10:00:00Z',
             };
             const query = '?buildingId=existing';
+            const uploadDetailRequests = [];
             let creationRequests = 0;
-            let uploadDetailRequests = 0;
             try {
                 await context.addInitScript(
                     ({ token, locale }) => {
@@ -87,8 +87,9 @@ try {
                             json: { items: rows.toReversed(), total: rows.length },
                         });
                     if (path.startsWith('/uploads/')) {
-                        uploadDetailRequests++;
-                        const row = rows.find((row) => row.id === path.split('/').pop());
+                        const id = path.split('/').at(-1);
+                        uploadDetailRequests.push(id);
+                        const row = rows.find((row) => row.id === id);
                         return row
                             ? route.fulfill({ json: row })
                             : route.fulfill({ status: 404, json: { detail: 'Upload not found' } });
@@ -207,6 +208,7 @@ try {
                     await page.locator('.record-btn-rec').click();
                 };
                 const localForm = page.locator('.reconstruction-form');
+                const summary = page.locator('.upload-summary');
                 const setOnline = (online) =>
                     page.evaluate((online) => {
                         Object.defineProperty(navigator, 'onLine', {
@@ -229,10 +231,7 @@ try {
                         );
                     }
                     await localForm.waitFor();
-                    assert.equal(
-                        await page.locator('.upload-summary, input[type=file], video').count(),
-                        0,
-                    );
+                    assert.equal(await page.locator('input[type=file], video').count(), 0);
                     assert.equal(
                         await page
                             .getByRole('button', { name: text.uploads.refresh, exact: true })
@@ -243,7 +242,7 @@ try {
                     const [path, queryString] = new URL(page.url()).hash.split('?');
                     assert.equal(new URLSearchParams(queryString).get('buildingId'), 'existing');
                     const localUploadId = path.split('/').at(-1);
-                    return page.evaluate(async (id) => {
+                    const backup = await page.evaluate(async (id) => {
                         const { LocalUploadsRegistry } =
                             await import('/src/lib/localUploadsRegistry.ts');
                         const uploads = new LocalUploadsRegistry();
@@ -251,6 +250,9 @@ try {
                         const file = await uploads.getFile('sources-owner', id);
                         return { name: file.name, size: file.size, remote: record.remote };
                     }, localUploadId);
+                    await summary.getByText(backup.name, { exact: true }).waitFor();
+                    await summary.getByText(text.tasks.status.queued, { exact: true }).waitFor();
+                    return backup;
                 }
                 async function finishTransfer(index) {
                     await waitFor(() => patches.some(({ row }) => row === rows[index]));
@@ -289,6 +291,7 @@ try {
                     remote: null,
                 });
                 assert.equal(creationRequests, 0);
+                assert.deepEqual(uploadDetailRequests, []);
 
                 const submitOffline = locale === 'en' && size === 'desktop';
                 if (submitOffline) {
@@ -323,11 +326,15 @@ try {
                 const localUrl = page.url();
 
                 await setOnline(true);
+                await summary.getByText(text.uploads.status.pending, { exact: true }).waitFor();
+                await summary.getByRole('progressbar').waitFor();
                 await finishTransfer(1);
+                await summary.getByText(text.uploads.status.uploaded, { exact: true }).waitFor();
                 assert.equal(creationRequests, 2);
                 assert.equal(page.url(), localUrl);
                 assert.equal(await name.inputValue(), 'Preserved building');
-                assert.equal(await page.locator('.upload-summary').count(), 0);
+                assert.equal(await summary.count(), 1);
+                assert.ok(uploadDetailRequests.includes(rows[1].id));
                 await page.screenshot({ path: join(screenshots, `${locale}-${size}.png`) });
                 assert.ok(
                     await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
@@ -385,10 +392,10 @@ try {
                     await page.getByRole('alert').first().waitFor();
                     assert.equal(creationRequests, previousRequests);
                 }
-                assert.equal(uploadDetailRequests, 0);
+                assert.ok(uploadDetailRequests.every((id) => rows.some((row) => row.id === id)));
                 assert.deepEqual(errors, []);
                 console.log(
-                    `${locale} ${size}: local file/camera handoff, background completion, preserved form passed`,
+                    `${locale} ${size}: local file/camera handoff, summary progress, preserved form passed`,
                 );
             } finally {
                 patches.forEach((patch) => patch.release());
