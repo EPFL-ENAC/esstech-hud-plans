@@ -17,13 +17,10 @@ import {
     type TaskOptions,
     type TaskSnapshot,
 } from 'src/lib/networkDependentTasks';
-
-export type ReconstructionUploadReference =
-    | { uploadId: string; localUploadId?: never }
-    | { localUploadId: string; uploadId?: never };
+import type { UploadReference } from 'src/lib/uploads';
 
 export type ReconstructionSubmission = BuildingSelection &
-    ReconstructionUploadReference & {
+    UploadReference & {
         settings: SplatGenerationSettings;
     };
 

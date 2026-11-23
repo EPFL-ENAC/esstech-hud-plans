@@ -77,11 +77,11 @@ import {
     type ReconstructionPreset,
     makeDefaultReconstructionSettings,
 } from 'src/lib/reconstruction-settings';
-import type { ReconstructionUploadReference } from 'src/lib/reconstructionSubmissionTask';
+import type { UploadReference } from 'src/lib/uploads';
 import { formatFileSize } from 'src/lib/utils/formatFileSize';
 import { useUploadQuery } from 'src/queries/uploads';
 
-const props = defineProps<{ uploadReference: ReconstructionUploadReference }>();
+const props = defineProps<{ uploadReference: UploadReference }>();
 const { t, locale } = useI18n();
 const route = useRoute();
 const remoteUploadId = computed(() => props.uploadReference.uploadId ?? '');

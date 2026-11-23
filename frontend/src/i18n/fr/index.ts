@@ -102,6 +102,10 @@ export default {
         pagination: 'Pagination de la liste des envois',
         created: 'Créé le {date}',
         uploaded: 'Envoyé le {date}',
+        summary: {
+            savedOnDevice: 'Enregistré sur cet appareil',
+            loadFailed: 'Impossible de charger cet envoi. Veuillez réessayer.',
+        },
         record: {
             action: 'Filmer une vidéo',
             failed: 'L’envoi de {filename} a échoué.',

@@ -97,6 +97,10 @@ export default {
         pagination: 'Upload list pagination',
         created: 'Created {date}',
         uploaded: 'Uploaded {date}',
+        summary: {
+            savedOnDevice: 'Saved on this device',
+            loadFailed: 'Could not load this upload. Please try again.',
+        },
         record: {
             action: 'Take a video',
             failed: 'The upload of {filename} failed.',

@@ -3,6 +3,10 @@ import { requestJson } from 'src/lib/api';
 
 export type UploadStatus = 'pending' | 'uploaded' | 'failed';
 
+export type UploadReference =
+    | { uploadId: string; localUploadId?: never }
+    | { localUploadId: string; uploadId?: never };
+
 export interface UserUpload {
     id: string;
     user_id: string;

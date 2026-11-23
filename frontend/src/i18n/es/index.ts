@@ -102,6 +102,10 @@ export default {
         pagination: 'Paginación de la lista de archivos',
         created: 'Creado el {date}',
         uploaded: 'Subido el {date}',
+        summary: {
+            savedOnDevice: 'Guardado en este dispositivo',
+            loadFailed: 'No se pudo cargar este archivo. Inténtalo de nuevo.',
+        },
         record: {
             action: 'Grabar un vídeo',
             failed: 'La subida de {filename} ha fallado.',

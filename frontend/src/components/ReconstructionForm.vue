@@ -81,12 +81,12 @@ import {
     makeDefaultReconstructionSettings,
     toSplatGenerationSettings,
 } from 'src/lib/reconstruction-settings';
-import type { ReconstructionUploadReference } from 'src/lib/reconstructionSubmissionTask';
+import type { UploadReference } from 'src/lib/uploads';
 import { useSubmitReconstructionMutation } from 'src/mutations/reconstructions';
 import { useUiStore } from 'src/stores/ui';
 
 const props = defineProps<{
-    uploadReference: ReconstructionUploadReference;
+    uploadReference: UploadReference;
     disabled?: boolean;
 }>();
 const buildingSelection = defineModel<BuildingSelection>('buildingSelection', { required: true });
