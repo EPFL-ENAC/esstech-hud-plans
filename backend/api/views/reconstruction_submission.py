@@ -13,6 +13,7 @@ from api.db import get_session
 from api.models.building import BuildingCreate
 from api.models.uploads import UploadStatus, UserUploads
 from api.models.workflows import SplatGenerationWorkflowSettings
+from api.services.idempotency import IdempotencyService
 from api.services.reconstructions import ReconstructionService
 from api.services.uploads import (
     UploadConflictError,
@@ -21,6 +22,12 @@ from api.services.uploads import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def get_idempotency_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> IdempotencyService:
+    return IdempotencyService(session)
 
 
 def get_reconstruction_service(

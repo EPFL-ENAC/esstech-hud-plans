@@ -36,6 +36,7 @@ from api.lib.workflows import common as workflow_common
 from api.lib.workflows import splat_generation as splat_workflow
 from api.lib.workflows.common import WorkflowNotFoundError
 from api.models.building import Building
+from api.models.idempotency import IdempotencyRecords, IdempotencyStatus
 from api.models.pagination import Page
 from api.models.reconstruction import (
     Reconstruction,
@@ -48,6 +49,7 @@ from api.models.user import User, utc_now
 from api.models.workflows import FramePickerSettings, SplatGenerationWorkflowSettings
 from api.services.auth import require_user
 from api.services.buildings import BuildingService
+from api.services.idempotency import IdempotencyService
 from api.services.reconstructions import (
     ReconstructionConflictError,
     ReconstructionService,
@@ -434,7 +436,9 @@ def test_registration_timeout_records_failure(
         splat_workflow, "schedule_splat_generation_from_upload", never_finishes
     )
     response = client.post(
-        _from_upload_url(building_id, False), json={"upload_id": str(upload_id)}
+        _from_upload_url(building_id, False),
+        headers={"Idempotency-Key": str(uuid4())},
+        json={"upload_id": str(upload_id)},
     )
     assert response.status_code == 503
     reconstruction_id = response.json()["detail"]["reconstruction_id"]
@@ -515,6 +519,7 @@ def test_reconstruction_list_sorting_and_pagination(sort_order: SortOrder) -> No
 def reconstruction_api(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    sqlite_idempotency_lock: None,
 ) -> Iterator[tuple[TestClient, UUID]]:
     engine = create_async_engine(
         "sqlite+aiosqlite://",
@@ -592,7 +597,16 @@ def test_only_from_upload_submission_routes_are_documented(
         "/buildings/from-reconstruction/from-upload",
         "/buildings/{building_id}/reconstructions/from-upload",
     ):
-        assert "202" in paths[path]["post"]["responses"]
+        operation = paths[path]["post"]
+        assert {"202", "204", "409"} <= operation["responses"].keys()
+        header = next(
+            parameter
+            for parameter in operation["parameters"]
+            if parameter["name"] == "Idempotency-Key"
+        )
+        assert header["in"] == "header"
+        assert header["required"] is True
+        assert header["schema"]["minLength"] == 1
     schemas = schema["components"]["schemas"]
     assert "ResumableReconstructionSubmission" not in schemas
     assert "ResumableBuildingFromReconstructionSubmission" not in schemas
@@ -634,6 +648,7 @@ def _submit_reconstruction(client: TestClient, building_id: UUID):
     upload_id = _seed_completed_upload(client)
     return client.post(
         f"/buildings/{building_id}/reconstructions/from-upload",
+        headers={"Idempotency-Key": str(uuid4())},
         json={"upload_id": upload_id, "settings": {}},
     )
 
@@ -642,6 +657,7 @@ def _submit_building_from_reconstruction(client: TestClient):
     upload_id = _seed_completed_upload(client)
     return client.post(
         "/buildings/from-reconstruction/from-upload",
+        headers={"Idempotency-Key": str(uuid4())},
         json={"upload_id": upload_id, "building": {}, "settings": {}},
     )
 
@@ -720,6 +736,7 @@ def test_pending_upload_submission_persists_without_scheduling(
     url = _from_upload_url(building_id, new_building)
     response = client.post(
         url,
+        headers={"Idempotency-Key": str(uuid4())},
         json={
             "upload_id": str(upload_id),
             "building": {"name": "Waiting building"},
@@ -765,6 +782,7 @@ def test_completion_dispatches_all_waiting_settings_and_skips_repeated_hooks(
     for fps in (3, 5):
         response = client.post(
             _from_upload_url(building_id, new_building=True),
+            headers={"Idempotency-Key": str(uuid4())},
             json={"upload_id": str(upload_id), "settings": {"ffmpeg": {"fps": fps}}},
         )
         assert response.status_code == 202
@@ -811,7 +829,9 @@ def test_waiting_reconstruction_can_be_cancelled_or_deleted_before_completion(
     client, building_id = reconstruction_api
     upload_id, _ = _seed_stored_upload(client, status=UploadStatus.PENDING)
     row = client.post(
-        _from_upload_url(building_id, False), json={"upload_id": str(upload_id)}
+        _from_upload_url(building_id, False),
+        headers={"Idempotency-Key": str(uuid4())},
+        json={"upload_id": str(upload_id)},
     ).json()
     url = f"/buildings/{building_id}/reconstructions/{row['id']}"
 
@@ -844,7 +864,9 @@ def test_cancel_refreshes_when_completion_claimed_the_waiting_row(
     client, building_id = reconstruction_api
     upload_id, _ = _seed_stored_upload(client, status=UploadStatus.PENDING)
     row = client.post(
-        _from_upload_url(building_id, False), json={"upload_id": str(upload_id)}
+        _from_upload_url(building_id, False),
+        headers={"Idempotency-Key": str(uuid4())},
+        json={"upload_id": str(upload_id)},
     ).json()
     original_cancel = ReconstructionService.cancel
     cancelled_workflows = []
@@ -875,7 +897,9 @@ def test_completion_dispatch_database_error_keeps_hook_failure_response(
     client, building_id = reconstruction_api
     upload_id, _ = _seed_stored_upload(client, status=UploadStatus.PENDING)
     row = client.post(
-        _from_upload_url(building_id, False), json={"upload_id": str(upload_id)}
+        _from_upload_url(building_id, False),
+        headers={"Idempotency-Key": str(uuid4())},
+        json={"upload_id": str(upload_id)},
     ).json()
 
     async def fail_claim(*args, **kwargs):
@@ -898,7 +922,9 @@ def test_completion_commit_failure_rolls_back_and_can_be_retried(
     client, building_id = reconstruction_api
     upload_id, _ = _seed_stored_upload(client, status=UploadStatus.PENDING)
     row = client.post(
-        _from_upload_url(building_id, False), json={"upload_id": str(upload_id)}
+        _from_upload_url(building_id, False),
+        headers={"Idempotency-Key": str(uuid4())},
+        json={"upload_id": str(upload_id)},
     ).json()
     original_commit = AsyncSession.commit
     failed_commit = False
@@ -950,6 +976,7 @@ def test_reconstruction_from_stored_upload_is_reusable(
     for _ in range(2):
         response = client.post(
             _from_upload_url(building_id, new_building),
+            headers={"Idempotency-Key": str(uuid4())},
             json={
                 "upload_id": str(upload_id),
                 "building": {"name": "From stored video"},
@@ -1023,13 +1050,18 @@ def test_reconstruction_from_upload_rejects_before_creating_rows(
     elif case == "unauthenticated":
         client.app.dependency_overrides.pop(require_user)
 
-    response = client.post(_from_upload_url(building_id, new_building), json=payload)
+    response = client.post(
+        _from_upload_url(building_id, new_building),
+        headers={"Idempotency-Key": str(uuid4())},
+        json=payload,
+    )
     assert response.status_code == expected_status
 
     async def assert_no_rows() -> None:
         async with AsyncSession(client.app.state.upload_database) as session:
             assert list((await session.exec(select(Reconstruction))).all()) == []
             assert len((await session.exec(select(Building))).all()) == 1
+            assert not (await session.exec(select(IdempotencyRecords))).all()
 
     asyncio.run(assert_no_rows())
 
@@ -1045,6 +1077,7 @@ def test_reconstruction_from_upload_rejects_foreign_building(
     )
     response = client.post(
         _from_upload_url(building_id, False),
+        headers={"Idempotency-Key": str(uuid4())},
         json={"upload_id": str(upload_id)},
     )
     assert response.status_code == 404
@@ -1067,6 +1100,7 @@ def test_reconstruction_from_upload_retains_rows_on_scheduling_failure(
     )
     response = client.post(
         _from_upload_url(building_id, new_building),
+        headers={"Idempotency-Key": str(uuid4())},
         json={"upload_id": str(upload_id)},
     )
     assert response.status_code == 503
@@ -1078,6 +1112,143 @@ def test_reconstruction_from_upload_retains_rows_on_scheduling_failure(
     assert reconstruction.status_code == 200
     assert reconstruction.json()["status"] == "failed"
     assert path.read_bytes() == b"stored video bytes"
+
+
+@pytest.mark.parametrize("new_building", [False, True])
+@pytest.mark.parametrize("outcome", ["pending", "scheduled", "scheduling_failed"])
+def test_accepted_reconstruction_replays_without_creating_or_scheduling_again(
+    reconstruction_api: tuple[TestClient, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+    new_building: bool,
+    outcome: str,
+) -> None:
+    client, building_id = reconstruction_api
+    upload_id, path = _seed_stored_upload(
+        client,
+        status=UploadStatus.PENDING if outcome == "pending" else UploadStatus.UPLOADED,
+    )
+    schedule = AsyncMock(
+        return_value=WORKFLOW_ID,
+        side_effect=OSError("Scheduler unavailable")
+        if outcome == "scheduling_failed"
+        else None,
+    )
+    monkeypatch.setattr(
+        splat_workflow, "schedule_splat_generation_from_upload", schedule
+    )
+    key = str(uuid4())
+    url = _from_upload_url(building_id, new_building)
+    headers = {"Idempotency-Key": key}
+    payload = {"upload_id": str(upload_id)}
+
+    original = client.post(url, headers=headers, json=payload)
+    assert original.status_code == (503 if outcome == "scheduling_failed" else 202)
+    # A replay must acknowledge acceptance even if the source is no longer
+    # available, without revalidating it or depending on the original response.
+    path.unlink()
+    replay = client.post(url, headers=headers, json=payload)
+    assert replay.status_code == 204
+    assert replay.content == b""
+    assert schedule.await_count == (0 if outcome == "pending" else 1)
+
+    async def assert_rows() -> None:
+        async with AsyncSession(client.app.state.upload_database) as session:
+            assert len((await session.exec(select(Building))).all()) == (
+                2 if new_building else 1
+            )
+            assert len((await session.exec(select(Reconstruction))).all()) == 1
+            records = (await session.exec(select(IdempotencyRecords))).all()
+            assert len(records) == 1
+            assert records[0].owner_id == USER_ID
+            assert records[0].idempotency_key == key
+            assert records[0].status == IdempotencyStatus.COMPLETED
+
+    asyncio.run(assert_rows())
+
+
+@pytest.mark.parametrize("new_building", [False, True])
+@pytest.mark.parametrize("failure", ["creation", "commit"])
+def test_failed_acceptance_rolls_back_resources_and_allows_same_key_retry(
+    reconstruction_api: tuple[TestClient, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+    new_building: bool,
+    failure: str,
+) -> None:
+    client, building_id = reconstruction_api
+    upload_id, _ = _seed_stored_upload(client, status=UploadStatus.PENDING)
+    url = _from_upload_url(building_id, new_building)
+    headers = {"Idempotency-Key": str(uuid4())}
+    payload = {"upload_id": str(upload_id)}
+    original_add = ReconstructionService.add_from_upload
+    original_commit = AsyncSession.commit
+
+    async def fail_after_creation(service, **kwargs):
+        await original_add(service, **kwargs)
+        raise OperationalError("INSERT", {}, RuntimeError("Database unavailable"))
+
+    async def fail_acceptance_commit(session):
+        if any(
+            isinstance(row, IdempotencyRecords)
+            and row.status == IdempotencyStatus.COMPLETED
+            for row in session.identity_map.values()
+        ):
+            raise OperationalError("COMMIT", {}, RuntimeError("Database unavailable"))
+        await original_commit(session)
+
+    with monkeypatch.context() as patches:
+        if failure == "creation":
+            patches.setattr(
+                ReconstructionService, "add_from_upload", fail_after_creation
+            )
+        else:
+            patches.setattr(AsyncSession, "commit", fail_acceptance_commit)
+        response = client.post(url, headers=headers, json=payload)
+    assert response.status_code == 503
+
+    async def assert_rolled_back() -> None:
+        async with AsyncSession(client.app.state.upload_database) as session:
+            assert len((await session.exec(select(Building))).all()) == 1
+            assert not (await session.exec(select(Reconstruction))).all()
+            assert not (await session.exec(select(IdempotencyRecords))).all()
+
+    asyncio.run(assert_rolled_back())
+    assert client.post(url, headers=headers, json=payload).status_code == 202
+    assert client.post(url, headers=headers, json=payload).status_code == 204
+
+
+@pytest.mark.parametrize("new_building", [False, True])
+def test_in_progress_reconstruction_returns_retryable_conflict(
+    reconstruction_api: tuple[TestClient, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+    new_building: bool,
+) -> None:
+    client, building_id = reconstruction_api
+    monkeypatch.setattr(IdempotencyService, "_try_lock", AsyncMock(return_value=False))
+    response = client.post(
+        _from_upload_url(building_id, new_building),
+        headers={"Idempotency-Key": str(uuid4())},
+        json={"upload_id": str(uuid4())},
+    )
+    assert response.status_code == 409
+    assert response.json() == {"detail": {"code": "idempotency_in_progress"}}
+    assert response.headers["Retry-After"] == "1"
+
+
+@pytest.mark.parametrize("new_building", [False, True])
+@pytest.mark.parametrize("key", [None, ""])
+def test_reconstruction_requires_nonempty_idempotency_key(
+    reconstruction_api: tuple[TestClient, UUID],
+    new_building: bool,
+    key: str | None,
+) -> None:
+    client, building_id = reconstruction_api
+    response = client.post(
+        _from_upload_url(building_id, new_building),
+        headers={} if key is None else {"Idempotency-Key": key},
+        json={"upload_id": str(uuid4())},
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["header", "Idempotency-Key"]
 
 
 def test_reconstructions_keep_serving_source_after_upload_metadata_is_deleted(
@@ -1095,6 +1266,7 @@ def test_reconstructions_keep_serving_source_after_upload_metadata_is_deleted(
     for _ in range(2):
         response = client.post(
             _from_upload_url(building_id, False),
+            headers={"Idempotency-Key": str(uuid4())},
             json={"upload_id": str(upload_id)},
         )
         assert response.status_code == 202
@@ -2286,21 +2458,8 @@ def test_building_from_reconstruction_handles_database_insert_failure(
     finally:
         event.remove(failed_model, "before_insert", fail_insert)
     assert response.status_code == 503
-    if failed_model is Building:
-        assert response.json() == {"detail": "Building database is unavailable"}
-        assert client.get("/buildings").json()["items"] == before
-    else:
-        detail = response.json()["detail"]
-        assert detail["message"] == "Reconstruction database is unavailable"
-        assert "reconstruction_id" not in detail
-        assert len(client.get("/buildings").json()["items"]) == len(before) + 1
-        assert client.get(f"/buildings/{detail['building_id']}").status_code == 200
-        assert (
-            client.get(f"/buildings/{detail['building_id']}/reconstructions").json()[
-                "items"
-            ]
-            == []
-        )
+    assert response.json() == {"detail": "Building database is unavailable"}
+    assert client.get("/buildings").json()["items"] == before
     # The completed upload survives; no reconstruction artifacts were created.
     assert [
         p for p in tmp_path.iterdir() if p.name not in {"tus-uploads", "data"}

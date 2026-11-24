@@ -12,11 +12,12 @@ from sqlmodel import SQLModel
 
 from api.config import config as app_config
 from api.models.building import Building
+from api.models.idempotency import IdempotencyRecords
 from api.models.reconstruction import Reconstruction
 from api.models.uploads import UserUploads
 from api.models.user import User
 
-_model_imports = (Building, Reconstruction, UserUploads, User)
+_model_imports = (Building, IdempotencyRecords, Reconstruction, UserUploads, User)
 
 config = context.config
 

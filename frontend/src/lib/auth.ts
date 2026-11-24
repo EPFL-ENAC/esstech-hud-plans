@@ -7,6 +7,26 @@ import {
 } from 'boot/api';
 
 const TOKEN_KEY = 'access_token';
+const AUTH_CHANGED_EVENT = 'hud-auth-changed';
+
+function notifyAuthChanged(): void {
+    window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
+}
+
+export function subscribeAuthChanges(listener: () => void): () => void {
+    const onStorage = (event: StorageEvent) => {
+        if (event.storageArea === localStorage && (event.key === TOKEN_KEY || event.key === null)) {
+            listener();
+        }
+    };
+
+    window.addEventListener(AUTH_CHANGED_EVENT, listener);
+    window.addEventListener('storage', onStorage);
+    return () => {
+        window.removeEventListener(AUTH_CHANGED_EVENT, listener);
+        window.removeEventListener('storage', onStorage);
+    };
+}
 
 export function getAccessToken(): string | null {
     return localStorage.getItem(TOKEN_KEY);
@@ -14,10 +34,12 @@ export function getAccessToken(): string | null {
 
 export function setAccessToken(token: string): void {
     localStorage.setItem(TOKEN_KEY, token);
+    notifyAuthChanged();
 }
 
 export function clearAccessToken(): void {
     localStorage.removeItem(TOKEN_KEY);
+    notifyAuthChanged();
 }
 
 export function isAuthenticated(): boolean {
@@ -81,6 +103,7 @@ export function logout(): void {
 /** Remove every trace of the app on this device: storage, caches, databases. */
 export async function clearLocalData(): Promise<void> {
     localStorage.clear();
+    notifyAuthChanged();
     sessionStorage.clear();
     if (typeof caches !== 'undefined') {
         const names = await caches.keys();

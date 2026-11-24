@@ -1,6 +1,36 @@
 import type enUS from '../en-US';
 
 export default {
+    tasks: {
+        title: 'Tareas pendientes',
+        empty: 'No hay tareas pendientes.',
+        persisted:
+            'Las tareas pendientes se guardan en este dispositivo y se reanudan al volver a abrir la aplicación.',
+        restoring: 'Restaurando tareas pendientes…',
+        offline: 'Sin conexión. Las tareas continuarán cuando vuelvas a conectarte.',
+        authenticationRequired: 'Inicia sesión para continuar las tareas pendientes.',
+        waitingHelp:
+            'Las tareas interrumpidas se reintentan al recuperar la conexión. También puedes reintentarlas manualmente.',
+        cancelHint:
+            'Cancelar detiene el trabajo local. No puede deshacer trabajo ya aceptado por el servidor.',
+        attempts: 'Intentos: {count}',
+        retryLabel: 'Reintentar {label}',
+        cancelLabel: 'Cancelar {label}',
+        progress: 'Progreso de {label}',
+        progressValue: '{completed} / {total}',
+        unknownError: 'No se pudo completar la tarea.',
+        status: {
+            queued: 'En cola',
+            running: 'En curso',
+            pausing: 'Pausando',
+            waiting: 'Esperando conexión',
+            blocked: 'Requiere atención',
+            failed: 'Error',
+            cancelling: 'Cancelando',
+            cancelled: 'Cancelada',
+            completed: 'Completada',
+        },
+    },
     pwa: {
         install: 'Instalar HUD Plans',
         installIos:
@@ -328,6 +358,7 @@ export default {
         new: 'Nueva reconstrucción',
         named: 'Reconstrucción {id}',
         submitted: 'Reconstrucción enviada.',
+        queued: 'Reconstrucción en cola. Se enviará cuando haya conexión disponible.',
         refreshFailed: 'No se pudieron actualizar las reconstrucciones.',
         loadFailed: 'No se pudieron cargar las reconstrucciones.',
         loading: 'Cargando las reconstrucciones',
