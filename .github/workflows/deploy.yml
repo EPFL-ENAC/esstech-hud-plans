@@ -16,10 +16,11 @@ jobs:
     uses: ./.github/workflows/frontend.yml
   deploy:
     needs: frontend
-    uses: EPFL-ENAC/epfl-enac-build-push-deploy-action/.github/workflows/deploy.yml@v3.8.0
+    uses: EPFL-ENAC/epfl-enac-build-push-deploy-action/.github/workflows/deploy.yml@v4.2.0
     secrets:
       token: ${{ secrets.CD_TOKEN }}
     with:
+      skip_vulnerability_scan: false
       # Optional inputs can be passed here
       org: epfl-esstech
       repo: hud-plans
